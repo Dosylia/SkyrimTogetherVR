@@ -1,5 +1,5 @@
 
-local function build_client(name)
+local function build_client(name, isVR)
 target(name)
     set_kind("static")
     set_group("Client")
@@ -70,8 +70,13 @@ target(name)
         "version",
         "dbghelp",
         "kernel32")
+
+    if isVR then
+        add_defines("SKYRIMVR")
+    end
 end
 
 add_requires("tiltedcore")
 
-build_client("SkyrimTogetherClient")
+build_client("SkyrimTogetherClient", false)
+build_client("SkyrimTogetherClientVR", true)
