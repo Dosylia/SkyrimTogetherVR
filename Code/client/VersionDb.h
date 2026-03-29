@@ -326,6 +326,35 @@ public:
 
         return true;
     }
+
+    bool LoadCSV(const std::filesystem::path& acGamePath)
+    {
+        std::ifstream file(acGamePath / "Data" / "SKSE" / "Plugins" / "version-1-4-15-0.csv");
+        if (!file.good())
+            return false;
+
+        HMODULE handle = GetModuleHandleA(NULL);
+        _base = (unsigned long long)handle;
+
+        std::string line;
+        std::getline(file, line); // skip header "id,offset"
+
+        while (std::getline(file, line))
+        {
+            std::istringstream ss(line);
+            std::string idStr, offsetStr;
+            if (!std::getline(ss, idStr, ',')) continue;
+            if (!std::getline(ss, offsetStr, ',')) continue;
+
+            unsigned long long id = std::stoull(idStr);
+            unsigned long long offset = std::stoull(offsetStr, nullptr, 16);
+
+            _data[id] = offset;
+            _rdata[offset] = id;
+        }
+
+        return !_data.empty();
+    }
 };
 
 template <class T> struct VersionDbPtr

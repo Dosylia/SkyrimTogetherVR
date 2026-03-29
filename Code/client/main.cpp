@@ -34,15 +34,19 @@ static void ShowAddressLibraryError(const wchar_t* apGamePath)
 
 void RunTiltedInit(const std::filesystem::path& acGamePath, const String& aExeVersion)
 {
+#ifndef SKYRIMVR
     if (!VersionDb::Get().Load(acGamePath, aExeVersion))
     {
         ShowAddressLibraryError(acGamePath.c_str());
     }
-
-    // VersionDb::Get().DumpToTextFile(R"(S:\Work\Tilted\fallout\_addresslib.txt)");
+#else
+    if (!VersionDb::Get().LoadCSV(acGamePath))
+    {
+        ShowAddressLibraryError(acGamePath.c_str());
+    }
+#endif
 
     g_appInstance = std::make_unique<TiltedOnlineApp>();
-
     TiltedOnlineApp::InstallHooks2();
     TP_HOOK_COMMIT;
 }
