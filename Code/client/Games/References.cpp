@@ -135,7 +135,7 @@ static TiltedPhoques::Initializer s_referencesHooks(
     {
         POINTER_SKYRIMSE(TCheckForNewPackage, s_checkForNewPackage, 39114, 0);
         POINTER_SKYRIMSE(TInitFromPackage, s_initFromPackage, 38959, 0);
-        POINTER_SKYRIMSE(TSetCurrentPickREFR, s_setCurrentPickREFR, 51093, 0);
+        POINTER_SKYRIMSE(TSetCurrentPickREFR, s_setCurrentPickREFR, 51093, 51093);
 
         RealCheckForNewPackage = s_checkForNewPackage.Get();
         RealInitFromPackage = s_initFromPackage.Get();

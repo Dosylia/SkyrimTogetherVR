@@ -4,6 +4,7 @@
 #include <fstream>
 #include <map>
 #include <stdio.h>
+#include <sstream>
 
 #pragma comment(lib, "version.lib")
 

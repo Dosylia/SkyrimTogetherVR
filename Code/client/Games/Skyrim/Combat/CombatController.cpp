@@ -8,7 +8,7 @@ void ArrayQuickSortRecursiveCombatTargets(GameArray<CombatTargetSelector*>* apAr
     POINTER_SKYRIMSE(TArrayQuickSort, arrayQuickSort, 33285, 0);
 
     using TSortTargetSelectors = int64_t(int64_t, int64_t);
-    POINTER_SKYRIMSE(TSortTargetSelectors, sortTargetSelectors, 33282, 0);
+    POINTER_SKYRIMSE(TSortTargetSelectors, sortTargetSelectors, 33282, 33282);
 
     arrayQuickSort(apArray, sortTargetSelectors, aiLowIndex, aiHighIndex);
 }

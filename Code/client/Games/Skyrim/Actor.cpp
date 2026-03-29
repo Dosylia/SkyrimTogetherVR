@@ -676,7 +676,7 @@ Inventory Actor::GetEquipment() const noexcept
 int32_t Actor::GetGoldAmount() const noexcept
 {
     TP_THIS_FUNCTION(TGetGoldAmount, int32_t, const Actor);
-    POINTER_SKYRIMSE(TGetGoldAmount, s_getGoldAmount, 37527, 0);
+    POINTER_SKYRIMSE(TGetGoldAmount, s_getGoldAmount, 37527, 37527);
     return TiltedPhoques::ThisCall(s_getGoldAmount, this);
 }
 
@@ -1279,7 +1279,7 @@ static TiltedPhoques::Initializer s_actorHooks(
         POINTER_SKYRIMSE(TDamageActor, s_damageActor, 37335, 0);
         POINTER_SKYRIMSE(TApplyActorEffect, s_applyActorEffect, 35086, 0);
         POINTER_SKYRIMSE(TRegenAttributes, s_regenAttributes, 37448, 0);
-        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525, 0);
+        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525, 37525);
         POINTER_SKYRIMSE(TPickUpObject, s_pickUpObject, 37521, 0);
         POINTER_SKYRIMSE(TDropObject, s_dropObject, 40454, 0);
         POINTER_SKYRIMSE(TUpdateDetectionState, s_updateDetectionState, 42704, 0);
