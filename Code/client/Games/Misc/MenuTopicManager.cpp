@@ -7,7 +7,7 @@ static TPlayDialogueOption* RealPlayDialogueOption = nullptr;
 
 MenuTopicManager* MenuTopicManager::Get() noexcept
 {
-    POINTER_SKYRIMSE(MenuTopicManager*, s_singleton, 401099);
+    POINTER_SKYRIMSE(MenuTopicManager*, s_singleton, 401099, 0);
     return *s_singleton.Get();
 }
 
@@ -37,9 +37,10 @@ bool TP_MAKE_THISCALL(HookPlayDialogueOption, MenuTopicManager, int32_t aIndex)
 static TiltedPhoques::Initializer s_menuTopicHooks(
     []()
     {
-        POINTER_SKYRIMSE(TPlayDialogueOption, s_playDialogueOption, 35269);
+        POINTER_SKYRIMSE(TPlayDialogueOption, s_playDialogueOption, 35269, 0);
 
         RealPlayDialogueOption = s_playDialogueOption.Get();
 
         TP_HOOK(&RealPlayDialogueOption, HookPlayDialogueOption);
     });
+

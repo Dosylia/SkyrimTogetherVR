@@ -3,7 +3,8 @@
 void Lock::SetLock(bool aIsLocked) noexcept
 {
     TP_THIS_FUNCTION(TSetLock, void, Lock, bool);
-    POINTER_SKYRIMSE(TSetLock, realSetLock, 12401);
+    POINTER_SKYRIMSE(TSetLock, realSetLock, 12401, 0);
 
     return TiltedPhoques::ThisCall(realSetLock, this, aIsLocked);
 }
+

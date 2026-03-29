@@ -5,14 +5,14 @@
 
 PlayerCamera* PlayerCamera::Get() noexcept
 {
-    POINTER_SKYRIMSE(PlayerCamera*, s_instance, 400802);
+    POINTER_SKYRIMSE(PlayerCamera*, s_instance, 400802, 0);
     return *(s_instance.Get());
 }
 
 bool PlayerCamera::IsFirstPerson() noexcept
 {
     TP_THIS_FUNCTION(TIsFirstPerson, void, PlayerCamera, void*, void*, double*);
-    POINTER_SKYRIMSE(TIsFirstPerson, isFirstPerson, 21600);
+    POINTER_SKYRIMSE(TIsFirstPerson, isFirstPerson, 21600, 0);
 
     double firstPerson = 0.0;
     TiltedPhoques::ThisCall(isFirstPerson, this, nullptr, nullptr, &firstPerson);
@@ -34,13 +34,14 @@ bool PlayerCamera::WorldPtToScreenPt3(const NiPoint3& in, NiPoint3& out, float z
 void PlayerCamera::ForceFirstPerson() noexcept
 {
     TP_THIS_FUNCTION(TForceFirstPerson, void, PlayerCamera);
-    POINTER_SKYRIMSE(TForceFirstPerson, forceFirstPerson, 50790);
+    POINTER_SKYRIMSE(TForceFirstPerson, forceFirstPerson, 50790, 0);
     TiltedPhoques::ThisCall(forceFirstPerson, this);
 }
 
 void PlayerCamera::ForceThirdPerson() noexcept
 {
     TP_THIS_FUNCTION(TForceThirdPerson, void, PlayerCamera);
-    POINTER_SKYRIMSE(TForceThirdPerson, forceThirdPerson, 50796);
+    POINTER_SKYRIMSE(TForceThirdPerson, forceThirdPerson, 50796, 0);
     TiltedPhoques::ThisCall(forceThirdPerson, this);
 }
+

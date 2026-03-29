@@ -12,7 +12,7 @@ struct GameHeap
 {
     static GameHeap* Get()
     {
-        POINTER_SKYRIMSE(GameHeap, s_gameHeap, 400188);
+        POINTER_SKYRIMSE(GameHeap, s_gameHeap, 400188, 0);
 
         return s_gameHeap.Get();
     }
@@ -69,7 +69,7 @@ void Memory::Free(void* apData) noexcept
 
 static bool IsFormAllocateReplacedByEF(TFormAllocate** appOutEngineFixesAlloc) noexcept
 {
-    POINTER_SKYRIMSE(TFormAllocate, s_formAllocate, 68115);
+    POINTER_SKYRIMSE(TFormAllocate, s_formAllocate, 68115, 0);
     TFormAllocate* pFormAllocate = s_formAllocate.Get();
 
     auto opcodeBytes = reinterpret_cast<uint16_t*>(*pFormAllocate);
@@ -133,9 +133,9 @@ void* Hook_aligned_malloc(size_t aSize, size_t aAlignment)
 static TiltedPhoques::Initializer s_memoryHooks(
     []()
     {
-        POINTER_SKYRIMSE(TFormAllocate, s_formAllocate, 68115);
+        POINTER_SKYRIMSE(TFormAllocate, s_formAllocate, 68115, 0);
 
-        POINTER_SKYRIMSE(TFormFree, s_formFree, 68117);
+        POINTER_SKYRIMSE(TFormFree, s_formFree, 68117, 0);
 
         RealFormAllocate = s_formAllocate.Get();
         RealFormFree = s_formFree.Get();
@@ -188,3 +188,4 @@ void HookFormAllocateSentinelInit()
     TP_HOOK_IAT(_initterm_e, "api-ms-win-crt-runtime-l1-1-0.dll");
 }
 #pragma optimize("", on)
+

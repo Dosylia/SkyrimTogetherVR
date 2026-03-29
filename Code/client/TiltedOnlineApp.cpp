@@ -46,7 +46,7 @@ TiltedOnlineApp::~TiltedOnlineApp() = default;
 
 void* TiltedOnlineApp::GetMainAddress() const
 {
-    POINTER_SKYRIMSE(void, winMain, 36544);
+    POINTER_SKYRIMSE(void, winMain, 36544, 0);
 
     return winMain.GetPtr();
 }
@@ -89,7 +89,7 @@ void TiltedOnlineApp::Update()
     // 
  
     // Make sure the window stays active
-    POINTER_SKYRIMSE(uint32_t, bAlwaysActive, 380768);
+    POINTER_SKYRIMSE(uint32_t, bAlwaysActive, 380768, 0);
 
     *bAlwaysActive = 1;
 
@@ -132,3 +132,4 @@ void TiltedOnlineApp::ApplyNvidiaFix() noexcept
     if (d3dFeatureLevelOut < D3D_FEATURE_LEVEL_11_0)
         spdlog::warn("Unexpected D3D11 feature level detected (< 11.0), may cause issues");
 }
+

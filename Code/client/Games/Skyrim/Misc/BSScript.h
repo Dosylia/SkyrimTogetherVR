@@ -119,14 +119,14 @@ struct BSScript
         uint32_t GetPageForFrame(StackFrame* apFrame)
         {
             TP_THIS_FUNCTION(TGetPageForFrame, uint32_t, Stack, StackFrame*);
-            POINTER_SKYRIMSE(TGetPageForFrame, getPageForFrame, 104483);
+            POINTER_SKYRIMSE(TGetPageForFrame, getPageForFrame, 104483, 0);
             return TiltedPhoques::ThisCall(getPageForFrame, this, apFrame);
         }
 
         Variable* GetStackFrameVariable(StackFrame* apFrame, uint32_t aIndex, uint32_t aPageHint)
         {
             TP_THIS_FUNCTION(TGetStackFrameVariable, Variable*, Stack, StackFrame*, uint32_t, uint32_t);
-            POINTER_SKYRIMSE(TGetStackFrameVariable, getStackFrameVariable, 104484);
+            POINTER_SKYRIMSE(TGetStackFrameVariable, getStackFrameVariable, 104484, 0);
             return TiltedPhoques::ThisCall(getStackFrameVariable, this, apFrame, aIndex, aPageHint);
         }
     };
@@ -271,14 +271,14 @@ struct BSScript
         {
             TP_THIS_FUNCTION(TNativeFunctionDtor, void, NativeFunction);
             // TODO: not sure about this address
-            POINTER_SKYRIMSE(TNativeFunctionDtor, dtor, 104655);
+            POINTER_SKYRIMSE(TNativeFunctionDtor, dtor, 104655, 0);
             TiltedPhoques::ThisCall(dtor, this);
         }
 
         NativeFunction(const char* apFunctionName, const char* apClassName, bool aIsStatic, uint32_t aParameterCount)
         {
             TP_THIS_FUNCTION(TNativeFunctionCtor, void, NativeFunction, const char*, const char*, bool, uint32_t);
-            POINTER_SKYRIMSE(TNativeFunctionCtor, ctor, 104653);
+            POINTER_SKYRIMSE(TNativeFunctionCtor, ctor, 104653, 0);
             TiltedPhoques::ThisCall(ctor, this, apFunctionName, apClassName, aIsStatic, aParameterCount);
         }
 
@@ -349,3 +349,4 @@ template <> void BSScript::Variable::Set(int32_t aValue) noexcept;
 template <> void BSScript::Variable::Set(float aValue) noexcept;
 template <> void BSScript::Variable::Set(bool aValue) noexcept;
 template <> void BSScript::Variable::Set(const char* acpValue) noexcept;
+

@@ -27,9 +27,9 @@ thread_local const char* g_animErrorCode = "";
 #pragma optimize("", off)
 
 using TApplyAnimationVariables = void*(void*, TESActionData*);
-POINTER_SKYRIMSE(TApplyAnimationVariables, ApplyAnimationVariables, 39004);
+POINTER_SKYRIMSE(TApplyAnimationVariables, ApplyAnimationVariables, 39004, 0);
 
-POINTER_SKYRIMSE(void*, qword_142F271B8, 403566);
+POINTER_SKYRIMSE(void*, qword_142F271B8, 403566, 0);
 
 extern thread_local bool g_forceAnimation;
 
@@ -41,7 +41,7 @@ struct Class142F3A1E8
 void hkbBehaviorGraph::ReSendEvent(hkEventContext& aContext, hkEventType& aType)
 {
     TP_THIS_FUNCTION(THandleEvents, void*, hkbBehaviorGraph, hkEventContext&, hkEventType&);
-    POINTER_SKYRIMSE(THandleEvents, HandleEvents, 58377);
+    POINTER_SKYRIMSE(THandleEvents, HandleEvents, 58377, 0);
 
     if (!aContext.behaviorGraph)
     {
@@ -79,7 +79,7 @@ void hkbBehaviorGraph::ReHandleEvent(hkEventContext& aContext, hkEventType& aTyp
             if (pGraph->symbolIdMap && eventType >= 0)
             {
                 TP_THIS_FUNCTION(Tsub_1409CA9D0, int32_t, void, int32_t, int64_t);
-                POINTER_SKYRIMSE(Tsub_1409CA9D0, sub_1409CA9D0, 57185);
+                POINTER_SKYRIMSE(Tsub_1409CA9D0, sub_1409CA9D0, 57185, 0);
 
                 eventType = TiltedPhoques::ThisCall(sub_1409CA9D0, &pGraph->symbolIdMap->pointer20, eventType + 1, -1ll);
             }
@@ -93,7 +93,7 @@ void hkbBehaviorGraph::ReHandleEvent(hkEventContext& aContext, hkEventType& aTyp
                 if (pSomeData->byte85 == 0)
                 {
                     TP_THIS_FUNCTION(Tsub_140A13150, int32_t, hkEventContext, hkbGenerator*, hkEventType&, SomeData*);
-                    POINTER_SKYRIMSE(Tsub_140A13150, sub_140A13150, 59310);
+                    POINTER_SKYRIMSE(Tsub_140A13150, sub_140A13150, 59310, 0);
 
                     TiltedPhoques::ThisCall(sub_140A13150, &aContext, pGenerator, type, pSomeData);
                 }
@@ -116,7 +116,7 @@ void hkbBehaviorGraph::ReHandleEvent(hkEventContext& aContext, hkEventType& aTyp
     if (!(aContext.byte30 & 1))
     {
         TP_THIS_FUNCTION(Tsub_1409F3EF0, void, hkbBehaviorGraph, hkEventContext&, hkEventType&);
-        POINTER_SKYRIMSE(Tsub_1409F3EF0, sub_1409F3EF0, 58378);
+        POINTER_SKYRIMSE(Tsub_1409F3EF0, sub_1409F3EF0, 58378, 0);
 
         hkEventType type(aType);
 
@@ -125,7 +125,7 @@ void hkbBehaviorGraph::ReHandleEvent(hkEventContext& aContext, hkEventType& aTyp
     if (byte12E || g_forceAnimation)
     {
         TP_THIS_FUNCTION(Tsub_140A4DFA0, void, hkbBehaviorGraph, hkEventContext&);
-        POINTER_SKYRIMSE(Tsub_140A4DFA0, sub_140A4DFA0, 60079);
+        POINTER_SKYRIMSE(Tsub_140A4DFA0, sub_140A4DFA0, 60079, 0);
 
         TiltedPhoques::ThisCall(sub_140A4DFA0, this, aContext);
     }
@@ -162,7 +162,7 @@ bool BShkbAnimationGraph::ReSendEvent(BSFixedString* apEventName)
         if (hkxDB->ptr160)
         {
             using Thash_stub = uint32_t(uint32_t&, const char*);
-            POINTER_SKYRIMSE(Thash_stub, hash_stub, 68221);
+            POINTER_SKYRIMSE(Thash_stub, hash_stub, 68221, 0);
 
             uint32_t hash = 0;
             hash_stub(hash, apEventName->data);
@@ -204,7 +204,7 @@ bool BShkbAnimationGraph::ReSendEvent(BSFixedString* apEventName)
 
     /*
     TP_THIS_FUNCTION(TBSSendEvent, bool, BShkbAnimationGraph, BSFixedString*);
-    POINTER_SKYRIMSE(TBSSendEvent, InternalSendEvent, 63591);
+    POINTER_SKYRIMSE(TBSSendEvent, InternalSendEvent, 63591, 0);
 
     return TiltedPhoques::ThisCall(InternalSendEvent, this, apEventName);*/
 }
@@ -224,7 +224,7 @@ uint32_t BSAnimationGraphManager::ReSendEvent(BSFixedString* apEventName)
 
     // Not sure what this is, looks like it call this function on another graph manager, maybe to sync ridder/ridden ?
     TP_THIS_FUNCTION(Tsub_140AE2DB0, uint8_t, BSAnimationGraphManager, BSFixedString*);
-    POINTER_SKYRIMSE(Tsub_140AE2DB0, sub_140AE2DB0, 63372);
+    POINTER_SKYRIMSE(Tsub_140AE2DB0, sub_140AE2DB0, 63372, 0);
 
     TiltedPhoques::ThisCall(sub_140AE2DB0, this, apEventName);
 
@@ -237,7 +237,7 @@ bool IAnimationGraphManagerHolder::ReSendAnimationEvent(BSFixedString* apAnimEve
     auto result = GetBSAnimationGraph(&pAnimationGraph);
 
     TP_THIS_FUNCTION(TBSSendEvent, uint32_t, BSAnimationGraphManager, BSFixedString*);
-    POINTER_SKYRIMSE(TBSSendEvent, BSSendEvent, 63362);
+    POINTER_SKYRIMSE(TBSSendEvent, BSSendEvent, 63362, 0);
 
     if (pAnimationGraph)
     {
@@ -252,7 +252,7 @@ bool IAnimationGraphManagerHolder::ReSendAnimationEvent(BSFixedString* apAnimEve
 uint8_t Class142F3A1E8::SendGraphAction(TESActionData* apAction)
 {
     TP_THIS_FUNCTION(TGetSomeIdleProperty, uint8_t, TESIdleForm);
-    POINTER_SKYRIMSE(TGetSomeIdleProperty, GetSomeIdleProperty, 24568);
+    POINTER_SKYRIMSE(TGetSomeIdleProperty, GetSomeIdleProperty, 24568, 0);
 
     if (!apAction->actor)
         return 0;
@@ -283,8 +283,8 @@ bool ActorMediator::RePerformAction(TESActionData* apAction) noexcept
 {
     TP_THIS_FUNCTION(TAnimationStep, uint8_t, ActorMediator, TESActionData*);
 
-    POINTER_SKYRIMSE(TAnimationStep, PerformIdleAction, 38952);
-    POINTER_SKYRIMSE(TAnimationStep, PerformComplexAction, 38953);
+    POINTER_SKYRIMSE(TAnimationStep, PerformIdleAction, 38952, 0);
+    POINTER_SKYRIMSE(TAnimationStep, PerformComplexAction, 38953, 0);
 
     uint8_t result = 0;
 
@@ -332,13 +332,13 @@ bool ActorMediator::RePerformIdleAction(TESActionData* apData) noexcept
     using Tsub_1405CCB20 = bool(void*, TESActionData*);
     using Tsub_1404ECF50 = bool(void*, TESActionData*);
 
-    POINTER_SKYRIMSE(Tsub_14063CAA0, sub_14063CAA0, 39002);
-    POINTER_SKYRIMSE(Tsub_14063CFB0, sub_14063CFB0, 38952);
-    POINTER_SKYRIMSE(Tsub_1405CCB20, sub_1405CCB20, 37147);
-    POINTER_SKYRIMSE(Tsub_1404ECF50, sub_1404ECF50, 32802);
+    POINTER_SKYRIMSE(Tsub_14063CAA0, sub_14063CAA0, 39002, 0);
+    POINTER_SKYRIMSE(Tsub_14063CFB0, sub_14063CFB0, 38952, 0);
+    POINTER_SKYRIMSE(Tsub_1405CCB20, sub_1405CCB20, 37147, 0);
+    POINTER_SKYRIMSE(Tsub_1404ECF50, sub_1404ECF50, 32802, 0);
 
-    POINTER_SKYRIMSE(void*, qword_142F271C8, 403568);
-    POINTER_SKYRIMSE(void*, qword_142EFF990, 401100);
+    POINTER_SKYRIMSE(void*, qword_142F271C8, 403568, 0);
+    POINTER_SKYRIMSE(void*, qword_142EFF990, 401100, 0);
 
     bool result = true;
 
@@ -372,11 +372,11 @@ bool ActorMediator::RePerformComplexAction(TESActionData* apData) noexcept
 
     using Tsub_1401A2220 = void(BSFixedString*);
 
-    POINTER_SKYRIMSE(Tsub_1404ED090, sub_1404ED090, 32803);
-    POINTER_SKYRIMSE(Tsub_1401A2220, sub_1401A2220, 15002);
+    POINTER_SKYRIMSE(Tsub_1404ED090, sub_1404ED090, 32803, 0);
+    POINTER_SKYRIMSE(Tsub_1401A2220, sub_1401A2220, 15002, 0);
 
-    POINTER_SKYRIMSE(void, qword_142EFF990, 401100);
-    POINTER_SKYRIMSE(Class142F3A1E8, qword_142F3A1E8, 403988);
+    POINTER_SKYRIMSE(void, qword_142EFF990, 401100, 0);
+    POINTER_SKYRIMSE(Class142F3A1E8, qword_142F3A1E8, 403988, 0);
 
     auto v4 = false;
     if (apData->ComputeResult())
@@ -404,7 +404,7 @@ bool ActorMediator::RePerformComplexAction(TESActionData* apData) noexcept
 bool TESActionData::ComputeResult()
 {
     using Tsub_1401A1D50 = char(void*, TESActionData*);
-    POINTER_SKYRIMSE(Tsub_1401A1D50, sub_1401A1D50, 15006);
+    POINTER_SKYRIMSE(Tsub_1401A1D50, sub_1401A1D50, 15006, 0);
 
     result = 0;
     if (targetIdleForm)
@@ -427,3 +427,4 @@ bool TESActionData::ComputeResult()
 }
 
 #pragma optimize("", on)
+

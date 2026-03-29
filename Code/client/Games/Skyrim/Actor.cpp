@@ -146,7 +146,7 @@ void Actor::SetSpeed(float aSpeed) noexcept
 uint16_t Actor::GetLevel() const noexcept
 {
     TP_THIS_FUNCTION(TGetLevel, uint16_t, const Actor);
-    POINTER_SKYRIMSE(TGetLevel, s_getLevel, 37334);
+    POINTER_SKYRIMSE(TGetLevel, s_getLevel, 37334, 0);
     return TiltedPhoques::ThisCall(s_getLevel, this);
 }
 
@@ -165,7 +165,7 @@ void Actor::QueueUpdate() noexcept
     pSetting->data = 0;
 
     TP_THIS_FUNCTION(TQueueUpdate, void, Actor, bool);
-    POINTER_SKYRIMSE(TQueueUpdate, QueueUpdate, 40255);
+    POINTER_SKYRIMSE(TQueueUpdate, QueueUpdate, 40255, 0);
 
     TiltedPhoques::ThisCall(QueueUpdate, this, true);
 
@@ -216,7 +216,7 @@ GamePtr<Actor> Actor::Spawn(uint32_t aBaseFormId) noexcept
 void Actor::SetLevelMod(uint32_t aLevel) noexcept
 {
     TP_THIS_FUNCTION(TActorSetLevelMod, void, ExtraDataList, uint32_t);
-    POINTER_SKYRIMSE(TActorSetLevelMod, realSetLevelMod, 11806);
+    POINTER_SKYRIMSE(TActorSetLevelMod, realSetLevelMod, 11806, 0);
 
     const auto pExtraDataList = &extraData;
 
@@ -305,7 +305,7 @@ void Actor::SetEssentialEx(bool aSet) noexcept
 void Actor::SetNoBleedoutRecovery(bool aSet) noexcept
 {
     TP_THIS_FUNCTION(TSetNoBleedoutRecovery, void, Actor, bool);
-    POINTER_SKYRIMSE(TSetNoBleedoutRecovery, s_setNoBleedoutRecovery, 38533);
+    POINTER_SKYRIMSE(TSetNoBleedoutRecovery, s_setNoBleedoutRecovery, 38533, 0);
     TiltedPhoques::ThisCall(s_setNoBleedoutRecovery, this, aSet);
 }
 
@@ -378,7 +378,7 @@ uint8_t Actor::GetPerkRank(uint32_t aPerkFormId) const noexcept
         return 0;
 
     TP_THIS_FUNCTION(TGetPerkRank, uint8_t, const Actor, BGSPerk*);
-    POINTER_SKYRIMSE(TGetPerkRank, getPerkRank, 37698);
+    POINTER_SKYRIMSE(TGetPerkRank, getPerkRank, 37698, 0);
 
     return TiltedPhoques::ThisCall(getPerkRank, this, pPerk);
 }
@@ -446,7 +446,7 @@ void Actor::InterruptCast(bool abRefund) noexcept
 {
     TP_THIS_FUNCTION(TInterruptCast, void, Actor, bool abRefund);
 
-    POINTER_SKYRIMSE(TInterruptCast, s_interruptCast, 38757);
+    POINTER_SKYRIMSE(TInterruptCast, s_interruptCast, 38757, 0);
 
     TiltedPhoques::ThisCall(s_interruptCast, this, abRefund);
 }
@@ -676,7 +676,7 @@ Inventory Actor::GetEquipment() const noexcept
 int32_t Actor::GetGoldAmount() const noexcept
 {
     TP_THIS_FUNCTION(TGetGoldAmount, int32_t, const Actor);
-    POINTER_SKYRIMSE(TGetGoldAmount, s_getGoldAmount, 37527);
+    POINTER_SKYRIMSE(TGetGoldAmount, s_getGoldAmount, 37527, 0);
     return TiltedPhoques::ThisCall(s_getGoldAmount, this);
 }
 
@@ -765,7 +765,7 @@ void Actor::SetFactionRank(const TESFaction* apFaction, int8_t aRank) noexcept
 {
     TP_THIS_FUNCTION(TSetFactionRankInternal, void, Actor, const TESFaction*, int8_t);
 
-    POINTER_SKYRIMSE(TSetFactionRankInternal, s_setFactionRankInternal, 37677);
+    POINTER_SKYRIMSE(TSetFactionRankInternal, s_setFactionRankInternal, 37677, 0);
 
     TiltedPhoques::ThisCall(s_setFactionRankInternal, this, apFaction, aRank);
 }
@@ -773,7 +773,7 @@ void Actor::SetFactionRank(const TESFaction* apFaction, int8_t aRank) noexcept
 void Actor::SetPlayerTeammate(bool aSet) noexcept
 {
     TP_THIS_FUNCTION(TSetPlayerTeammate, void, Actor, bool aSet, bool abCanDoFavor);
-    POINTER_SKYRIMSE(TSetPlayerTeammate, setPlayerTeammate, 37717);
+    POINTER_SKYRIMSE(TSetPlayerTeammate, setPlayerTeammate, 37717, 0);
     return TiltedPhoques::ThisCall(setPlayerTeammate, this, aSet, true);
 }
 
@@ -1267,28 +1267,28 @@ bool TP_MAKE_THISCALL(HookIsFleeing, Actor)
 static TiltedPhoques::Initializer s_actorHooks(
     []()
     {
-        POINTER_SKYRIMSE(TActorProcess, s_actorProcess, 37356);
-        POINTER_SKYRIMSE(TSetPosition, s_setPosition, 19790);
-        POINTER_SKYRIMSE(TRemoveSpell, s_removeSpell, 38717);
-        POINTER_SKYRIMSE(TCharacterConstructor, s_characterCtor, 40245);
-        POINTER_SKYRIMSE(TCharacterConstructor2, s_characterCtor2, 40246);
-        POINTER_SKYRIMSE(TCharacterDestructor, s_characterDtor, 37175);
-        POINTER_SKYRIMSE(TGetLocation, s_GetActorLocation, 19812);
-        POINTER_SKYRIMSE(TForceState, s_ForceState, 37313);
-        POINTER_SKYRIMSE(TSpawnActorInWorld, s_SpawnActorInWorld, 19742);
-        POINTER_SKYRIMSE(TDamageActor, s_damageActor, 37335);
-        POINTER_SKYRIMSE(TApplyActorEffect, s_applyActorEffect, 35086);
-        POINTER_SKYRIMSE(TRegenAttributes, s_regenAttributes, 37448);
-        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525);
-        POINTER_SKYRIMSE(TPickUpObject, s_pickUpObject, 37521);
-        POINTER_SKYRIMSE(TDropObject, s_dropObject, 40454);
-        POINTER_SKYRIMSE(TUpdateDetectionState, s_updateDetectionState, 42704);
-        POINTER_SKYRIMSE(TProcessResponse, s_processResponse, 39643);
-        POINTER_SKYRIMSE(TInitiateMountPackage, s_initiateMountPackage, 37905);
-        POINTER_SKYRIMSE(TUnequipObject, s_unequipObject, 37975);
-        POINTER_SKYRIMSE(TSpeakSoundFunction, s_speakSoundFunction, 37542);
-        POINTER_SKYRIMSE(TAddDeathItems, addDeathItems, 37198);
-        POINTER_SKYRIMSE(TIsFleeing, isFleeing, 37577);
+        POINTER_SKYRIMSE(TActorProcess, s_actorProcess, 37356, 0);
+        POINTER_SKYRIMSE(TSetPosition, s_setPosition, 19790, 0);
+        POINTER_SKYRIMSE(TRemoveSpell, s_removeSpell, 38717, 0);
+        POINTER_SKYRIMSE(TCharacterConstructor, s_characterCtor, 40245, 0);
+        POINTER_SKYRIMSE(TCharacterConstructor2, s_characterCtor2, 40246, 0);
+        POINTER_SKYRIMSE(TCharacterDestructor, s_characterDtor, 37175, 0);
+        POINTER_SKYRIMSE(TGetLocation, s_GetActorLocation, 19812, 0);
+        POINTER_SKYRIMSE(TForceState, s_ForceState, 37313, 0);
+        POINTER_SKYRIMSE(TSpawnActorInWorld, s_SpawnActorInWorld, 19742, 0);
+        POINTER_SKYRIMSE(TDamageActor, s_damageActor, 37335, 0);
+        POINTER_SKYRIMSE(TApplyActorEffect, s_applyActorEffect, 35086, 0);
+        POINTER_SKYRIMSE(TRegenAttributes, s_regenAttributes, 37448, 0);
+        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525, 0);
+        POINTER_SKYRIMSE(TPickUpObject, s_pickUpObject, 37521, 0);
+        POINTER_SKYRIMSE(TDropObject, s_dropObject, 40454, 0);
+        POINTER_SKYRIMSE(TUpdateDetectionState, s_updateDetectionState, 42704, 0);
+        POINTER_SKYRIMSE(TProcessResponse, s_processResponse, 39643, 0);
+        POINTER_SKYRIMSE(TInitiateMountPackage, s_initiateMountPackage, 37905, 0);
+        POINTER_SKYRIMSE(TUnequipObject, s_unequipObject, 37975, 0);
+        POINTER_SKYRIMSE(TSpeakSoundFunction, s_speakSoundFunction, 37542, 0);
+        POINTER_SKYRIMSE(TAddDeathItems, addDeathItems, 37198, 0);
+        POINTER_SKYRIMSE(TIsFleeing, isFleeing, 37577, 0);
 
         RealActorProcess = s_actorProcess.Get();
         RealSetPosition = s_setPosition.Get();
@@ -1333,3 +1333,4 @@ static TiltedPhoques::Initializer s_actorHooks(
         TP_HOOK(&RealAddDeathItems, HookAddDeathItems);
         TP_HOOK(&RealIsFleeing, HookIsFleeing);
     });
+

@@ -7,7 +7,7 @@
 TESObjectREFR* TESQuest::GetAliasedRef(uint32_t aAliasID) noexcept
 {
     TP_THIS_FUNCTION(TGetAliasedRef, BSPointerHandle<TESObjectREFR>*, TESQuest, BSPointerHandle<TESObjectREFR>*, uint32_t);
-    POINTER_SKYRIMSE(TGetAliasedRef, getAliasedRef, 25066);
+    POINTER_SKYRIMSE(TGetAliasedRef, getAliasedRef, 25066, 0);
 
     BSPointerHandle<TESObjectREFR> result{};
     TiltedPhoques::ThisCall(getAliasedRef, this, &result, aAliasID);
@@ -33,14 +33,14 @@ TESQuest::State TESQuest::getState()
 void TESQuest::SetCompleted(bool force)
 {
     TP_THIS_FUNCTION(TSetCompleted, void, TESQuest, bool);
-    POINTER_SKYRIMSE(TSetCompleted, SetCompleted, 24991);
+    POINTER_SKYRIMSE(TSetCompleted, SetCompleted, 24991, 0);
     SetCompleted(this, force);
 }
 
 void TESQuest::CompleteAllObjectives()
 {
     TP_THIS_FUNCTION(TCompleteAllObjectives, void, TESQuest);
-    POINTER_SKYRIMSE(TCompleteAllObjectives, CompleteAll, 23231);
+    POINTER_SKYRIMSE(TCompleteAllObjectives, CompleteAll, 23231, 0);
     CompleteAll(this);
 }
 
@@ -66,7 +66,7 @@ bool TESQuest::IsStageDone(uint16_t stageIndex)
 bool TESQuest::Kill()
 {
     using TSetStopped = void(TESQuest*, bool);
-    POINTER_SKYRIMSE(TSetStopped, SetStopped, 24987);
+    POINTER_SKYRIMSE(TSetStopped, SetStopped, 24987, 0);
 
     if (flags & Flags::Enabled)
     {
@@ -84,7 +84,7 @@ bool TESQuest::Kill()
 bool TESQuest::EnsureQuestStarted(bool& success, bool force)
 {
     TP_THIS_FUNCTION(TSetRunning, bool, TESQuest, bool*, bool);
-    POINTER_SKYRIMSE(TSetRunning, SetRunning, 25003);
+    POINTER_SKYRIMSE(TSetRunning, SetRunning, 25003, 0);
     return SetRunning(this, &success, force);
 }
 
@@ -93,7 +93,7 @@ bool TESQuest::SetStage(uint16_t newStage)
     ScopedQuestOverride _;
 
     TP_THIS_FUNCTION(TSetStage, bool, TESQuest, uint16_t);
-    POINTER_SKYRIMSE(TSetStage, SetStage, 25004);
+    POINTER_SKYRIMSE(TSetStage, SetStage, 25004, 0);
     return SetStage(this, newStage);
 }
 
@@ -119,3 +119,4 @@ static TiltedPhoques::Initializer s_questInitHooks(
         // kill quest init in cold blood
         // TiltedPhoques::Write<uint8_t>(25003, 0xC3);
     });
+

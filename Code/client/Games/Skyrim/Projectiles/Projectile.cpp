@@ -114,7 +114,7 @@ BSPointerHandle<Projectile>* TP_MAKE_THISCALL(HookLaunch, BSPointerHandle<Projec
 static TiltedPhoques::Initializer s_projectileHooks(
     []()
     {
-        POINTER_SKYRIMSE(TLaunch, s_launch, 44108);
+        POINTER_SKYRIMSE(TLaunch, s_launch, 44108, 0);
 
         RealLaunch = s_launch.Get();
 
@@ -152,3 +152,4 @@ static TiltedPhoques::Initializer s_projectileHooks(
         } gen(hookLoc.Get());
         TiltedPhoques::Jump(hookLoc.Get() + 0x374, gen.getCode());
     });
+

@@ -18,14 +18,14 @@ static TRenderPresent* RealRenderPresent = nullptr;
 
 BGSRenderer* BGSRenderer::Get()
 {
-    POINTER_SKYRIMSE(BGSRenderer*, s_instance, 411347);
+    POINTER_SKYRIMSE(BGSRenderer*, s_instance, 411347, 0);
 
     return *(s_instance.Get());
 }
 
 ID3D11Device* BGSRenderer::GetDevice()
 {
-    POINTER_SKYRIMSE(ID3D11Device*, s_device, 411348);
+    POINTER_SKYRIMSE(ID3D11Device*, s_device, 411348, 0);
 
     return *(s_device.Get());
 }
@@ -61,3 +61,4 @@ static TiltedPhoques::Initializer s_viewportHooks(
     []()
     {
     });
+

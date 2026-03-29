@@ -94,14 +94,14 @@ void ExtraDataList::SetType(ExtraDataType aType, bool aClear)
 void ExtraDataList::SetSoulData(SOUL_LEVEL aSoulLevel) noexcept
 {
     TP_THIS_FUNCTION(TSetSoulData, void, ExtraDataList, SOUL_LEVEL aSoulLevel);
-    POINTER_SKYRIMSE(TSetSoulData, setSoulData, 11620);
+    POINTER_SKYRIMSE(TSetSoulData, setSoulData, 11620, 0);
     TiltedPhoques::ThisCall(setSoulData, this, aSoulLevel);
 }
 
 void ExtraDataList::SetChargeData(float aCharge) noexcept
 {
     TP_THIS_FUNCTION(TSetChargeData, void, ExtraDataList, float aCharge);
-    POINTER_SKYRIMSE(TSetChargeData, setChargeData, 11619);
+    POINTER_SKYRIMSE(TSetChargeData, setChargeData, 11619, 0);
     TiltedPhoques::ThisCall(setChargeData, this, aCharge);
 }
 
@@ -109,34 +109,35 @@ void ExtraDataList::SetWorn(bool aWornLeft) noexcept
 {
     // TODO: what's this bool? seems to be true always except for one instance
     TP_THIS_FUNCTION(TSetWornData, void, ExtraDataList, bool aUnk1, bool aWornLeft);
-    POINTER_SKYRIMSE(TSetWornData, setWornData, 11612);
+    POINTER_SKYRIMSE(TSetWornData, setWornData, 11612, 0);
     TiltedPhoques::ThisCall(setWornData, this, true, aWornLeft);
 }
 
 void ExtraDataList::SetPoison(AlchemyItem* apItem, uint32_t aCount) noexcept
 {
     TP_THIS_FUNCTION(TSetPoison, void, ExtraDataList, AlchemyItem* apItem, uint32_t aCount);
-    POINTER_SKYRIMSE(TSetPoison, setPoison, 11822);
+    POINTER_SKYRIMSE(TSetPoison, setPoison, 11822, 0);
     TiltedPhoques::ThisCall(setPoison, this, apItem, aCount);
 }
 
 void ExtraDataList::SetHealth(float aHealth) noexcept
 {
     TP_THIS_FUNCTION(TSetHealth, void, ExtraDataList, float aHealth);
-    POINTER_SKYRIMSE(TSetHealth, setHealth, 11616);
+    POINTER_SKYRIMSE(TSetHealth, setHealth, 11616, 0);
     TiltedPhoques::ThisCall(setHealth, this, aHealth);
 }
 
 void ExtraDataList::SetEnchantmentData(EnchantmentItem* apItem, uint16_t aCharge, bool aRemoveOnUnequip) noexcept
 {
     TP_THIS_FUNCTION(TSetEnchantmentData, void, ExtraDataList, EnchantmentItem* apItem, uint16_t aCharge, bool aRemoveOnUnequip);
-    POINTER_SKYRIMSE(TSetEnchantmentData, setEnchantmentData, 12060);
+    POINTER_SKYRIMSE(TSetEnchantmentData, setEnchantmentData, 12060, 0);
     TiltedPhoques::ThisCall(setEnchantmentData, this, apItem, aCharge, aRemoveOnUnequip);
 }
 
 bool ExtraDataList::HasQuestObjectAlias() noexcept
 {
     TP_THIS_FUNCTION(THasQuestObjectAlias, bool, ExtraDataList);
-    POINTER_SKYRIMSE(THasQuestObjectAlias, s_hasQuestObjectAlias, 12052);
+    POINTER_SKYRIMSE(THasQuestObjectAlias, s_hasQuestObjectAlias, 12052, 0);
     return TiltedPhoques::ThisCall(s_hasQuestObjectAlias, this);
 }
+

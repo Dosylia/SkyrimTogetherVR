@@ -5,7 +5,7 @@
 
 NiCamera* TESCamera::GetNiCamera()
 {
-    POINTER_SKYRIMSE(NiRTTI, NiCameraRTTI, 410506);
+    POINTER_SKYRIMSE(NiRTTI, NiCameraRTTI, 410506, 0);
     // usually the first child should be the camera
     for (auto* child : cameraNode->children)
     {
@@ -15,3 +15,4 @@ NiCamera* TESCamera::GetNiCamera()
 
     return nullptr;
 }
+

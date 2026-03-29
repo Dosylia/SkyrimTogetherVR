@@ -38,7 +38,7 @@ static thread_local bool s_applyStaminaPerkBonus = false;
 void MagicTarget::DispelAllSpells(bool aNow) noexcept
 {
     TP_THIS_FUNCTION(TDispelAllSpells, void, MagicTarget, bool aNow);
-    POINTER_SKYRIMSE(TDispelAllSpells, dispelAllSpells, 34512);
+    POINTER_SKYRIMSE(TDispelAllSpells, dispelAllSpells, 34512, 0);
     TiltedPhoques::ThisCall(dispelAllSpells, this, aNow);
 }
 
@@ -74,7 +74,7 @@ bool MagicTarget::AddTargetData::IsForbiddenEffect(Actor* apTarget)
 Actor* MagicTarget::GetTargetAsActor()
 {
     TP_THIS_FUNCTION(TGetTargetAsActor, Actor*, MagicTarget);
-    POINTER_SKYRIMSE(TGetTargetAsActor, getTargetAsActor, 34529);
+    POINTER_SKYRIMSE(TGetTargetAsActor, getTargetAsActor, 34529, 0);
     return TiltedPhoques::ThisCall(getTargetAsActor, this);
 }
 
@@ -227,12 +227,12 @@ uint8_t TP_MAKE_THISCALL(HookGetPerkRank, Actor, TESForm* apPerk)
 }
 
 static TiltedPhoques::Initializer s_magicTargetHooks([]() {
-    POINTER_SKYRIMSE(TAddTarget, addTarget, 34526);
-    POINTER_SKYRIMSE(TCheckAddEffectTargetData, checkAddEffectTargetData, 34525);
-    POINTER_SKYRIMSE(TFindTargets, findTargets, 34410);
-    POINTER_SKYRIMSE(TAdjustForPerks, adjustForPerks, 34053);
-    POINTER_SKYRIMSE(THasPerk, hasPerk, 21622);
-    POINTER_SKYRIMSE(TGetPerkRank, getPerkRank, 37698);
+    POINTER_SKYRIMSE(TAddTarget, addTarget, 34526, 0);
+    POINTER_SKYRIMSE(TCheckAddEffectTargetData, checkAddEffectTargetData, 34525, 0);
+    POINTER_SKYRIMSE(TFindTargets, findTargets, 34410, 0);
+    POINTER_SKYRIMSE(TAdjustForPerks, adjustForPerks, 34053, 0);
+    POINTER_SKYRIMSE(THasPerk, hasPerk, 21622, 0);
+    POINTER_SKYRIMSE(TGetPerkRank, getPerkRank, 37698, 0);
 
     RealAddTarget = addTarget.Get();
     RealCheckAddEffectTargetData = checkAddEffectTargetData.Get();
@@ -248,3 +248,4 @@ static TiltedPhoques::Initializer s_magicTargetHooks([]() {
     TP_HOOK(&RealHasPerk, HookHasPerk);
     //TP_HOOK(&RealGetPerkRank, HookGetPerkRank);
 });
+

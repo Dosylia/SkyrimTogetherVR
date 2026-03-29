@@ -12,7 +12,7 @@
 TESForm* TESForm::GetById(const uint32_t aId)
 {
     using TGetFormById = TESForm*(uint32_t);
-    POINTER_SKYRIMSE(TGetFormById, getFormById, 14617);
+    POINTER_SKYRIMSE(TGetFormById, getFormById, 14617, 0);
 
     return getFormById.Get()(aId);
 }
@@ -99,9 +99,9 @@ uint32_t TESForm::GetChangeFlags() const noexcept
 
     TP_THIS_FUNCTION(InternalGetChangeFlags, bool, void, uint32_t formId, ChangeFlags& changeFlags);
 
-    POINTER_SKYRIMSE(InternalGetChangeFlags, internalGetChangeFlags, 35503);
+    POINTER_SKYRIMSE(InternalGetChangeFlags, internalGetChangeFlags, 35503, 0);
 
-    POINTER_SKYRIMSE(Unk*, s_singleton, 403330);
+    POINTER_SKYRIMSE(Unk*, s_singleton, 403330, 0);
 
     const auto pUnk = *(s_singleton.Get());
 
@@ -139,3 +139,4 @@ BGSHeadPart* TESNPC::GetHeadPart(uint32_t aType)
 
     return nullptr;
 }
+

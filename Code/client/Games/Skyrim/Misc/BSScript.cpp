@@ -4,7 +4,7 @@
 uint64_t BSScript::Object::GetHandle()
 {
     TP_THIS_FUNCTION(TGetHandle, uint64_t, BSScript::Object);
-    POINTER_SKYRIMSE(TGetHandle, s_getHandle, 104247);
+    POINTER_SKYRIMSE(TGetHandle, s_getHandle, 104247, 0);
     return TiltedPhoques::ThisCall(s_getHandle, this);
 }
 
@@ -21,7 +21,7 @@ void BSScript::Variable::Reset() noexcept
 {
     TP_THIS_FUNCTION(TReset, void, BSScript::Variable);
 
-    POINTER_SKYRIMSE(TReset, s_reset, 104296);
+    POINTER_SKYRIMSE(TReset, s_reset, 104296, 0);
 
     TiltedPhoques::ThisCall(s_reset, this);
 }
@@ -99,13 +99,13 @@ template <class T> T* BSScript::Variable::ExtractComplexType() noexcept
 void BSScript::IFunctionArguments::Statement::SetSize(uint32_t aCount) noexcept
 {
     TP_THIS_FUNCTION(TSetSize, void, BSScript::IFunctionArguments::Statement, uint32_t aCount);
-    POINTER_SKYRIMSE(TSetSize, s_setSize, 53915);
+    POINTER_SKYRIMSE(TSetSize, s_setSize, 53915, 0);
     TiltedPhoques::ThisCall(s_setSize, this, aCount);
 }
 
 BSScript::IObjectHandlePolicy* BSScript::IObjectHandlePolicy::Get() noexcept
 {
-    POINTER_SKYRIMSE(BSScript::IObjectHandlePolicy*, s_policy, 414391);
+    POINTER_SKYRIMSE(BSScript::IObjectHandlePolicy*, s_policy, 414391, 0);
     return *s_policy.Get();
 }
 
@@ -192,7 +192,7 @@ void BSScript::NativeFunctionBase::InsertLocals(StackFrame*)
 BSScript::CallResult BSScript::NativeFunctionBase::Call(Stack* apStack, void* apLogger, IVirtualMachine* apVm, bool aArg4)
 {
     TP_THIS_FUNCTION(TCall, CallResult, NativeFunctionBase, Stack*, void*, IVirtualMachine*, bool);
-    POINTER_SKYRIMSE(TCall, s_call, 104651);
+    POINTER_SKYRIMSE(TCall, s_call, 104651, 0);
     return TiltedPhoques::ThisCall(s_call, this, apStack, apLogger, apVm, aArg4);
 }
 
@@ -302,3 +302,4 @@ bool BSScript::DidLaunchSkyrimTogetherFunc::MarshallAndDispatch(Variable* apBase
     apResult->Set<bool>(true);
     return true;
 }
+

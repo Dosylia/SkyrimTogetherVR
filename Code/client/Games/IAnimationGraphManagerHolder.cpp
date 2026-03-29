@@ -7,7 +7,7 @@
 bool IAnimationGraphManagerHolder::SetVariableFloat(BSFixedString* apVariable, float aValue)
 {
     TP_THIS_FUNCTION(TSetFloatVariable, bool, IAnimationGraphManagerHolder, BSFixedString*, float);
-    POINTER_SKYRIMSE(TSetFloatVariable, InternalSetFloatVariable, 32887);
+    POINTER_SKYRIMSE(TSetFloatVariable, InternalSetFloatVariable, 32887, 0);
 
     return TiltedPhoques::ThisCall(InternalSetFloatVariable, this, apVariable, aValue);
 }
@@ -15,7 +15,7 @@ bool IAnimationGraphManagerHolder::SetVariableFloat(BSFixedString* apVariable, f
 bool IAnimationGraphManagerHolder::SetVariableInt(BSFixedString* apVariable, int32_t aValue)
 {
     TP_THIS_FUNCTION(TSetIntVariable, bool, IAnimationGraphManagerHolder, BSFixedString*, int32_t);
-    POINTER_SKYRIMSE(TSetIntVariable, InternalSetIntVariable, 32886);
+    POINTER_SKYRIMSE(TSetIntVariable, InternalSetIntVariable, 32886, 0);
 
     return TiltedPhoques::ThisCall(InternalSetIntVariable, this, apVariable, aValue);
 }
@@ -23,7 +23,7 @@ bool IAnimationGraphManagerHolder::SetVariableInt(BSFixedString* apVariable, int
 bool IAnimationGraphManagerHolder::SetVariableBool(BSFixedString* apVariable, bool aValue)
 {
     TP_THIS_FUNCTION(TSetBoolVariable, bool, IAnimationGraphManagerHolder, BSFixedString*, bool);
-    POINTER_SKYRIMSE(TSetBoolVariable, InternalSetBoolVariable, 32885);
+    POINTER_SKYRIMSE(TSetBoolVariable, InternalSetBoolVariable, 32885, 0);
 
     return TiltedPhoques::ThisCall(InternalSetBoolVariable, this, apVariable, aValue);
 }
@@ -31,7 +31,7 @@ bool IAnimationGraphManagerHolder::SetVariableBool(BSFixedString* apVariable, bo
 bool IAnimationGraphManagerHolder::RevertAnimationGraphManager()
 {
     TP_THIS_FUNCTION(TRevertAnimationGraphManager, bool, IAnimationGraphManagerHolder);
-    POINTER_SKYRIMSE(TRevertAnimationGraphManager, InternalRevertAnimationGraphManager, 32883);
+    POINTER_SKYRIMSE(TRevertAnimationGraphManager, InternalRevertAnimationGraphManager, 32883, 0);
 
     return TiltedPhoques::ThisCall(InternalRevertAnimationGraphManager, this);
 }
@@ -46,3 +46,4 @@ bool IAnimationGraphManagerHolder::IsReady()
 
     return result;
 }
+

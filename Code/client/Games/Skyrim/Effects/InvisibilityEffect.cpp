@@ -24,9 +24,10 @@ void TP_MAKE_THISCALL(HookFinish, InvisibilityEffect)
 static TiltedPhoques::Initializer s_invisibilityEffectsHooks(
     []()
     {
-        POINTER_SKYRIMSE(TFinish, s_finish, 34370);
+        POINTER_SKYRIMSE(TFinish, s_finish, 34370, 0);
 
         RealFinish = s_finish.Get();
 
         TP_HOOK(&RealFinish, HookFinish);
     });
+

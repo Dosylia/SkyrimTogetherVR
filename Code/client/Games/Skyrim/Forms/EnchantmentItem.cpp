@@ -8,9 +8,9 @@
 EnchantmentItem* EnchantmentItem::Create(const Inventory::EnchantmentData& aData) noexcept
 {
     TP_THIS_FUNCTION(TAddWeaponEnchantment, EnchantmentItem*, void, GameArray<EffectItem>*);
-    POINTER_SKYRIMSE(TAddWeaponEnchantment, addWeaponEnchantment, 36165);
+    POINTER_SKYRIMSE(TAddWeaponEnchantment, addWeaponEnchantment, 36165, 0);
     TP_THIS_FUNCTION(TAddArmorEnchantment, EnchantmentItem*, void, GameArray<EffectItem>*);
-    POINTER_SKYRIMSE(TAddArmorEnchantment, addArmorEnchantment, 36166);
+    POINTER_SKYRIMSE(TAddArmorEnchantment, addArmorEnchantment, 36166, 0);
 
     ModSystem& modSystem = World::Get().GetModSystem();
 
@@ -48,3 +48,4 @@ EnchantmentItem* EnchantmentItem::Create(const Inventory::EnchantmentData& aData
 
     return pItem;
 }
+

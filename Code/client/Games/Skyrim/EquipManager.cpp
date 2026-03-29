@@ -62,7 +62,7 @@ TUnEquipShout* RealUnEquipShout = nullptr;
 
 EquipManager* EquipManager::Get() noexcept
 {
-    POINTER_SKYRIMSE(EquipManager*, s_singleton, 400636);
+    POINTER_SKYRIMSE(EquipManager*, s_singleton, 400636, 0);
 
     return *s_singleton.Get();
 }
@@ -70,7 +70,7 @@ EquipManager* EquipManager::Get() noexcept
 void* EquipManager::Equip(Actor* apActor, TESForm* apItem, ExtraDataList* apExtraDataList, int aCount, TESForm* apSlot, bool abQueueEquip, bool abForceEquip, bool abPlaySound, bool abApplyNow)
 {
     TP_THIS_FUNCTION(TEquipInternal, void*, EquipManager, Actor* apActor, TESForm* apItem, ExtraDataList* apExtraDataList, int aCount, TESForm* apSlot, bool abQueueEquip, bool abForceEquip, bool abPlaySound, bool abApplyNow);
-    POINTER_SKYRIMSE(TEquipInternal, s_equipFunc, 38894);
+    POINTER_SKYRIMSE(TEquipInternal, s_equipFunc, 38894, 0);
 
     ScopedEquipOverride equipOverride;
 
@@ -82,7 +82,7 @@ void* EquipManager::Equip(Actor* apActor, TESForm* apItem, ExtraDataList* apExtr
 void* EquipManager::UnEquip(Actor* apActor, TESForm* apItem, ExtraDataList* apExtraDataList, int aCount, TESForm* apSlot, bool abQueueEquip, bool abForceEquip, bool abPlaySound, bool abApplyNow, TESForm* apSlotToReplace)
 {
     TP_THIS_FUNCTION(TUnEquipInternal, void*, EquipManager, Actor* apActor, TESForm* apItem, ExtraDataList* apExtraDataList, int aCount, TESForm* apSlot, bool abQueueEquip, bool abForceEquip, bool abPlaySound, bool abApplyNow, TESForm* apSlotToReplace);
-    POINTER_SKYRIMSE(TUnEquipInternal, s_unequipFunc, 38901);
+    POINTER_SKYRIMSE(TUnEquipInternal, s_unequipFunc, 38901, 0);
 
     ScopedEquipOverride equipOverride;
 
@@ -94,7 +94,7 @@ void* EquipManager::UnEquip(Actor* apActor, TESForm* apItem, ExtraDataList* apEx
 void* EquipManager::EquipSpell(Actor* apActor, TESForm* apSpell, uint32_t aSlotId)
 {
     TP_THIS_FUNCTION(TEquipSpellInternal, void*, EquipManager, Actor*, TESForm*, uint32_t);
-    POINTER_SKYRIMSE(TEquipSpellInternal, s_equipFunc, 38896);
+    POINTER_SKYRIMSE(TEquipSpellInternal, s_equipFunc, 38896, 0);
 
     ScopedEquipOverride equipOverride;
 
@@ -104,7 +104,7 @@ void* EquipManager::EquipSpell(Actor* apActor, TESForm* apSpell, uint32_t aSlotI
 void* EquipManager::UnEquipSpell(Actor* apActor, TESForm* apSpell, uint32_t aSlotId)
 {
     TP_THIS_FUNCTION(TUnEquipSpellInternal, void*, EquipManager, Actor*, TESForm*, uint32_t);
-    POINTER_SKYRIMSE(TUnEquipSpellInternal, s_unequipFunc, 38903);
+    POINTER_SKYRIMSE(TUnEquipSpellInternal, s_unequipFunc, 38903, 0);
 
     ScopedEquipOverride equipOverride;
 
@@ -114,7 +114,7 @@ void* EquipManager::UnEquipSpell(Actor* apActor, TESForm* apSpell, uint32_t aSlo
 void* EquipManager::EquipShout(Actor* apActor, TESForm* apShout)
 {
     TP_THIS_FUNCTION(TEquipShoutInternal, void*, EquipManager, Actor*, TESForm*);
-    POINTER_SKYRIMSE(TEquipShoutInternal, s_equipFunc, 38897);
+    POINTER_SKYRIMSE(TEquipShoutInternal, s_equipFunc, 38897, 0);
 
     ScopedEquipOverride equipOverride;
 
@@ -124,7 +124,7 @@ void* EquipManager::EquipShout(Actor* apActor, TESForm* apShout)
 void* EquipManager::UnEquipShout(Actor* apActor, TESForm* apShout)
 {
     TP_THIS_FUNCTION(TUnEquipShoutInternal, void*, EquipManager, Actor*, TESForm*);
-    POINTER_SKYRIMSE(TUnEquipShoutInternal, s_unequipFunc, 38903);
+    POINTER_SKYRIMSE(TUnEquipShoutInternal, s_unequipFunc, 38903, 0);
 
     ScopedEquipOverride equipOverride;
 
@@ -134,7 +134,7 @@ void* EquipManager::UnEquipShout(Actor* apActor, TESForm* apShout)
 void EquipManager::UnequipAll(Actor* apActor)
 {
     TP_THIS_FUNCTION(TUnEquipAll, void, EquipManager, Actor*);
-    POINTER_SKYRIMSE(TUnEquipAll, s_unequipAll, 38899);
+    POINTER_SKYRIMSE(TUnEquipAll, s_unequipAll, 38899, 0);
 
     ScopedEquipOverride equipOverride;
 
@@ -308,12 +308,12 @@ void* TP_MAKE_THISCALL(UnEquipShoutHook, EquipManager, Actor* apActor, TESForm* 
 static TiltedPhoques::Initializer s_equipmentHooks(
     []()
     {
-        POINTER_SKYRIMSE(TEquip, s_equipFunc, 38929);
-        POINTER_SKYRIMSE(TUnEquip, s_unequipFunc, 38934);
-        POINTER_SKYRIMSE(TEquipSpell, s_equipSpellFunc, 38928);
-        POINTER_SKYRIMSE(TUnEquipSpell, s_unequipSpellFunc, 38933);
-        POINTER_SKYRIMSE(TEquipShout, s_equipShoutFunc, 38930);
-        POINTER_SKYRIMSE(TUnEquipShout, s_unequipShoutFunc, 38935);
+        POINTER_SKYRIMSE(TEquip, s_equipFunc, 38929, 0);
+        POINTER_SKYRIMSE(TUnEquip, s_unequipFunc, 38934, 0);
+        POINTER_SKYRIMSE(TEquipSpell, s_equipSpellFunc, 38928, 0);
+        POINTER_SKYRIMSE(TUnEquipSpell, s_unequipSpellFunc, 38933, 0);
+        POINTER_SKYRIMSE(TEquipShout, s_equipShoutFunc, 38930, 0);
+        POINTER_SKYRIMSE(TUnEquipShout, s_unequipShoutFunc, 38935, 0);
 
         RealEquip = s_equipFunc.Get();
         RealUnEquip = s_unequipFunc.Get();
@@ -329,3 +329,4 @@ static TiltedPhoques::Initializer s_equipmentHooks(
         TP_HOOK(&RealEquipShout, EquipShoutHook);
         TP_HOOK(&RealUnEquipShout, UnEquipShoutHook);
     });
+

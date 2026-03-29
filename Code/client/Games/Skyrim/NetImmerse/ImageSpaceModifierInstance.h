@@ -21,10 +21,11 @@ struct ImageSpaceModifierInstance : public NiObject
     static void Stop(ImageSpaceModifierInstance* apMod)
     {
         using TClearImageSpaceModifier = void(ImageSpaceModifierInstance*);
-        POINTER_SKYRIMSE(TClearImageSpaceModifier, s_clearImageSpaceModifier, 18563);
+        POINTER_SKYRIMSE(TClearImageSpaceModifier, s_clearImageSpaceModifier, 18563, 0);
         return s_clearImageSpaceModifier.Get()(apMod);
     }
 };
 
 static_assert(offsetof(ImageSpaceModifierInstance, target) == 0x18);
 static_assert(sizeof(ImageSpaceModifierInstance) == 0x28);
+

@@ -10,7 +10,7 @@ static bool g_RequestUnpauseAll{false};
 
 UI* UI::Get()
 {
-    POINTER_SKYRIMSE(UI*, s_instance, 400327);
+    POINTER_SKYRIMSE(UI*, s_instance, 400327, 0);
     return *s_instance.Get();
 }
 
@@ -20,7 +20,7 @@ bool UI::GetMenuOpen(const BSFixedString& acName) const
         return false;
 
     TP_THIS_FUNCTION(TMenuSystem_IsOpen, bool, const UI, const BSFixedString&);
-    POINTER_SKYRIMSE(TMenuSystem_IsOpen, s_isMenuOpen, 82074);
+    POINTER_SKYRIMSE(TMenuSystem_IsOpen, s_isMenuOpen, 82074, 0);
 
     return TiltedPhoques::ThisCall(s_isMenuOpen.Get(), this, acName);
 }
@@ -28,7 +28,7 @@ bool UI::GetMenuOpen(const BSFixedString& acName) const
 void UI::CloseAllMenus()
 {
     TP_THIS_FUNCTION(TUI_CloseAll, void, const UI);
-    POINTER_SKYRIMSE(TUI_CloseAll, s_CloseAll, 82088);
+    POINTER_SKYRIMSE(TUI_CloseAll, s_CloseAll, 82088, 0);
 
     TiltedPhoques::ThisCall(s_CloseAll.Get(), this);
 }
@@ -136,7 +136,7 @@ static TiltedPhoques::Initializer s_s(
         TiltedPhoques::Put<uint16_t>(FavoritesCanProcess.Get() + 0x15, 0x9090);
 
         // Some experiments:
-        // POINTER_SKYRIMSE(TCallback, s_start, 13631);
+        // POINTER_SKYRIMSE(TCallback, s_start, 13631, 0);
         // UIMessageQueue__AddMessage_Real = s_start.Get();
         // TP_HOOK(&UIMessageQueue__AddMessage_Real, UIMessageQueue__AddMessage);
 
@@ -147,3 +147,4 @@ static TiltedPhoques::Initializer s_s(
         // use 8 threads by default!
         // TiltedPhoques::Put<uint8_t>(0x141E45770, 8);
     });
+

@@ -42,7 +42,7 @@ static TRemoveWaypoint* RealRemoveWaypoint = nullptr;
 
 PlayerCharacter* PlayerCharacter::Get() noexcept
 {
-    POINTER_SKYRIMSE(PlayerCharacter*, s_character, 401069);
+    POINTER_SKYRIMSE(PlayerCharacter*, s_character, 401069, 0);
 
     return *s_character.Get();
 }
@@ -57,7 +57,7 @@ const GameArray<TintMask*>& PlayerCharacter::GetTints() const noexcept
 
 void PlayerCharacter::SetGodMode(bool aSet) noexcept
 {
-    POINTER_SKYRIMSE(bool, bGodMode, 404238);
+    POINTER_SKYRIMSE(bool, bGodMode, 404238, 0);
     *bGodMode.Get() = aSet;
 }
 
@@ -245,12 +245,12 @@ void TP_MAKE_THISCALL(HookRemoveWaypoint, PlayerCharacter)
 static TiltedPhoques::Initializer s_playerCharacterHooks(
     []()
     {
-        POINTER_SKYRIMSE(TPickUpObject, s_pickUpObject, 40533);
-        POINTER_SKYRIMSE(TSetBeastForm, s_setBeastForm, 55497);
-        POINTER_SKYRIMSE(TAddSkillExperience, s_addSkillExperience, 40488);
-        POINTER_SKYRIMSE(TCalculateExperience, s_calculateExperience, 27244);
-        POINTER_SKYRIMSE(TSetWaypoint, s_setWaypoint, 40535);
-        POINTER_SKYRIMSE(TRemoveWaypoint, s_removeWaypoint, 40536);
+        POINTER_SKYRIMSE(TPickUpObject, s_pickUpObject, 40533, 0);
+        POINTER_SKYRIMSE(TSetBeastForm, s_setBeastForm, 55497, 0);
+        POINTER_SKYRIMSE(TAddSkillExperience, s_addSkillExperience, 40488, 0);
+        POINTER_SKYRIMSE(TCalculateExperience, s_calculateExperience, 27244, 0);
+        POINTER_SKYRIMSE(TSetWaypoint, s_setWaypoint, 40535, 0);
+        POINTER_SKYRIMSE(TRemoveWaypoint, s_removeWaypoint, 40536, 0);
 
         RealPickUpObject = s_pickUpObject.Get();
         RealSetBeastForm = s_setBeastForm.Get();
@@ -266,3 +266,4 @@ static TiltedPhoques::Initializer s_playerCharacterHooks(
         TP_HOOK(&RealSetWaypoint, HookSetWaypoint);
         TP_HOOK(&RealRemoveWaypoint, HookRemoveWaypoint);
     });
+

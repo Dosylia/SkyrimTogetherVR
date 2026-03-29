@@ -15,9 +15,10 @@ TESNPC* TP_MAKE_THISCALL(HookSetLeveledNpc, TESNPC, TESNPC* apSelectedNpc)
 static TiltedPhoques::Initializer s_npcInitHooks(
     []()
     {
-        POINTER_SKYRIMSE(TSetLeveledNpc, s_SetLeveledNpc, 14375);
+        POINTER_SKYRIMSE(TSetLeveledNpc, s_SetLeveledNpc, 14375, 0);
 
         RealSetLeveledNpc = s_SetLeveledNpc.Get();
 
         // TP_HOOK(&RealSetLeveledNpc, HookSetLeveledNpc);
     });
+

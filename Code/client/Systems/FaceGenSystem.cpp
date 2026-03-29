@@ -22,7 +22,7 @@
 __declspec(noinline) NiTriBasedGeom* GetHeadTriBasedGeom(Actor* apActor, uint32_t aPartType)
 {
     using TGetObjectByName = NiAVObject*(BSFaceGenNiNode*, const char**, char);
-    POINTER_SKYRIMSE(TGetObjectByName, GetObjectByName, 76207);
+    POINTER_SKYRIMSE(TGetObjectByName, GetObjectByName, 76207, 0);
 
     BSFaceGenNiNode* pFaceNode = apActor->GetFaceGenNiNode();
     TESNPC* pActorBase = Cast<TESNPC>(apActor->baseForm);
@@ -58,11 +58,11 @@ using TCreateTints = void(__fastcall)(const GameArray<TintMask*>& acTints, NiRen
 
 void FaceGenSystem::Update(World& aWorld, Actor* apActor, FaceGenComponent& aFaceGenComponent) noexcept
 {
-    POINTER_SKYRIMSE(NiRTTI, NiMaskedShaderRTTI, 414675);
-    POINTER_SKYRIMSE(TCreateTexture, CreateTexture, 70717);
-    POINTER_SKYRIMSE(TCreateResourceView, CreateResourceView, 77299);
-    POINTER_SKYRIMSE(TCreateTints, CreateTints, 27040);
-    POINTER_SKYRIMSE(TextureHolder, s_textureHolder, 411393);
+    POINTER_SKYRIMSE(NiRTTI, NiMaskedShaderRTTI, 414675, 0);
+    POINTER_SKYRIMSE(TCreateTexture, CreateTexture, 70717, 0);
+    POINTER_SKYRIMSE(TCreateResourceView, CreateResourceView, 77299, 0);
+    POINTER_SKYRIMSE(TCreateTints, CreateTints, 27040, 0);
+    POINTER_SKYRIMSE(TextureHolder, s_textureHolder, 411393, 0);
 
     if (aFaceGenComponent.Generated)
         return;
@@ -139,3 +139,4 @@ void FaceGenSystem::Setup(World& aWorld, const entt::entity aEntity, const Tints
     auto& component = aWorld.emplace_or_replace<FaceGenComponent>(aEntity);
     component.FaceTints = acTints;
 }
+
