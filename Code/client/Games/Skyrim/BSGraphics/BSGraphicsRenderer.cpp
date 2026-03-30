@@ -79,26 +79,29 @@ void Hook_StopTimer(int type)
 static TiltedPhoques::Initializer s_viewportHooks(
     []()
     {
+        #ifndef SKYRIMVR
         const VersionDbPtr<void> initWindowLoc(77226);
-        // patch dwStyle in BSGraphics::InitWindows
+        #else
+        const VersionDbPtr<void> initWindowLoc(0); // TODOVR : find the correct id for VR
+        #endif
         TiltedPhoques::Put(mem::pointer(initWindowLoc.GetPtr()) + 0x174 + 1, WS_OVERLAPPEDWINDOW);
-
+        #ifndef SKYRIMVR
         const VersionDbPtr<void> windowLoc(68781);
-        // TODO: move me to input patches.
-        // don't let the game steal the media keys in windowed mode
+        #else
+        const VersionDbPtr<void> windowLoc(0); // TODOVR : find the correct id for VR
+        #endif
         TiltedPhoques::Put(
             mem::pointer(windowLoc.GetPtr()) + 0x55 + 2,
             /*strip DISCL_EXCLUSIVE bits and append DISCL_NONEXCLUSIVE*/ 3);
-
+        #ifndef SKYRIMVR
         const VersionDbPtr<void> timerLoc(77246);
         const VersionDbPtr<void> renderInit(77226);
-
+        #else
+        const VersionDbPtr<void> timerLoc(0); // TODOVR : find the correct id for VR
+        const VersionDbPtr<void> renderInit(0); // TODOVR : find the correct id for VR
+        #endif
         TiltedPhoques::SwapCall(mem::pointer(timerLoc.GetPtr()) + 9, StopTimer, &Hook_StopTimer);
-
         Renderer_Init = static_cast<decltype(Renderer_Init)>(renderInit.GetPtr());
-
-        // Once we find a proper way to locate it for different versions, go back to swapcall
-        // TiltedPhoques::SwapCall(mem::pointer(initLoc.GetPtr()) + 0xD1A, Renderer_Init, &Hook_Renderer_Init);
         TP_HOOK_IMMEDIATE(&Renderer_Init, &Hook_Renderer_Init);
     });
 } // namespace BSGraphics

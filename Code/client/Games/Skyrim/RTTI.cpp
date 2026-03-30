@@ -3,7 +3,7 @@
 #ifndef SKYRIMVR
 const VersionDbPtr<internal::TDynamicCast> internal::DynamicCast(109689);
 #else
-const VersionDbPtr<internal::TDynamicCast> internal::DynamicCast(0);
+const VersionDbPtr<internal::TDynamicCast> internal::DynamicCast(0); // TODOVR : find the correct id for VR
 #endif
 
 namespace internal

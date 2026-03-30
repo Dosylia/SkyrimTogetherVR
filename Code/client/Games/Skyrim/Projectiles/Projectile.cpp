@@ -120,7 +120,11 @@ static TiltedPhoques::Initializer s_projectileHooks(
 
         TP_HOOK(&RealLaunch, HookLaunch);
 
+        #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> hookLoc(34452);
+        #else
+        VersionDbPtr<uint8_t> hookLoc(0); // TODOVR : find the correct id for VR
+        #endif
 
         struct C : TiltedPhoques::CodeGenerator
         {

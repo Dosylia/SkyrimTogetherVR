@@ -29,7 +29,11 @@ static void Hook_Construct_TaskletManager(BSTaskletManager* apSelf)
 static TiltedPhoques::Initializer s_BSThreadInit(
     []()
     {
+        #ifndef SKYRIMVR
         const VersionDbPtr<uint8_t> getTaskletManagerInstance(69554);
+        #else
+        const VersionDbPtr<uint8_t> getTaskletManagerInstance(0);
+        #endif
 
         // tasklet naming
         TiltedPhoques::SwapCall(getTaskletManagerInstance.Get() + 0x63, Construct_TaskletManager, &Hook_Construct_TaskletManager);

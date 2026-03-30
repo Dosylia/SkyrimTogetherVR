@@ -122,17 +122,29 @@ static TiltedPhoques::Initializer s_s(
     []()
     {
         // pray that this doesnt fail!
+        #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> ProcessHook(82082);
+        #else
+        VersionDbPtr<uint8_t> ProcessHook(0); // TODOVR : find the correct id for VR
+        #endif
         TiltedPhoques::SwapCall(ProcessHook.Get() + 0x682, UI_AddToActiveQueue, &UI_AddToActiveQueue_Hook);
 
         // Ignore startup movie
         // TODO: Move me later.
+        #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> MainInit(36548);
+        #else
+        VersionDbPtr<uint8_t> MainInit(0); // TODOVR : find the correct id for VR
+        #endif
         TiltedPhoques::Put<uint8_t>(MainInit.Get() + 0xFE, 0xEB);
 
         // Credits to Skyrim Souls RE for this fix.
         // Allows the favorites menu to be numbered during connect.
+        #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> FavoritesCanProcess(51538);
+        #else
+        VersionDbPtr<uint8_t> FavoritesCanProcess(0); // TODOVR : find the correct id for VR
+        #endif
         TiltedPhoques::Put<uint16_t>(FavoritesCanProcess.Get() + 0x15, 0x9090);
 
         // Some experiments:
