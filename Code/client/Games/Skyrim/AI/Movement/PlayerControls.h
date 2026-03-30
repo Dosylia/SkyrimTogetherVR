@@ -43,7 +43,11 @@ struct PlayerControls
     void SetCamSwitch(bool aSet) noexcept;
 
 public:
-    char pad0[0x20];
+    #ifndef SKYRIMVR
+        char pad0[0x20];
+    #else
+        char pad0[0x24]; // VR: extra 4 bytes padding before Data
+    #endif
     PlayerControlsData Data;
     std::uint32_t pad054;                    // 054
     GameArray<void*> handlers;               // 058
@@ -77,7 +81,11 @@ public:
 };
 
 static_assert(offsetof(PlayerControls, PlayerControls::bBlockPlayerInput) == 0x1D9);
+#ifndef SKYRIMVR
 static_assert(offsetof(PlayerControls, PlayerControls::Data) == 0x20);
+#else
+static_assert(offsetof(PlayerControls, PlayerControls::Data) == 0x24); // VR has 4 bytes extra padding
+#endif
 
 struct BSInputEnableManager
 {
