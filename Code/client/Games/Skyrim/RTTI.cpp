@@ -1,6 +1,10 @@
 #include "RTTI.h"
 
+#ifndef SKYRIMVR
 const VersionDbPtr<internal::TDynamicCast> internal::DynamicCast(109689);
+#else
+const VersionDbPtr<internal::TDynamicCast> internal::DynamicCast(0);
+#endif
 
 namespace internal
 {
