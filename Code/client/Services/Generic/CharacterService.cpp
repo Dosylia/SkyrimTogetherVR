@@ -569,6 +569,7 @@ void CharacterService::OnReferencesMoveRequest(const ServerReferencesMoveRequest
         point.Rotation = {movement.Rotation.x, 0.f, movement.Rotation.y};
         point.Variables = movement.Variables;
         point.Direction = movement.Direction;
+        point.VRPoseData = update.UpdatedVRPose;
 
         InterpolationSystem::AddPoint(interpolationComponent, point);
 

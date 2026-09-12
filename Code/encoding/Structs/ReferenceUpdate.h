@@ -2,6 +2,7 @@
 
 #include <Structs/Movement.h>
 #include <Structs/ActionEvent.h>
+#include <Structs/VRPose.h>
 
 using TiltedPhoques::Buffer;
 using TiltedPhoques::Vector;
@@ -19,4 +20,5 @@ struct ReferenceUpdate
 
     Movement UpdatedMovement{};
     Vector<ActionEvent> ActionEvents{};
+    VRPose UpdatedVRPose{};
 };

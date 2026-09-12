@@ -19,7 +19,44 @@
 #include <Forms/TESObjectCELL.h>
 #include <Forms/TESWorldSpace.h>
 
+#ifdef SKYRIMVR
+#include <PlayerCharacter.h>
+#include <NetImmerse/NiNode.h>
+#include <NetImmerse/NiTransform.h>
+#endif
+
 extern thread_local const char* g_animErrorCode;
+
+#ifdef SKYRIMVR
+namespace
+{
+    // Byte offsets from PlayerCharacter's own base pointer, per CommonLibVR-NG's
+    // VR_NODE_DATA (RE/P/PlayerCharacter.h) - TODOVR: unverified against a live
+    // game process, same caveat as NiMatrix3ToQuat.
+    constexpr uint32_t kUprightHmdNodeOffset = 0x580;
+    constexpr uint32_t kLeftWandNodeOffset = 0x490;
+    constexpr uint32_t kRightWandNodeOffset = 0x4F8;
+    constexpr uint32_t kNiAVObjectWorldTransformOffset = 0x7C;
+
+    NiNode* GetVRTrackedNode(PlayerCharacter* apPlayer, uint32_t aOffset) noexcept
+    {
+        return *reinterpret_cast<NiNode**>(reinterpret_cast<uint8_t*>(apPlayer) + aOffset);
+    }
+
+    bool CaptureVRTransform(PlayerCharacter* apPlayer, uint32_t aNodeOffset, const NiPoint3& acActorPosition, VRTransform& aOutTransform) noexcept
+    {
+        NiNode* pNode = GetVRTrackedNode(apPlayer, aNodeOffset);
+        if (!pNode)
+            return false;
+
+        const auto& worldTransform = *reinterpret_cast<const NiTransform*>(reinterpret_cast<const uint8_t*>(pNode) + kNiAVObjectWorldTransformOffset);
+
+        aOutTransform.Position = static_cast<glm::vec3>(worldTransform.translate) - static_cast<glm::vec3>(acActorPosition);
+        aOutTransform.Rotation = NiMatrix3ToQuat(worldTransform.rotate);
+        return true;
+    }
+}
+#endif
 
 void AnimationSystem::Update(World& aWorld, Actor* apActor, RemoteAnimationComponent& aAnimationComponent, const uint64_t aTick) noexcept
 {
@@ -132,6 +169,21 @@ void AnimationSystem::Serialize(World& aWorld, ClientReferencesMoveRequest& aMov
     {
         movement.Direction = pActor->currentProcess->middleProcess->direction;
     }
+
+#ifdef SKYRIMVR
+    if (pActor == PlayerCharacter::Get())
+    {
+        auto* pPlayer = static_cast<PlayerCharacter*>(pActor);
+
+        VRPose pose{};
+        const bool hasHead = CaptureVRTransform(pPlayer, kUprightHmdNodeOffset, pActor->position, pose.Head);
+        const bool hasLeftHand = CaptureVRTransform(pPlayer, kLeftWandNodeOffset, pActor->position, pose.LeftHand);
+        const bool hasRightHand = CaptureVRTransform(pPlayer, kRightWandNodeOffset, pActor->position, pose.RightHand);
+
+        pose.HasData = hasHead && hasLeftHand && hasRightHand;
+        update.UpdatedVRPose = pose;
+    }
+#endif
 
     for (auto& entry : animationComponent.Actions)
     {

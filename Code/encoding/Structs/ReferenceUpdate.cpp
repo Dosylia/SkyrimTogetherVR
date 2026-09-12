@@ -6,7 +6,7 @@ using TiltedPhoques::Serialization;
 
 bool ReferenceUpdate::operator==(const ReferenceUpdate& acRhs) const noexcept
 {
-    return UpdatedMovement == acRhs.UpdatedMovement && ActionEvents == acRhs.ActionEvents;
+    return UpdatedMovement == acRhs.UpdatedMovement && ActionEvents == acRhs.ActionEvents && UpdatedVRPose == acRhs.UpdatedVRPose;
 }
 
 bool ReferenceUpdate::operator!=(const ReferenceUpdate& acRhs) const noexcept
@@ -24,6 +24,8 @@ void ReferenceUpdate::Serialize(TiltedPhoques::Buffer::Writer& aWriter) const no
     {
         entry.GenerateDifferential(ActionEvent{}, aWriter);
     }
+
+    UpdatedVRPose.Serialize(aWriter);
 }
 
 void ReferenceUpdate::Deserialize(TiltedPhoques::Buffer::Reader& aReader)
@@ -38,4 +40,6 @@ void ReferenceUpdate::Deserialize(TiltedPhoques::Buffer::Reader& aReader)
     {
         ActionEvents[i].ApplyDifferential(aReader);
     }
+
+    UpdatedVRPose.Deserialize(aReader);
 }

@@ -9,6 +9,17 @@
 #include <Games/References.h>
 #include <World.h>
 
+namespace
+{
+    VRTransform LerpVRTransform(const VRTransform& acFirst, const VRTransform& acSecond, float aDelta) noexcept
+    {
+        VRTransform result{};
+        result.Position = TiltedPhoques::Lerp(static_cast<glm::vec3>(acFirst.Position), static_cast<glm::vec3>(acSecond.Position), aDelta);
+        result.Rotation = glm::slerp(static_cast<glm::quat>(acFirst.Rotation), static_cast<glm::quat>(acSecond.Rotation), aDelta);
+        return result;
+    }
+}
+
 void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterpolationComponent, const uint64_t aTick) noexcept
 {
     auto& movements = aInterpolationComponent.TimePoints;
@@ -41,6 +52,19 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     const NiPoint3 position{TiltedPhoques::Lerp(first.Position, second.Position, delta)};
 
     aInterpolationComponent.Position = position;
+
+    if (first.VRPoseData.HasData && second.VRPoseData.HasData)
+    {
+        auto& vrPose = aInterpolationComponent.InterpolatedVRPose;
+        vrPose.HasData = true;
+        vrPose.Head = LerpVRTransform(first.VRPoseData.Head, second.VRPoseData.Head, delta);
+        vrPose.LeftHand = LerpVRTransform(first.VRPoseData.LeftHand, second.VRPoseData.LeftHand, delta);
+        vrPose.RightHand = LerpVRTransform(first.VRPoseData.RightHand, second.VRPoseData.RightHand, delta);
+    }
+    else
+    {
+        aInterpolationComponent.InterpolatedVRPose.HasData = false;
+    }
 
     // Don't try to move a null actor
     if (!apActor)
