@@ -30,7 +30,11 @@ if has_config("unitybuild") then
     add_rules("c++.unity_build", {batchsize = 12})
 end
 
--- direct dependencies version pinning 
+-- Local package overrides, must be registered before anything resolves packages.
+-- Currently only carries a fork of the cef recipe; see xmake-repo/packages/c/cef.
+add_repositories("tilted-local-repo xmake-repo")
+
+-- direct dependencies version pinning
 add_requires(
     "entt v3.10.0", 
     "recastnavigation v1.6.0", 
