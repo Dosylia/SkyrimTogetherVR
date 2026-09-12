@@ -3094,4 +3094,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 411393u, 0x1c78060u },
     { 414391u, 0x1c8d5e8u },
     { 414675u, 0x1c8f6c0u },
+    // Found via call-graph matching against the unpacked SE/VR binaries (2026-09-12):
+    // TESQuest::SetCompleted, identified via its unique SE caller (DialogueSubtitleStrings, id 34429).
+    { 24991u, 0xc6dc90u },
 };

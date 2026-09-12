@@ -33,7 +33,7 @@ TESQuest::State TESQuest::getState()
 void TESQuest::SetCompleted(bool force)
 {
     TP_THIS_FUNCTION(TSetCompleted, void, TESQuest, bool);
-    POINTER_SKYRIMSE(TSetCompleted, SetCompleted, 24991, 0);
+    POINTER_SKYRIMSE(TSetCompleted, SetCompleted, 24991, 24991);
     SetCompleted(this, force);
 }
 
