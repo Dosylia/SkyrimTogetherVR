@@ -82,13 +82,13 @@ static TiltedPhoques::Initializer s_viewportHooks(
         #ifndef SKYRIMVR
         const VersionDbPtr<void> initWindowLoc(77226);
         #else
-        const VersionDbPtr<void> initWindowLoc(0); // TODOVR : find the correct id for VR
+        const VersionDbPtr<void> initWindowLoc(77226);
         #endif
         TiltedPhoques::Put(mem::pointer(initWindowLoc.GetPtr()) + 0x174 + 1, WS_OVERLAPPEDWINDOW);
         #ifndef SKYRIMVR
         const VersionDbPtr<void> windowLoc(68781);
         #else
-        const VersionDbPtr<void> windowLoc(0); // TODOVR : find the correct id for VR
+        const VersionDbPtr<void> windowLoc(68781);
         #endif
         TiltedPhoques::Put(
             mem::pointer(windowLoc.GetPtr()) + 0x55 + 2,
@@ -97,8 +97,8 @@ static TiltedPhoques::Initializer s_viewportHooks(
         const VersionDbPtr<void> timerLoc(77246);
         const VersionDbPtr<void> renderInit(77226);
         #else
-        const VersionDbPtr<void> timerLoc(0); // TODOVR : find the correct id for VR
-        const VersionDbPtr<void> renderInit(0); // TODOVR : find the correct id for VR
+        const VersionDbPtr<void> timerLoc(77246);
+        const VersionDbPtr<void> renderInit(77226);
         #endif
         TiltedPhoques::SwapCall(mem::pointer(timerLoc.GetPtr()) + 9, StopTimer, &Hook_StopTimer);
         Renderer_Init = static_cast<decltype(Renderer_Init)>(renderInit.GetPtr());

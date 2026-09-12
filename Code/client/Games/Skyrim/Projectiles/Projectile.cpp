@@ -114,7 +114,7 @@ BSPointerHandle<Projectile>* TP_MAKE_THISCALL(HookLaunch, BSPointerHandle<Projec
 static TiltedPhoques::Initializer s_projectileHooks(
     []()
     {
-        POINTER_SKYRIMSE(TLaunch, s_launch, 44108, 0);
+        POINTER_SKYRIMSE(TLaunch, s_launch, 44108, 44108);
 
         RealLaunch = s_launch.Get();
 
@@ -123,7 +123,7 @@ static TiltedPhoques::Initializer s_projectileHooks(
         #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> hookLoc(34452);
         #else
-        VersionDbPtr<uint8_t> hookLoc(0); // TODOVR : find the correct id for VR
+        VersionDbPtr<uint8_t> hookLoc(34452);
         #endif
 
         struct C : TiltedPhoques::CodeGenerator

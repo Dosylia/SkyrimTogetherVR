@@ -4,7 +4,7 @@
 
 SkyrimVM* SkyrimVM::Get()
 {
-    POINTER_SKYRIMSE(SkyrimVM*, s_instance, 400475, 0);
+    POINTER_SKYRIMSE(SkyrimVM*, s_instance, 400475, 400475);
 
     return *s_instance.Get();
 }

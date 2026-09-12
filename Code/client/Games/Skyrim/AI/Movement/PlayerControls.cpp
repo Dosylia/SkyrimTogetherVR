@@ -3,14 +3,14 @@
 
 PlayerControls* PlayerControls::GetInstance()
 {
-    POINTER_SKYRIMSE(PlayerControls*, s_instance, 400864, 0);
+    POINTER_SKYRIMSE(PlayerControls*, s_instance, 400864, 400864);
     return *(s_instance.Get());
 }
 
 void PlayerControls::SetEnabled(bool abFlag)
 {
     TP_THIS_FUNCTION(TSetEnabled, void, PlayerControls, bool);
-    POINTER_SKYRIMSE(TSetEnabled, setEnabled, 42345, 0);
+    POINTER_SKYRIMSE(TSetEnabled, setEnabled, 42345, 42345);
     TiltedPhoques::ThisCall(setEnabled, this, abFlag);
 }
 
@@ -21,14 +21,14 @@ void PlayerControls::SetCamSwitch(bool aSet) noexcept
 
 BSInputEnableManager* BSInputEnableManager::Get()
 {
-    POINTER_SKYRIMSE(BSInputEnableManager*, s_instance, 400863, 0);
+    POINTER_SKYRIMSE(BSInputEnableManager*, s_instance, 400863, 400863);
     return *(s_instance.Get());
 }
 
 void BSInputEnableManager::EnableOtherEvent(int32_t aFlags, bool aEnable, bool aUnk2)
 {
     TP_THIS_FUNCTION(TSetEnabled, void, BSInputEnableManager, int32_t, bool, bool);
-    POINTER_SKYRIMSE(TSetEnabled, setEnabled, 68545, 0);
+    POINTER_SKYRIMSE(TSetEnabled, setEnabled, 68545, 68545);
     TiltedPhoques::ThisCall(setEnabled, this, aFlags, aEnable, aUnk2);
 }
 

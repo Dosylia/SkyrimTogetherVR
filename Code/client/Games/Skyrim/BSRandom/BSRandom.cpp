@@ -17,13 +17,13 @@ static TiltedPhoques::Initializer s_randomInit(
         #ifndef SKYRIMVR
         const VersionDbPtr<void> unsignedInt(68276);
         #else
-        const VersionDbPtr<void> unsignedInt(0); // TODOVR : find the correct id for VR
+        const VersionDbPtr<void> unsignedInt(68276);
         #endif
         Real_UnsignedInt = static_cast<decltype(Real_UnsignedInt)>(unsignedInt.GetPtr());
         #ifndef SKYRIMVR
         const VersionDbPtr<void> getGenerator(14774);
         #else
-        const VersionDbPtr<void> getGenerator(0); // TODOVR: find the correct id for VR
+        const VersionDbPtr<void> getGenerator(14774);
         #endif
         GetGenerator = static_cast<decltype(GetGenerator)>(getGenerator.GetPtr());
     });

@@ -5,7 +5,7 @@ void ArrayQuickSortRecursiveCombatTargets(GameArray<CombatTargetSelector*>* apAr
                                           uint32_t aiHighIndex)
 {
     using TArrayQuickSort = void(GameArray<CombatTargetSelector*>* apArray, void* apFunction, uint32_t aiLowIndex, uint32_t aiHighIndex);
-    POINTER_SKYRIMSE(TArrayQuickSort, arrayQuickSort, 33285, 0);
+    POINTER_SKYRIMSE(TArrayQuickSort, arrayQuickSort, 33285, 33285);
 
     using TSortTargetSelectors = int64_t(int64_t, int64_t);
     POINTER_SKYRIMSE(TSortTargetSelectors, sortTargetSelectors, 33282, 33282);
@@ -70,7 +70,7 @@ void TP_MAKE_THISCALL(HookUpdateTarget, CombatController)
 void CombatController::SetTarget(Actor* apTarget)
 {
     TP_THIS_FUNCTION(TSetTarget, void, CombatController, Actor*);
-    POINTER_SKYRIMSE(TSetTarget, setTarget, 33235, 0);
+    POINTER_SKYRIMSE(TSetTarget, setTarget, 33235, 33235);
     TiltedPhoques::ThisCall(setTarget, this, apTarget);
 }
 
@@ -78,7 +78,7 @@ static TiltedPhoques::Initializer s_combatControllerHooks(
     []()
     {
 #if 0
-        POINTER_SKYRIMSE(TUpdateTarget, s_updateTarget, 33236, 0);
+        POINTER_SKYRIMSE(TUpdateTarget, s_updateTarget, 33236, 33236);
 
         RealUpdateTarget = s_updateTarget.Get();
 

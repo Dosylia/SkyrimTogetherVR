@@ -6,6 +6,10 @@
 #include <stdio.h>
 #include <sstream>
 
+#ifdef SKYRIMVR
+#include "VRAddressOverrides.h"
+#endif
+
 #pragma comment(lib, "version.lib")
 
 class VersionDb
@@ -353,6 +357,17 @@ public:
             _data[id] = offset;
             _rdata[offset] = id;
         }
+
+#ifdef SKYRIMVR
+        for (const auto& entry : kVRAddressOverrides)
+        {
+            if (_data.find(entry.id) == _data.end())
+            {
+                _data[entry.id] = entry.offset;
+                _rdata[entry.offset] = entry.id;
+            }
+        }
+#endif
 
         return !_data.empty();
     }

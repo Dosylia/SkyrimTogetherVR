@@ -10,7 +10,7 @@ static bool g_RequestUnpauseAll{false};
 
 UI* UI::Get()
 {
-    POINTER_SKYRIMSE(UI*, s_instance, 400327, 0);
+    POINTER_SKYRIMSE(UI*, s_instance, 400327, 400327);
     return *s_instance.Get();
 }
 
@@ -20,7 +20,7 @@ bool UI::GetMenuOpen(const BSFixedString& acName) const
         return false;
 
     TP_THIS_FUNCTION(TMenuSystem_IsOpen, bool, const UI, const BSFixedString&);
-    POINTER_SKYRIMSE(TMenuSystem_IsOpen, s_isMenuOpen, 82074, 0);
+    POINTER_SKYRIMSE(TMenuSystem_IsOpen, s_isMenuOpen, 82074, 82074);
 
     return TiltedPhoques::ThisCall(s_isMenuOpen.Get(), this, acName);
 }
@@ -28,7 +28,7 @@ bool UI::GetMenuOpen(const BSFixedString& acName) const
 void UI::CloseAllMenus()
 {
     TP_THIS_FUNCTION(TUI_CloseAll, void, const UI);
-    POINTER_SKYRIMSE(TUI_CloseAll, s_CloseAll, 82088, 0);
+    POINTER_SKYRIMSE(TUI_CloseAll, s_CloseAll, 82088, 82088);
 
     TiltedPhoques::ThisCall(s_CloseAll.Get(), this);
 }
@@ -125,7 +125,7 @@ static TiltedPhoques::Initializer s_s(
         #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> ProcessHook(82082);
         #else
-        VersionDbPtr<uint8_t> ProcessHook(0); // TODOVR : find the correct id for VR
+        VersionDbPtr<uint8_t> ProcessHook(82082);
         #endif
         TiltedPhoques::SwapCall(ProcessHook.Get() + 0x682, UI_AddToActiveQueue, &UI_AddToActiveQueue_Hook);
 
@@ -134,7 +134,7 @@ static TiltedPhoques::Initializer s_s(
         #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> MainInit(36548);
         #else
-        VersionDbPtr<uint8_t> MainInit(0); // TODOVR : find the correct id for VR
+        VersionDbPtr<uint8_t> MainInit(36548);
         #endif
         TiltedPhoques::Put<uint8_t>(MainInit.Get() + 0xFE, 0xEB);
 
@@ -148,7 +148,7 @@ static TiltedPhoques::Initializer s_s(
         TiltedPhoques::Put<uint16_t>(FavoritesCanProcess.Get() + 0x15, 0x9090);
 
         // Some experiments:
-        // POINTER_SKYRIMSE(TCallback, s_start, 13631, 0);
+        // POINTER_SKYRIMSE(TCallback, s_start, 13631, 13631);
         // UIMessageQueue__AddMessage_Real = s_start.Get();
         // TP_HOOK(&UIMessageQueue__AddMessage_Real, UIMessageQueue__AddMessage);
 

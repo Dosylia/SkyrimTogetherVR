@@ -107,7 +107,7 @@ TESObjectREFR* TESObjectREFR::GetByHandle(uint32_t aHandle) noexcept
 
     using TGetRefrByHandle = void(uint32_t & aHandle, TESObjectREFR * &apResult);
 
-    POINTER_SKYRIMSE(TGetRefrByHandle, s_getRefrByHandle, 17201, 0);
+    POINTER_SKYRIMSE(TGetRefrByHandle, s_getRefrByHandle, 17201, 17201);
 
     s_getRefrByHandle.Get()(aHandle, pResult);
 
@@ -120,7 +120,7 @@ TESObjectREFR* TESObjectREFR::GetByHandle(uint32_t aHandle) noexcept
 BSPointerHandle<TESObjectREFR> TESObjectREFR::GetHandle() const noexcept
 {
     TP_THIS_FUNCTION(TGetHandle, BSPointerHandle<TESObjectREFR>, const TESObjectREFR, BSPointerHandle<TESObjectREFR>* apResult);
-    POINTER_SKYRIMSE(TGetHandle, s_getHandle, 19846, 0);
+    POINTER_SKYRIMSE(TGetHandle, s_getHandle, 19846, 19846);
 
     BSPointerHandle<TESObjectREFR> result{};
     TiltedPhoques::ThisCall(s_getHandle, this, &result);
@@ -130,7 +130,7 @@ BSPointerHandle<TESObjectREFR> TESObjectREFR::GetHandle() const noexcept
 
 uint32_t* TESObjectREFR::GetNullHandle() noexcept
 {
-    POINTER_SKYRIMSE(uint32_t, s_nullHandle, 400312, 0);
+    POINTER_SKYRIMSE(uint32_t, s_nullHandle, 400312, 400312);
 
     return s_nullHandle.Get();
 }
@@ -352,7 +352,7 @@ void TESObjectREFR::MoveTo(TESObjectCELL* apCell, const NiPoint3& acPosition) co
 
     TP_THIS_FUNCTION(TInternalMoveTo, bool, const TESObjectREFR, uint32_t*&, TESObjectCELL*, TESWorldSpace*, const NiPoint3&, const NiPoint3&);
 
-    POINTER_SKYRIMSE(TInternalMoveTo, s_internalMoveTo, 56626, 0);
+    POINTER_SKYRIMSE(TInternalMoveTo, s_internalMoveTo, 56626, 56626);
 
     TiltedPhoques::ThisCall(s_internalMoveTo, this, GetNullHandle(), apCell, apCell->worldspace, acPosition, rotation);
 }
@@ -366,14 +366,14 @@ void TESObjectREFR::PayGold(int32_t aAmount) noexcept
 void TESObjectREFR::PayGoldToContainer(TESObjectREFR* pContainer, int32_t aAmount) noexcept
 {
     TP_THIS_FUNCTION(TPayGoldToContainer, void, TESObjectREFR, TESObjectREFR*, int32_t);
-    POINTER_SKYRIMSE(TPayGoldToContainer, s_payGoldToContainer, 37511, 0);
+    POINTER_SKYRIMSE(TPayGoldToContainer, s_payGoldToContainer, 37511, 37511);
     TiltedPhoques::ThisCall(s_payGoldToContainer, this, pContainer, aAmount);
 }
 
 Lock* TESObjectREFR::GetLock() const noexcept
 {
     TP_THIS_FUNCTION(TGetLock, Lock*, const TESObjectREFR);
-    POINTER_SKYRIMSE(TGetLock, realGetLock, 20223, 0);
+    POINTER_SKYRIMSE(TGetLock, realGetLock, 20223, 20223);
 
     return TiltedPhoques::ThisCall(realGetLock, this);
 }
@@ -381,7 +381,7 @@ Lock* TESObjectREFR::GetLock() const noexcept
 Lock* TESObjectREFR::CreateLock() noexcept
 {
     TP_THIS_FUNCTION(TCreateLock, Lock*, TESObjectREFR);
-    POINTER_SKYRIMSE(TCreateLock, realCreateLock, 20221, 0);
+    POINTER_SKYRIMSE(TCreateLock, realCreateLock, 20221, 20221);
 
     return TiltedPhoques::ThisCall(realCreateLock, this);
 }
@@ -410,7 +410,7 @@ ExtraContainerChanges::Data* TESObjectREFR::GetContainerChanges() const noexcept
 {
     TP_THIS_FUNCTION(TGetContainterChanges, ExtraContainerChanges::Data*, const TESObjectREFR);
 
-    POINTER_SKYRIMSE(TGetContainterChanges, s_getContainerChangs, 16040, 0);
+    POINTER_SKYRIMSE(TGetContainterChanges, s_getContainerChangs, 16040, 16040);
 
     return TiltedPhoques::ThisCall(s_getContainerChangs, this);
 }
@@ -430,7 +430,7 @@ TESContainer* TESObjectREFR::GetContainer() const noexcept
 {
     TP_THIS_FUNCTION(TGetContainer, TESContainer*, const TESObjectREFR);
 
-    POINTER_SKYRIMSE(TGetContainer, s_getContainer, 19702, 0);
+    POINTER_SKYRIMSE(TGetContainer, s_getContainer, 19702, 19702);
 
     return TiltedPhoques::ThisCall(s_getContainer, this);
 }
@@ -890,7 +890,7 @@ void TESObjectREFR::AddOrRemoveItem(const Inventory::Entry& arEntry, bool aIsSet
 void TESObjectREFR::UpdateItemList(TESForm* pUnkForm) noexcept
 {
     TP_THIS_FUNCTION(TUpdateItemList, void, TESObjectREFR, TESForm*);
-    POINTER_SKYRIMSE(TUpdateItemList, updateItemList, 52849, 0);
+    POINTER_SKYRIMSE(TUpdateItemList, updateItemList, 52849, 52849);
     TiltedPhoques::ThisCall(updateItemList, this, pUnkForm);
 }
 
@@ -1099,15 +1099,15 @@ void TP_MAKE_THISCALL(HookLockChange, TESObjectREFR)
 static TiltedPhoques::Initializer s_objectReferencesHooks(
     []()
     {
-        POINTER_SKYRIMSE(TLockChange, s_lockChange, 19512, 0);
-        POINTER_SKYRIMSE(TRotate, s_rotateX, 19787, 0);
-        POINTER_SKYRIMSE(TRotate, s_rotateY, 19788, 0);
+        POINTER_SKYRIMSE(TLockChange, s_lockChange, 19512, 19512);
+        POINTER_SKYRIMSE(TRotate, s_rotateX, 19787, 19787);
+        POINTER_SKYRIMSE(TRotate, s_rotateY, 19788, 19788);
         POINTER_SKYRIMSE(TRotate, s_rotateZ, 19789, 19789);
-        POINTER_SKYRIMSE(TActivate, s_activate, 19796, 0);
-        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 19708, 0);
-        POINTER_SKYRIMSE(TRemoveInventoryItem, s_removeInventoryItem, 19689, 0);
-        POINTER_SKYRIMSE(TPlayAnimationAndWait, s_playAnimationAndWait, 56206, 0);
-        POINTER_SKYRIMSE(TPlayAnimation, s_playAnimation, 56205, 0);
+        POINTER_SKYRIMSE(TActivate, s_activate, 19796, 19796);
+        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 19708, 19708);
+        POINTER_SKYRIMSE(TRemoveInventoryItem, s_removeInventoryItem, 19689, 19689);
+        POINTER_SKYRIMSE(TPlayAnimationAndWait, s_playAnimationAndWait, 56206, 56206);
+        POINTER_SKYRIMSE(TPlayAnimation, s_playAnimation, 56205, 56205);
 
         RealLockChange = s_lockChange.Get();
         RealRotateX = s_rotateX.Get();

@@ -66,7 +66,7 @@ uint8_t TP_MAKE_THISCALL(HookPerformAction, ActorMediator, TESActionData* apActi
 
 ActorMediator* ActorMediator::Get() noexcept
 {
-    POINTER_SKYRIMSE(ActorMediator*, s_actorMediator, 403567, 0);
+    POINTER_SKYRIMSE(ActorMediator*, s_actorMediator, 403567, 403567);
 
     return *(s_actorMediator.Get());
 }
@@ -107,9 +107,9 @@ bool ActorMediator::ForceAction(TESActionData* apAction) noexcept
     TP_THIS_FUNCTION(TAnimationStep, uint8_t, ActorMediator, TESActionData*);
     using TApplyAnimationVariables = void*(void*, TESActionData*);
 
-    POINTER_SKYRIMSE(TApplyAnimationVariables, ApplyAnimationVariables, 39004, 0);
-    POINTER_SKYRIMSE(TAnimationStep, PerformComplexAction, 38953, 0);
-    POINTER_SKYRIMSE(void*, qword_142F271B8, 403566, 0);
+    POINTER_SKYRIMSE(TApplyAnimationVariables, ApplyAnimationVariables, 39004, 39004);
+    POINTER_SKYRIMSE(TAnimationStep, PerformComplexAction, 38953, 38953);
+    POINTER_SKYRIMSE(void*, qword_142F271B8, 403566, 403566);
 
     uint8_t result = 0;
 
@@ -167,7 +167,7 @@ BGSActionData::BGSActionData(uint32_t aParam1, Actor* apActor, BGSAction* apActi
 TESActionData::TESActionData(uint32_t aParam1, Actor* apActor, BGSAction* apAction, TESObjectREFR* apTarget)
     : BGSActionData(aParam1, apActor, apAction, apTarget)
 {
-    POINTER_SKYRIMSE(void*, s_vtbl, 188603, 0);
+    POINTER_SKYRIMSE(void*, s_vtbl, 188603, 188603);
 
     someFlag = false;
 
@@ -183,7 +183,7 @@ TESActionData::~TESActionData()
 static TiltedPhoques::Initializer s_animationHook(
     []()
     {
-        POINTER_SKYRIMSE(TPerformAction, performAction, 38949, 0);
+        POINTER_SKYRIMSE(TPerformAction, performAction, 38949, 38949);
 
         RealPerformAction = performAction.Get();
 

@@ -15,7 +15,7 @@ bool IAnimationGraphManagerHolder::SetVariableFloat(BSFixedString* apVariable, f
 bool IAnimationGraphManagerHolder::SetVariableInt(BSFixedString* apVariable, int32_t aValue)
 {
     TP_THIS_FUNCTION(TSetIntVariable, bool, IAnimationGraphManagerHolder, BSFixedString*, int32_t);
-    POINTER_SKYRIMSE(TSetIntVariable, InternalSetIntVariable, 32886, 0);
+    POINTER_SKYRIMSE(TSetIntVariable, InternalSetIntVariable, 32886, 32886);
 
     return TiltedPhoques::ThisCall(InternalSetIntVariable, this, apVariable, aValue);
 }
@@ -23,7 +23,7 @@ bool IAnimationGraphManagerHolder::SetVariableInt(BSFixedString* apVariable, int
 bool IAnimationGraphManagerHolder::SetVariableBool(BSFixedString* apVariable, bool aValue)
 {
     TP_THIS_FUNCTION(TSetBoolVariable, bool, IAnimationGraphManagerHolder, BSFixedString*, bool);
-    POINTER_SKYRIMSE(TSetBoolVariable, InternalSetBoolVariable, 32885, 0);
+    POINTER_SKYRIMSE(TSetBoolVariable, InternalSetBoolVariable, 32885, 32885);
 
     return TiltedPhoques::ThisCall(InternalSetBoolVariable, this, apVariable, aValue);
 }

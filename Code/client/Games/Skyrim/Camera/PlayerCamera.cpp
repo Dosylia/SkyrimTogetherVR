@@ -5,14 +5,14 @@
 
 PlayerCamera* PlayerCamera::Get() noexcept
 {
-    POINTER_SKYRIMSE(PlayerCamera*, s_instance, 400802, 0);
+    POINTER_SKYRIMSE(PlayerCamera*, s_instance, 400802, 400802);
     return *(s_instance.Get());
 }
 
 bool PlayerCamera::IsFirstPerson() noexcept
 {
     TP_THIS_FUNCTION(TIsFirstPerson, void, PlayerCamera, void*, void*, double*);
-    POINTER_SKYRIMSE(TIsFirstPerson, isFirstPerson, 21600, 0);
+    POINTER_SKYRIMSE(TIsFirstPerson, isFirstPerson, 21600, 21600);
 
     double firstPerson = 0.0;
     TiltedPhoques::ThisCall(isFirstPerson, this, nullptr, nullptr, &firstPerson);

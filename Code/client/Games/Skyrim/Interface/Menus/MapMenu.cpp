@@ -12,7 +12,7 @@ static TiltedPhoques::Initializer s_init(
     #ifndef SKYRIMVR
     VersionDbPtr<void*> hookLoc(53112);
     #else
-    VersionDbPtr<void*> hookLoc(0);
+    VersionDbPtr<void*> hookLoc(53112);
     #endif
     TiltedPhoques::Nop(hookLoc.GetPtrU() + 0x53, 4);
     TiltedPhoques::Nop(hookLoc.GetPtrU() + 0x9D, 2);

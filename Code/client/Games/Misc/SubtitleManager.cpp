@@ -10,7 +10,7 @@
 
 SubtitleManager* SubtitleManager::Get() noexcept
 {
-    POINTER_SKYRIMSE(SubtitleManager*, s_singleton, 400443, 0);
+    POINTER_SKYRIMSE(SubtitleManager*, s_singleton, 400443, 400443);
     return *s_singleton.Get();
 }
 
@@ -25,7 +25,7 @@ void SubtitleManager::ShowSubtitle(TESObjectREFR* apSpeaker, const char* apSubti
 void* SubtitleManager::HideSubtitle(TESObjectREFR* apSpeaker) noexcept
 {
     TP_THIS_FUNCTION(THideSubtitle, void*, SubtitleManager, TESObjectREFR* apSpeaker);
-    POINTER_SKYRIMSE(THideSubtitle, s_hideSubtitle, 52627, 0);
+    POINTER_SKYRIMSE(THideSubtitle, s_hideSubtitle, 52627, 52627);
     return TiltedPhoques::ThisCall(s_hideSubtitle, this, apSpeaker);
 }
 
@@ -43,7 +43,7 @@ void TP_MAKE_THISCALL(HookShowSubtitle, SubtitleManager, TESObjectREFR* apSpeake
 static TiltedPhoques::Initializer s_subtitleHooks(
     []()
     {
-        POINTER_SKYRIMSE(TShowSubtitle, s_showSubtitle, 52626, 0);
+        POINTER_SKYRIMSE(TShowSubtitle, s_showSubtitle, 52626, 52626);
 
         RealShowSubtitle = s_showSubtitle.Get();
 

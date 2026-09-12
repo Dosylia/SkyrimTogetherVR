@@ -16,8 +16,8 @@ bool WorldPtToScreenPt3(const NiPoint3& aWorldPt, NiPoint3& aScreenPt)
 static TiltedPhoques::Initializer s_Init(
     []()
     {
-        POINTER_SKYRIMSE(float[4][4], s_matrix, 406126, 0);
-        POINTER_SKYRIMSE(NiRect<float>, s_port, 406160, 0);
+        POINTER_SKYRIMSE(float[4][4], s_matrix, 406126, 406126);
+        POINTER_SKYRIMSE(NiRect<float>, s_port, 406160, 406160);
 
         HUDMenuUtils::CameraWorldToCam = s_matrix.Get();
         HUDMenuUtils::CameraPort = s_port.Get();

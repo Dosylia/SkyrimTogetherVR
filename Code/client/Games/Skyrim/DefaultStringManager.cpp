@@ -6,7 +6,7 @@ DefaultStringManager& DefaultStringManager::Get()
 {
     using TGetDefaultStringManager = DefaultStringManager&();
 
-    POINTER_SKYRIMSE(TGetDefaultStringManager, GetDefaultStringManager, 11437, 0);
+    POINTER_SKYRIMSE(TGetDefaultStringManager, GetDefaultStringManager, 11437, 11437);
 
     return GetDefaultStringManager();
 }

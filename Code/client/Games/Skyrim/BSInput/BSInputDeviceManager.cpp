@@ -19,7 +19,7 @@ static TiltedPhoques::Initializer s_initInputDeviceManager(
         #ifndef SKYRIMVR
         const VersionDbPtr<void> pollInputDevices(68617);
         #else
-        const VersionDbPtr<void> pollInputDevices(0); // TODOVR : find the correct id for VR
+        const VersionDbPtr<void> pollInputDevices(68617);
         #endif
 
         BSInputDeviceManager_PollInputDevices = static_cast<decltype(BSInputDeviceManager_PollInputDevices)>(pollInputDevices.GetPtr());

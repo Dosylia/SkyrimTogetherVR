@@ -78,7 +78,7 @@ static TiltedPhoques::Initializer s_BSThreadInit(
         #ifndef SKYRIMVR
         const VersionDbPtr<uint8_t> threadInit(68261);
         #else
-        const VersionDbPtr<uint8_t> threadInit(0); // TODOVR : find the correct id for VR
+        const VersionDbPtr<uint8_t> threadInit(68261);
         #endif
         BSThread_Initialize = static_cast<decltype(BSThread_Initialize)>(threadInit.GetPtr());
         // need to detour this for now :/
@@ -87,7 +87,7 @@ static TiltedPhoques::Initializer s_BSThreadInit(
         #ifndef SKYRIMVR
         const VersionDbPtr<uint8_t> setThreadName(69066);
         #else
-        const VersionDbPtr<uint8_t> setThreadName(0); // TODOVR : find the correct id for VR
+        const VersionDbPtr<uint8_t> setThreadName(69066);
         #endif
         TiltedPhoques::Jump(setThreadName.Get(), &Hook_SetThreadName);
 
@@ -95,7 +95,7 @@ static TiltedPhoques::Initializer s_BSThreadInit(
     #ifndef SKYRIMVR
     const VersionDbPtr<uint8_t> createHavokThread(57704);
     #else
-    const VersionDbPtr<uint8_t> createHavokThread(0); // TODOVR : find the correct id for VR
+    const VersionDbPtr<uint8_t> createHavokThread(57704);
     #endif
     // relatively safe to do, since this is unlikely to ever change, as beth wont update havok
     TiltedPhoques::Nop(createHavokThread.Get() + 0x81, 6);

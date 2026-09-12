@@ -33,7 +33,7 @@ static_assert(sizeof(DetectionState) == 0x48);
 BGSEncounterZone* GetLocationEncounterZone(Actor* apActor)
 {
     TP_THIS_FUNCTION(TGetLocationEncounterZone, BGSEncounterZone*, Actor);
-    POINTER_SKYRIMSE(TGetLocationEncounterZone, getLocationEncounterZone, 20203, 0);
+    POINTER_SKYRIMSE(TGetLocationEncounterZone, getLocationEncounterZone, 20203, 20203);
     return TiltedPhoques::ThisCall(getLocationEncounterZone, apActor);
 }
 
@@ -41,7 +41,7 @@ bool IsValidTarget(CombatTargetSelector* apThis, Actor* apAttacker, Actor* apTar
 {
     TP_THIS_FUNCTION(TIsValidTarget, bool, CombatTargetSelector, Actor* apAttacker, Actor* apTarget,
                      BGSEncounterZone* apEncounterZone);
-    POINTER_SKYRIMSE(TIsValidTarget, isValidTarget, 47196, 0);
+    POINTER_SKYRIMSE(TIsValidTarget, isValidTarget, 47196, 47196);
     return TiltedPhoques::ThisCall(isValidTarget, apThis, apAttacker, apTarget, apEncounterZone);
 }
 
@@ -54,61 +54,61 @@ DetectionState* GetDetectionState(Actor* apAttacker, Actor* apTarget)
 
 float GetCombatTargetSelectorDetectionTimeLimit()
 {
-    POINTER_SKYRIMSE(float, s_value, 382393, 0);
+    POINTER_SKYRIMSE(float, s_value, 382393, 382393);
     return *s_value;
 }
 
 float GetCombatTargetSelectorRecentLOSTimeLimit()
 {
-    POINTER_SKYRIMSE(float, s_value, 382400, 0);
+    POINTER_SKYRIMSE(float, s_value, 382400, 382400);
     return *s_value;
 }
 
 bool ActorHasEquippedRangedWeapon_m(Actor* apActor)
 {
     TP_THIS_FUNCTION(TActorHasEquippedRangedWeapon_m, bool, Actor);
-    POINTER_SKYRIMSE(TActorHasEquippedRangedWeapon_m, actorHasEquippedRangedWeapon_m, 47303, 0);
+    POINTER_SKYRIMSE(TActorHasEquippedRangedWeapon_m, actorHasEquippedRangedWeapon_m, 47303, 47303);
     return TiltedPhoques::ThisCall(actorHasEquippedRangedWeapon_m, apActor);
 }
 
 BGSWorldLocation* RefrGetWorldLocation(TESObjectREFR* apThis, BGSWorldLocation* apResult)
 {
     TP_THIS_FUNCTION(TRefrGetWorldLocation, BGSWorldLocation*, TESObjectREFR, BGSWorldLocation*);
-    POINTER_SKYRIMSE(TRefrGetWorldLocation, refrGetWorldLocation, 19784, 0);
+    POINTER_SKYRIMSE(TRefrGetWorldLocation, refrGetWorldLocation, 19784, 19784);
     return TiltedPhoques::ThisCall(refrGetWorldLocation, apThis, apResult);
 }
 
 float GetModifiedDistance(BGSWorldLocation* apThis, BGSWorldLocation* apWorldLocation)
 {
     TP_THIS_FUNCTION(TGetModifiedDistance, float, BGSWorldLocation, BGSWorldLocation*);
-    POINTER_SKYRIMSE(TGetModifiedDistance, getModifiedDistance, 18518, 0);
+    POINTER_SKYRIMSE(TGetModifiedDistance, getModifiedDistance, 18518, 18518);
     return TiltedPhoques::ThisCall(getModifiedDistance, apThis, apWorldLocation);
 }
 
 float GetDword_142FE5B78()
 {
-    POINTER_SKYRIMSE(float, s_value, 405282, 0);
+    POINTER_SKYRIMSE(float, s_value, 405282, 405282);
     return *s_value;
 }
 
 bool CheckMovement(CombatController* apThis, BGSWorldLocation* apWorldLocation)
 {
     TP_THIS_FUNCTION(TCheckMovement, bool, CombatController, BGSWorldLocation*);
-    POINTER_SKYRIMSE(TCheckMovement, checkMovement, 33261, 0);
+    POINTER_SKYRIMSE(TCheckMovement, checkMovement, 33261, 33261);
     return TiltedPhoques::ThisCall(checkMovement, apThis, apWorldLocation);
 }
 
 bool sub_1407E7A40(Actor* apThis, BGSWorldLocation* apWorldLocation)
 {
     TP_THIS_FUNCTION(TFunc, bool, Actor, BGSWorldLocation*);
-    POINTER_SKYRIMSE(TFunc, func, 47307, 0);
+    POINTER_SKYRIMSE(TFunc, func, 47307, 47307);
     return TiltedPhoques::ThisCall(func, apThis, apWorldLocation);
 }
 
 bool IsFleeing(Actor* apThis)
 {
     TP_THIS_FUNCTION(TFunc, bool, Actor);
-    POINTER_SKYRIMSE(TFunc, func, 37577, 0);
+    POINTER_SKYRIMSE(TFunc, func, 37577, 37577);
     return TiltedPhoques::ThisCall(func, apThis);
 }
 

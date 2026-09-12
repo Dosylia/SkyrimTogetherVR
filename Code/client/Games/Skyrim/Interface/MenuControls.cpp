@@ -8,7 +8,7 @@ void MenuControls::SetToggle(bool b)
 
 MenuControls* MenuControls::GetInstance()
 {
-    POINTER_SKYRIMSE(MenuControls*, s_instance, 401263, 0);
+    POINTER_SKYRIMSE(MenuControls*, s_instance, 401263, 401263);
     return *(s_instance.Get());
 }
 

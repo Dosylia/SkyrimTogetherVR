@@ -7,7 +7,7 @@
 TESObjectREFR* TESQuest::GetAliasedRef(uint32_t aAliasID) noexcept
 {
     TP_THIS_FUNCTION(TGetAliasedRef, BSPointerHandle<TESObjectREFR>*, TESQuest, BSPointerHandle<TESObjectREFR>*, uint32_t);
-    POINTER_SKYRIMSE(TGetAliasedRef, getAliasedRef, 25066, 0);
+    POINTER_SKYRIMSE(TGetAliasedRef, getAliasedRef, 25066, 25066);
 
     BSPointerHandle<TESObjectREFR> result{};
     TiltedPhoques::ThisCall(getAliasedRef, this, &result, aAliasID);
@@ -40,7 +40,7 @@ void TESQuest::SetCompleted(bool force)
 void TESQuest::CompleteAllObjectives()
 {
     TP_THIS_FUNCTION(TCompleteAllObjectives, void, TESQuest);
-    POINTER_SKYRIMSE(TCompleteAllObjectives, CompleteAll, 23231, 0);
+    POINTER_SKYRIMSE(TCompleteAllObjectives, CompleteAll, 23231, 23231);
     CompleteAll(this);
 }
 
@@ -66,7 +66,7 @@ bool TESQuest::IsStageDone(uint16_t stageIndex)
 bool TESQuest::Kill()
 {
     using TSetStopped = void(TESQuest*, bool);
-    POINTER_SKYRIMSE(TSetStopped, SetStopped, 24987, 0);
+    POINTER_SKYRIMSE(TSetStopped, SetStopped, 24987, 24987);
 
     if (flags & Flags::Enabled)
     {
@@ -84,7 +84,7 @@ bool TESQuest::Kill()
 bool TESQuest::EnsureQuestStarted(bool& success, bool force)
 {
     TP_THIS_FUNCTION(TSetRunning, bool, TESQuest, bool*, bool);
-    POINTER_SKYRIMSE(TSetRunning, SetRunning, 25003, 0);
+    POINTER_SKYRIMSE(TSetRunning, SetRunning, 25003, 25003);
     return SetRunning(this, &success, force);
 }
 
@@ -93,7 +93,7 @@ bool TESQuest::SetStage(uint16_t newStage)
     ScopedQuestOverride _;
 
     TP_THIS_FUNCTION(TSetStage, bool, TESQuest, uint16_t);
-    POINTER_SKYRIMSE(TSetStage, SetStage, 25004, 0);
+    POINTER_SKYRIMSE(TSetStage, SetStage, 25004, 25004);
     return SetStage(this, newStage);
 }
 
