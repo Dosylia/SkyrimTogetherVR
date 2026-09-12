@@ -23,16 +23,29 @@ std::string SerializeTimePoint(const time_point& time, const std::string& format
 
 LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 {
-    static int alreadyCrashed = 0;
+    // Separate one-shot gates per exception code: an access violation that a
+    // downstream __except recovers from must not consume the single dump
+    // opportunity a later, actually-fatal STATUS_STACK_BUFFER_OVERRUN needs -
+    // that's exactly what was happening (AV dumped and recovered, the /GS
+    // failure that followed it got silently skipped every time).
+    static int alreadyCrashedAV = 0;
+    static int alreadyCrashedGS = 0;
     auto retval = EXCEPTION_CONTINUE_SEARCH;
 
-    // Serialize 
+    // Serialize
     static std::mutex singleThreaded;
     const std::lock_guard lock{singleThreaded};
 
-    // Check for severe, not continuable and not software-originated exception
-    if (pExceptionInfo->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
-        alreadyCrashed++ == 0)
+    const auto exceptionCode = pExceptionInfo->ExceptionRecord->ExceptionCode;
+    const bool isNewAV = exceptionCode == EXCEPTION_ACCESS_VIOLATION && alreadyCrashedAV++ == 0;
+    const bool isNewGS = exceptionCode == STATUS_STACK_BUFFER_OVERRUN && alreadyCrashedGS++ == 0;
+
+    // Check for severe, not continuable and not software-originated exception.
+    // Also catch STATUS_STACK_BUFFER_OVERRUN (/GS cookie failures, raised via
+    // __fastfail) - these were previously invisible here (no dump, no WER
+    // detail beyond a bare fault offset), making stack-corruption bugs
+    // essentially undiagnosable.
+    if (isNewAV || isNewGS)
     {
         spdlog::critical (__FUNCTION__ ": crash occurred!"); 
         
@@ -74,8 +87,17 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
                                         FILE_ATTRIBUTE_NORMAL, NULL);
 
                 // baseline settings from https://stackoverflow.com/a/63123214/5273909
+                // MiniDumpWithFullMemory was tried and reverted: for this
+                // process (1GB+ reserved game_seg buffer plus normal game
+                // heap) it took ~3 minutes and produced a ~7GB file - easy to
+                // mistake for a hang and kill before the write finishes
+                // (which happened), and impractical for repeated iteration
+                // even when it succeeds. MiniDumpWithIndirectlyReferencedMemory
+                // captures memory reachable from register/stack pointers
+                // (enough to inspect a specific crashing pointer) at a much
+                // smaller/faster cost.
                 auto dumpSettings = MiniDumpWithDataSegs | MiniDumpWithProcessThreadData | MiniDumpWithHandleData |
-                                    MiniDumpWithThreadInfo |
+                                    MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory |
                                     /*
                                     //MiniDumpWithPrivateReadWriteMemory | // this one gens bad dump
                                     MiniDumpWithUnloadedModules |

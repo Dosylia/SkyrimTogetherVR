@@ -394,7 +394,20 @@ template <class T> struct VersionDbPtr
     void* GetPtr() const noexcept
     {
         if (m_pPtr == nullptr)
+        {
             m_pPtr = VersionDb::Get().FindAddressById(m_id);
+
+            // Surface which id failed to resolve so an unguarded caller's crash
+            // (dereferencing this as a data pointer, not a function hook) can be
+            // traced back to the offending POINTER_SKYRIMSE(...) declaration
+            // instead of showing up as a bare access violation with no context.
+            if (m_pPtr == nullptr)
+            {
+                char buf[96];
+                _snprintf_s(buf, sizeof(buf), "VersionDbPtr: unresolved id %u (GetPtr returning null)\n", m_id);
+                OutputDebugStringA(buf);
+            }
+        }
 
         return m_pPtr;
     }

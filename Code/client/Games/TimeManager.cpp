@@ -3,7 +3,7 @@
 
 TimeData* TimeData::Get() noexcept
 {
-    POINTER_SKYRIMSE(TimeData*, s_instance, 400447, 400447);
+    POINTER_SKYRIMSE(TimeData*, s_instance, 400447, 514287);
     return *(s_instance.Get());
 }
 

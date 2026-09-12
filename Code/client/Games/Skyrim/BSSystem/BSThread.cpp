@@ -78,7 +78,7 @@ static TiltedPhoques::Initializer s_BSThreadInit(
         #ifndef SKYRIMVR
         const VersionDbPtr<uint8_t> threadInit(68261);
         #else
-        const VersionDbPtr<uint8_t> threadInit(68261);
+        const VersionDbPtr<uint8_t> threadInit(0);
         #endif
         BSThread_Initialize = static_cast<decltype(BSThread_Initialize)>(threadInit.GetPtr());
         // need to detour this for now :/
@@ -87,9 +87,13 @@ static TiltedPhoques::Initializer s_BSThreadInit(
         #ifndef SKYRIMVR
         const VersionDbPtr<uint8_t> setThreadName(69066);
         #else
-        const VersionDbPtr<uint8_t> setThreadName(69066);
+        const VersionDbPtr<uint8_t> setThreadName(0);
         #endif
-        TiltedPhoques::Jump(setThreadName.Get(), &Hook_SetThreadName);
+        // id 69066 is unverified on VR - writing a JMP at a garbage address
+        // overwrites the prologue of whatever unrelated function lives there
+        // (confirmed in a crash dump: e9 .. jmp written into game code).
+        if (setThreadName.Get())
+            TiltedPhoques::Jump(setThreadName.Get(), &Hook_SetThreadName);
 
 #if 0
     #ifndef SKYRIMVR

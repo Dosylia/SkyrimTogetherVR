@@ -3,7 +3,7 @@
 
 PlayerControls* PlayerControls::GetInstance()
 {
-    POINTER_SKYRIMSE(PlayerControls*, s_instance, 400864, 400864);
+    POINTER_SKYRIMSE(PlayerControls*, s_instance, 400864, 514706);
     return *(s_instance.Get());
 }
 
@@ -21,7 +21,7 @@ void PlayerControls::SetCamSwitch(bool aSet) noexcept
 
 BSInputEnableManager* BSInputEnableManager::Get()
 {
-    POINTER_SKYRIMSE(BSInputEnableManager*, s_instance, 400863, 400863);
+    POINTER_SKYRIMSE(BSInputEnableManager*, s_instance, 400863, 514705);
     return *(s_instance.Get());
 }
 

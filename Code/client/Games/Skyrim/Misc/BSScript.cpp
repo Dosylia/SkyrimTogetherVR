@@ -4,7 +4,7 @@
 uint64_t BSScript::Object::GetHandle()
 {
     TP_THIS_FUNCTION(TGetHandle, uint64_t, BSScript::Object);
-    POINTER_SKYRIMSE(TGetHandle, s_getHandle, 104247, 104247);
+    POINTER_SKYRIMSE(TGetHandle, s_getHandle, 104247, 97463);
     return TiltedPhoques::ThisCall(s_getHandle, this);
 }
 
@@ -192,7 +192,7 @@ void BSScript::NativeFunctionBase::InsertLocals(StackFrame*)
 BSScript::CallResult BSScript::NativeFunctionBase::Call(Stack* apStack, void* apLogger, IVirtualMachine* apVm, bool aArg4)
 {
     TP_THIS_FUNCTION(TCall, CallResult, NativeFunctionBase, Stack*, void*, IVirtualMachine*, bool);
-    POINTER_SKYRIMSE(TCall, s_call, 104651, 104651);
+    POINTER_SKYRIMSE(TCall, s_call, 104651, 97923);
     return TiltedPhoques::ThisCall(s_call, this, apStack, apLogger, apVm, aArg4);
 }
 

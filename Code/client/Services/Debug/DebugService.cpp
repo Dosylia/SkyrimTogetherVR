@@ -152,7 +152,11 @@ extern thread_local bool g_forceAnimation;
 
 void DebugService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
 {
-    if (!BSGraphics::GetMainWindow()->IsForeground())
+    // GetMainWindow() is null on VR (Hook_Renderer_Init, which sets it, is
+    // disabled there - see BSGraphicsRenderer.cpp). Runs every frame, so an
+    // unguarded dereference here would crash immediately and constantly.
+    auto* pMainWindow = BSGraphics::GetMainWindow();
+    if (!pMainWindow || !pMainWindow->IsForeground())
         return;
 
     if (moveData.pActor)

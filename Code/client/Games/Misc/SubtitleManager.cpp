@@ -10,7 +10,7 @@
 
 SubtitleManager* SubtitleManager::Get() noexcept
 {
-    POINTER_SKYRIMSE(SubtitleManager*, s_singleton, 400443, 400443);
+    POINTER_SKYRIMSE(SubtitleManager*, s_singleton, 400443, 514283);
     return *s_singleton.Get();
 }
 

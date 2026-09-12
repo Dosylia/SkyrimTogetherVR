@@ -84,7 +84,7 @@ bool TESQuest::Kill()
 bool TESQuest::EnsureQuestStarted(bool& success, bool force)
 {
     TP_THIS_FUNCTION(TSetRunning, bool, TESQuest, bool*, bool);
-    POINTER_SKYRIMSE(TSetRunning, SetRunning, 25003, 25003);
+    POINTER_SKYRIMSE(TSetRunning, SetRunning, 25003, 24481);
     return SetRunning(this, &success, force);
 }
 

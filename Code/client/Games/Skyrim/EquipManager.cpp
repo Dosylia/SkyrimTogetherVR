@@ -62,7 +62,7 @@ TUnEquipShout* RealUnEquipShout = nullptr;
 
 EquipManager* EquipManager::Get() noexcept
 {
-    POINTER_SKYRIMSE(EquipManager*, s_singleton, 400636, 400636);
+    POINTER_SKYRIMSE(EquipManager*, s_singleton, 400636, 514494);
 
     return *s_singleton.Get();
 }
@@ -70,7 +70,7 @@ EquipManager* EquipManager::Get() noexcept
 void* EquipManager::Equip(Actor* apActor, TESForm* apItem, ExtraDataList* apExtraDataList, int aCount, TESForm* apSlot, bool abQueueEquip, bool abForceEquip, bool abPlaySound, bool abApplyNow)
 {
     TP_THIS_FUNCTION(TEquipInternal, void*, EquipManager, Actor* apActor, TESForm* apItem, ExtraDataList* apExtraDataList, int aCount, TESForm* apSlot, bool abQueueEquip, bool abForceEquip, bool abPlaySound, bool abApplyNow);
-    POINTER_SKYRIMSE(TEquipInternal, s_equipFunc, 38894, 38894);
+    POINTER_SKYRIMSE(TEquipInternal, s_equipFunc, 38894, 37938);
 
     ScopedEquipOverride equipOverride;
 
@@ -82,7 +82,7 @@ void* EquipManager::Equip(Actor* apActor, TESForm* apItem, ExtraDataList* apExtr
 void* EquipManager::UnEquip(Actor* apActor, TESForm* apItem, ExtraDataList* apExtraDataList, int aCount, TESForm* apSlot, bool abQueueEquip, bool abForceEquip, bool abPlaySound, bool abApplyNow, TESForm* apSlotToReplace)
 {
     TP_THIS_FUNCTION(TUnEquipInternal, void*, EquipManager, Actor* apActor, TESForm* apItem, ExtraDataList* apExtraDataList, int aCount, TESForm* apSlot, bool abQueueEquip, bool abForceEquip, bool abPlaySound, bool abApplyNow, TESForm* apSlotToReplace);
-    POINTER_SKYRIMSE(TUnEquipInternal, s_unequipFunc, 38901, 38901);
+    POINTER_SKYRIMSE(TUnEquipInternal, s_unequipFunc, 38901, 37945);
 
     ScopedEquipOverride equipOverride;
 
@@ -114,7 +114,7 @@ void* EquipManager::UnEquipSpell(Actor* apActor, TESForm* apSpell, uint32_t aSlo
 void* EquipManager::EquipShout(Actor* apActor, TESForm* apShout)
 {
     TP_THIS_FUNCTION(TEquipShoutInternal, void*, EquipManager, Actor*, TESForm*);
-    POINTER_SKYRIMSE(TEquipShoutInternal, s_equipFunc, 38897, 38897);
+    POINTER_SKYRIMSE(TEquipShoutInternal, s_equipFunc, 38897, 37941);
 
     ScopedEquipOverride equipOverride;
 

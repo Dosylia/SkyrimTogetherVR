@@ -229,10 +229,10 @@ uint8_t TP_MAKE_THISCALL(HookGetPerkRank, Actor, TESForm* apPerk)
 static TiltedPhoques::Initializer s_magicTargetHooks([]() {
     POINTER_SKYRIMSE(TAddTarget, addTarget, 34526, 34526);
     POINTER_SKYRIMSE(TCheckAddEffectTargetData, checkAddEffectTargetData, 34525, 34525);
-    POINTER_SKYRIMSE(TFindTargets, findTargets, 34410, 34410);
+    POINTER_SKYRIMSE(TFindTargets, findTargets, 34410, 33632);
     POINTER_SKYRIMSE(TAdjustForPerks, adjustForPerks, 34053, 34053);
     POINTER_SKYRIMSE(THasPerk, hasPerk, 21622, 21622);
-    POINTER_SKYRIMSE(TGetPerkRank, getPerkRank, 37698, 37698);
+    POINTER_SKYRIMSE(TGetPerkRank, getPerkRank, 37698, 36690);
 
     RealAddTarget = addTarget.Get();
     RealCheckAddEffectTargetData = checkAddEffectTargetData.Get();

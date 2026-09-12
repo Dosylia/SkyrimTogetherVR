@@ -167,7 +167,7 @@ BGSActionData::BGSActionData(uint32_t aParam1, Actor* apActor, BGSAction* apActi
 TESActionData::TESActionData(uint32_t aParam1, Actor* apActor, BGSAction* apAction, TESObjectREFR* apTarget)
     : BGSActionData(aParam1, apActor, apAction, apTarget)
 {
-    POINTER_SKYRIMSE(void*, s_vtbl, 188603, 188603);
+    POINTER_SKYRIMSE(void*, s_vtbl, 188603, 232777);
 
     someFlag = false;
 

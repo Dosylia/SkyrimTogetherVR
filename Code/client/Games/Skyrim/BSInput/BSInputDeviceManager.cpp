@@ -7,7 +7,12 @@ void (*BSInputDeviceManager_PollInputDevices)(BSInputDeviceManager*, float) = nu
 
 void Hook_BSInputDeviceManager_PollInputDevices(BSInputDeviceManager* inputDeviceMgr, float afDelta)
 {
-    if (!BSGraphics::GetMainWindow()->IsForeground())
+    // GetMainWindow() is null on VR (Hook_Renderer_Init, which sets it, is
+    // disabled there - see BSGraphicsRenderer.cpp). This runs every input
+    // poll, so an unguarded dereference here would crash immediately and
+    // constantly.
+    auto* pWindow = BSGraphics::GetMainWindow();
+    if (pWindow && !pWindow->IsForeground())
         return;
 
     BSInputDeviceManager_PollInputDevices(inputDeviceMgr, afDelta);
@@ -19,7 +24,7 @@ static TiltedPhoques::Initializer s_initInputDeviceManager(
         #ifndef SKYRIMVR
         const VersionDbPtr<void> pollInputDevices(68617);
         #else
-        const VersionDbPtr<void> pollInputDevices(68617);
+        const VersionDbPtr<void> pollInputDevices(0);
         #endif
 
         BSInputDeviceManager_PollInputDevices = static_cast<decltype(BSInputDeviceManager_PollInputDevices)>(pollInputDevices.GetPtr());

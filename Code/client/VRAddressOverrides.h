@@ -58,7 +58,11 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 16113u, 0x0209130u },
     { 16142u, 0x0209fe0u },
     { 16143u, 0x020a010u },
-    { 17201u, 0x022fce0u },
+    // 17201 removed: doesn't exist in the official VR Address Library at all
+    // (confirmed against version-1-4-15-0.csv) - this crosswalk-derived entry
+    // pointed at an unrelated function and caused a stack-corrupting crash in
+    // TESObjectREFR::GetByHandle. The real id for that function is 12204,
+    // used directly there now instead of going through this override table.
     { 18518u, 0x0275180u },
     { 18563u, 0x0277910u },
     { 18573u, 0x0278190u },

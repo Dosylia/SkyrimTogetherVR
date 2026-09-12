@@ -13,7 +13,7 @@ void MagicCaster::InterruptCast() noexcept
 {
     TP_THIS_FUNCTION(TInterruptCast, void, MagicCaster);
 
-    POINTER_SKYRIMSE(TInterruptCast, s_interruptCast, 34408, 34408);
+    POINTER_SKYRIMSE(TInterruptCast, s_interruptCast, 34408, 33630);
 
     TiltedPhoques::ThisCall(s_interruptCast, this);
 }

@@ -60,9 +60,9 @@ void FaceGenSystem::Update(World& aWorld, Actor* apActor, FaceGenComponent& aFac
 {
     POINTER_SKYRIMSE(NiRTTI, NiMaskedShaderRTTI, 414675, 414675);
     POINTER_SKYRIMSE(TCreateTexture, CreateTexture, 70717, 70717);
-    POINTER_SKYRIMSE(TCreateResourceView, CreateResourceView, 77299, 77299);
+    POINTER_SKYRIMSE(TCreateResourceView, CreateResourceView, 77299, 75507);
     POINTER_SKYRIMSE(TCreateTints, CreateTints, 27040, 27040);
-    POINTER_SKYRIMSE(TextureHolder, s_textureHolder, 411393, 411393);
+    POINTER_SKYRIMSE(TextureHolder, s_textureHolder, 411393, 524907);
 
     if (aFaceGenComponent.Generated)
         return;

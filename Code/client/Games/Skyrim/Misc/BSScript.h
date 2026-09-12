@@ -126,7 +126,7 @@ struct BSScript
         Variable* GetStackFrameVariable(StackFrame* apFrame, uint32_t aIndex, uint32_t aPageHint)
         {
             TP_THIS_FUNCTION(TGetStackFrameVariable, Variable*, Stack, StackFrame*, uint32_t, uint32_t);
-            POINTER_SKYRIMSE(TGetStackFrameVariable, getStackFrameVariable, 104484, 104484);
+            POINTER_SKYRIMSE(TGetStackFrameVariable, getStackFrameVariable, 104484, 97746);
             return TiltedPhoques::ThisCall(getStackFrameVariable, this, apFrame, aIndex, aPageHint);
         }
     };

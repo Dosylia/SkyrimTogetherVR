@@ -372,11 +372,16 @@ bool ActorMediator::RePerformComplexAction(TESActionData* apData) noexcept
 
     using Tsub_1401A2220 = void(BSFixedString*);
 
-    POINTER_SKYRIMSE(Tsub_1404ED090, sub_1404ED090, 32803, 0);
+    // id 32803 has no known VR address (parked) - Get() is null; ThisCall
+    // would call through a null function pointer and crash.
+    POINTER_SKYRIMSE(Tsub_1404ED090, sub_1404ED090, 32803, 32803);
     POINTER_SKYRIMSE(Tsub_1401A2220, sub_1401A2220, 15002, 15002);
 
     POINTER_SKYRIMSE(void, qword_142EFF990, 401100, 401100);
     POINTER_SKYRIMSE(Class142F3A1E8, qword_142F3A1E8, 403988, 403988);
+
+    if (!sub_1404ED090.Get())
+        return false;
 
     auto v4 = false;
     if (apData->ComputeResult())

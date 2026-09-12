@@ -6,7 +6,7 @@
 
 ModManager* ModManager::Get() noexcept
 {
-    POINTER_SKYRIMSE(ModManager*, modManager, 400269, 400269);
+    POINTER_SKYRIMSE(ModManager*, modManager, 400269, 514141);
 
     return *modManager.Get();
 }
@@ -73,7 +73,7 @@ TESObjectCELL* ModManager::GetCellFromCoordinates(int32_t aX, int32_t aY, TESWor
 static TiltedPhoques::Initializer s_tesHooks(
     []()
     {
-        POINTER_SKYRIMSE(TSpawnNewREFR, s_realSpawnNewREFR, 13723, 13723);
+        POINTER_SKYRIMSE(TSpawnNewREFR, s_realSpawnNewREFR, 13723, 13625);
 
         RealSpawnNewREFR = s_realSpawnNewREFR.Get();
 

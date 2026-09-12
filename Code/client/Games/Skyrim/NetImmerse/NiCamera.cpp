@@ -20,7 +20,7 @@ bool NiCamera::WorldPtToScreenPt3(float* matrix, const NiRect<float>* port, cons
 static TiltedPhoques::Initializer s_Init(
     []()
     {
-        POINTER_SKYRIMSE(TWorldPtToScreenPt3, s_w2s, 70640, 70640);
+        POINTER_SKYRIMSE(TWorldPtToScreenPt3, s_w2s, 70640, 69270);
         s_WorldPtToScreenPt3 = s_w2s.Get();
     });
 

@@ -18,14 +18,14 @@ static TRenderPresent* RealRenderPresent = nullptr;
 
 BGSRenderer* BGSRenderer::Get()
 {
-    POINTER_SKYRIMSE(BGSRenderer*, s_instance, 411347, 411347);
+    POINTER_SKYRIMSE(BGSRenderer*, s_instance, 411347, 524728);
 
     return *(s_instance.Get());
 }
 
 ID3D11Device* BGSRenderer::GetDevice()
 {
-    POINTER_SKYRIMSE(ID3D11Device*, s_device, 411348, 411348);
+    POINTER_SKYRIMSE(ID3D11Device*, s_device, 411348, 524729);
 
     return *(s_device.Get());
 }

@@ -9,7 +9,7 @@ struct ImageSpaceModifierInstanceForm : public ImageSpaceModifierInstance
     static void Stop(TESImageSpaceModifier* apMod)
     {
         using TClearImageSpaceModifier = void(TESImageSpaceModifier*);
-        POINTER_SKYRIMSE(TClearImageSpaceModifier, s_clearImageSpaceModifier, 18573, 18573);
+        POINTER_SKYRIMSE(TClearImageSpaceModifier, s_clearImageSpaceModifier, 18573, 18188);
         return s_clearImageSpaceModifier.Get()(apMod);
     }
 

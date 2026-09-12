@@ -7,7 +7,7 @@ static TPlayDialogueOption* RealPlayDialogueOption = nullptr;
 
 MenuTopicManager* MenuTopicManager::Get() noexcept
 {
-    POINTER_SKYRIMSE(MenuTopicManager*, s_singleton, 401099, 401099);
+    POINTER_SKYRIMSE(MenuTopicManager*, s_singleton, 401099, 514959);
     return *s_singleton.Get();
 }
 

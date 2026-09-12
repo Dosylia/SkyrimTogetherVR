@@ -57,7 +57,7 @@ const GameArray<TintMask*>& PlayerCharacter::GetTints() const noexcept
 
 void PlayerCharacter::SetGodMode(bool aSet) noexcept
 {
-    POINTER_SKYRIMSE(bool, bGodMode, 404238, 404238);
+    POINTER_SKYRIMSE(bool, bGodMode, 404238, 517711);
     *bGodMode.Get() = aSet;
 }
 
@@ -247,7 +247,7 @@ static TiltedPhoques::Initializer s_playerCharacterHooks(
     {
         POINTER_SKYRIMSE(TPickUpObject, s_pickUpObject, 40533, 40533);
         POINTER_SKYRIMSE(TSetBeastForm, s_setBeastForm, 55497, 55497);
-        POINTER_SKYRIMSE(TAddSkillExperience, s_addSkillExperience, 40488, 40488);
+        POINTER_SKYRIMSE(TAddSkillExperience, s_addSkillExperience, 40488, 39413);
         POINTER_SKYRIMSE(TCalculateExperience, s_calculateExperience, 27244, 27244);
         POINTER_SKYRIMSE(TSetWaypoint, s_setWaypoint, 40535, 40535);
         POINTER_SKYRIMSE(TRemoveWaypoint, s_removeWaypoint, 40536, 40536);

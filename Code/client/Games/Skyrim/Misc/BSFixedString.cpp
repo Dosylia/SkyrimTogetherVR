@@ -11,7 +11,7 @@ BSFixedString::BSFixedString(const char* acpData)
 {
     TP_THIS_FUNCTION(TConstructor, void, BSFixedString, const char*);
 
-    POINTER_SKYRIMSE(TConstructor, s_constructor, 69161, 69161);
+    POINTER_SKYRIMSE(TConstructor, s_constructor, 69161, 67819);
 
     TiltedPhoques::ThisCall(s_constructor, this, acpData);
 }
@@ -34,7 +34,7 @@ void BSFixedString::Release() noexcept
 {
     TP_THIS_FUNCTION(TRelease, void, BSFixedString);
 
-    POINTER_SKYRIMSE(TRelease, s_release, 69192, 69192);
+    POINTER_SKYRIMSE(TRelease, s_release, 69192, 67847);
 
     TiltedPhoques::ThisCall(s_release, this);
 }

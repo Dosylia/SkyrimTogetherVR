@@ -101,7 +101,7 @@ uint32_t TESForm::GetChangeFlags() const noexcept
 
     POINTER_SKYRIMSE(InternalGetChangeFlags, internalGetChangeFlags, 35503, 35503);
 
-    POINTER_SKYRIMSE(Unk*, s_singleton, 403330, 403330);
+    POINTER_SKYRIMSE(Unk*, s_singleton, 403330, 516851);
 
     const auto pUnk = *(s_singleton.Get());
 

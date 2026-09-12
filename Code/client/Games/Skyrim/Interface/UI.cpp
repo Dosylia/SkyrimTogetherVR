@@ -10,7 +10,7 @@ static bool g_RequestUnpauseAll{false};
 
 UI* UI::Get()
 {
-    POINTER_SKYRIMSE(UI*, s_instance, 400327, 400327);
+    POINTER_SKYRIMSE(UI*, s_instance, 400327, 514178);
     return *s_instance.Get();
 }
 
@@ -122,21 +122,30 @@ static TiltedPhoques::Initializer s_s(
     []()
     {
         // pray that this doesnt fail!
+        // id 82082 doesn't exist in the official VR Address Library at all -
+        // it's only in the unverified crosswalk table (VRAddressOverrides.h),
+        // and this is a raw byte-patch (SwapCall) at a fixed offset into
+        // whatever it resolves to, which is exactly the kind of thing that
+        // silently corrupts unrelated code without crashing. This hook only
+        // changes behavior once connected to multiplayer (see the early
+        // return in UI_AddToActiveQueue_Hook) - disabled on VR until 82082 is
+        // verified against the real VR binary.
         #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> ProcessHook(82082);
-        #else
-        VersionDbPtr<uint8_t> ProcessHook(82082);
-        #endif
         TiltedPhoques::SwapCall(ProcessHook.Get() + 0x682, UI_AddToActiveQueue, &UI_AddToActiveQueue_Hook);
+        #endif
 
         // Ignore startup movie
         // TODO: Move me later.
+        // id 36548: same problem as 82082 above - not in the official VR
+        // Address Library, unverified crosswalk entry, raw byte patch at a
+        // fixed offset. Cosmetic (skips the intro movie) - disabled on VR
+        // rather than risk corrupting whatever real VR code sits at this
+        // offset instead.
         #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> MainInit(36548);
-        #else
-        VersionDbPtr<uint8_t> MainInit(36548);
-        #endif
         TiltedPhoques::Put<uint8_t>(MainInit.Get() + 0xFE, 0xEB);
+        #endif
 
         // Credits to Skyrim Souls RE for this fix.
         // Allows the favorites menu to be numbered during connect.
@@ -145,10 +154,12 @@ static TiltedPhoques::Initializer s_s(
         #else
         VersionDbPtr<uint8_t> FavoritesCanProcess(0); // TODOVR : find the correct id for VR
         #endif
-        TiltedPhoques::Put<uint16_t>(FavoritesCanProcess.Get() + 0x15, 0x9090);
+        // id unresolved on VR - Get() is null, guard so we don't patch address 0x15.
+        if (FavoritesCanProcess.Get())
+            TiltedPhoques::Put<uint16_t>(FavoritesCanProcess.Get() + 0x15, 0x9090);
 
         // Some experiments:
-        // POINTER_SKYRIMSE(TCallback, s_start, 13631, 13631);
+        // POINTER_SKYRIMSE(TCallback, s_start, 13631, 13530);
         // UIMessageQueue__AddMessage_Real = s_start.Get();
         // TP_HOOK(&UIMessageQueue__AddMessage_Real, UIMessageQueue__AddMessage);
 

@@ -5,7 +5,7 @@
 
 PlayerCamera* PlayerCamera::Get() noexcept
 {
-    POINTER_SKYRIMSE(PlayerCamera*, s_instance, 400802, 400802);
+    POINTER_SKYRIMSE(PlayerCamera*, s_instance, 400802, 514642);
     return *(s_instance.Get());
 }
 
@@ -34,14 +34,20 @@ bool PlayerCamera::WorldPtToScreenPt3(const NiPoint3& in, NiPoint3& out, float z
 void PlayerCamera::ForceFirstPerson() noexcept
 {
     TP_THIS_FUNCTION(TForceFirstPerson, void, PlayerCamera);
-    POINTER_SKYRIMSE(TForceFirstPerson, forceFirstPerson, 50790, 0);
+    // Defensive: ThisCall through an unresolved id would call a null pointer.
+    POINTER_SKYRIMSE(TForceFirstPerson, forceFirstPerson, 50790, 49858);
+    if (!forceFirstPerson.Get())
+        return;
     TiltedPhoques::ThisCall(forceFirstPerson, this);
 }
 
 void PlayerCamera::ForceThirdPerson() noexcept
 {
     TP_THIS_FUNCTION(TForceThirdPerson, void, PlayerCamera);
-    POINTER_SKYRIMSE(TForceThirdPerson, forceThirdPerson, 50796, 0);
+    // Defensive: ThisCall through an unresolved id would call a null pointer.
+    POINTER_SKYRIMSE(TForceThirdPerson, forceThirdPerson, 50796, 49863);
+    if (!forceThirdPerson.Get())
+        return;
     TiltedPhoques::ThisCall(forceThirdPerson, this);
 }
 

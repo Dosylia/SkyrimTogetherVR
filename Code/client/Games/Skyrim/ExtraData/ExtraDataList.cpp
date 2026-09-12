@@ -137,7 +137,7 @@ void ExtraDataList::SetEnchantmentData(EnchantmentItem* apItem, uint16_t aCharge
 bool ExtraDataList::HasQuestObjectAlias() noexcept
 {
     TP_THIS_FUNCTION(THasQuestObjectAlias, bool, ExtraDataList);
-    POINTER_SKYRIMSE(THasQuestObjectAlias, s_hasQuestObjectAlias, 12052, 12052);
+    POINTER_SKYRIMSE(THasQuestObjectAlias, s_hasQuestObjectAlias, 12052, 11913);
     return TiltedPhoques::ThisCall(s_hasQuestObjectAlias, this);
 }
 

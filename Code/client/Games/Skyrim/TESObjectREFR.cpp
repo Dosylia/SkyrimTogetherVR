@@ -107,7 +107,14 @@ TESObjectREFR* TESObjectREFR::GetByHandle(uint32_t aHandle) noexcept
 
     using TGetRefrByHandle = void(uint32_t & aHandle, TESObjectREFR * &apResult);
 
-    POINTER_SKYRIMSE(TGetRefrByHandle, s_getRefrByHandle, 17201, 17201);
+    // 17201 (formerly used for both SE and VR here) is a leftover from an
+    // earlier, unverified SE->VR crosswalk pass and doesn't exist at all in
+    // the official VR address library - it resolved to an unrelated function,
+    // which corrupted the stack on every call. 12204 is this function's real,
+    // officially-verified id (confirmed against both the VR Address Library
+    // CSV and CommonLibVR-NG's LookupReferenceByHandle, which uses the same
+    // id for SE/VR since address-library ids are stable across versions).
+    POINTER_SKYRIMSE(TGetRefrByHandle, s_getRefrByHandle, 17201, 12204);
 
     s_getRefrByHandle.Get()(aHandle, pResult);
 
@@ -352,7 +359,7 @@ void TESObjectREFR::MoveTo(TESObjectCELL* apCell, const NiPoint3& acPosition) co
 
     TP_THIS_FUNCTION(TInternalMoveTo, bool, const TESObjectREFR, uint32_t*&, TESObjectCELL*, TESWorldSpace*, const NiPoint3&, const NiPoint3&);
 
-    POINTER_SKYRIMSE(TInternalMoveTo, s_internalMoveTo, 56626, 56626);
+    POINTER_SKYRIMSE(TInternalMoveTo, s_internalMoveTo, 56626, 56227);
 
     TiltedPhoques::ThisCall(s_internalMoveTo, this, GetNullHandle(), apCell, apCell->worldspace, acPosition, rotation);
 }
@@ -373,7 +380,7 @@ void TESObjectREFR::PayGoldToContainer(TESObjectREFR* pContainer, int32_t aAmoun
 Lock* TESObjectREFR::GetLock() const noexcept
 {
     TP_THIS_FUNCTION(TGetLock, Lock*, const TESObjectREFR);
-    POINTER_SKYRIMSE(TGetLock, realGetLock, 20223, 20223);
+    POINTER_SKYRIMSE(TGetLock, realGetLock, 20223, 19818);
 
     return TiltedPhoques::ThisCall(realGetLock, this);
 }
@@ -410,7 +417,7 @@ ExtraContainerChanges::Data* TESObjectREFR::GetContainerChanges() const noexcept
 {
     TP_THIS_FUNCTION(TGetContainterChanges, ExtraContainerChanges::Data*, const TESObjectREFR);
 
-    POINTER_SKYRIMSE(TGetContainterChanges, s_getContainerChangs, 16040, 16040);
+    POINTER_SKYRIMSE(TGetContainterChanges, s_getContainerChangs, 16040, 15802);
 
     return TiltedPhoques::ThisCall(s_getContainerChangs, this);
 }
@@ -890,7 +897,7 @@ void TESObjectREFR::AddOrRemoveItem(const Inventory::Entry& arEntry, bool aIsSet
 void TESObjectREFR::UpdateItemList(TESForm* pUnkForm) noexcept
 {
     TP_THIS_FUNCTION(TUpdateItemList, void, TESObjectREFR, TESForm*);
-    POINTER_SKYRIMSE(TUpdateItemList, updateItemList, 52849, 52849);
+    POINTER_SKYRIMSE(TUpdateItemList, updateItemList, 52849, 51911);
     TiltedPhoques::ThisCall(updateItemList, this, pUnkForm);
 }
 
@@ -1103,7 +1110,7 @@ static TiltedPhoques::Initializer s_objectReferencesHooks(
         POINTER_SKYRIMSE(TRotate, s_rotateX, 19787, 19787);
         POINTER_SKYRIMSE(TRotate, s_rotateY, 19788, 19788);
         POINTER_SKYRIMSE(TRotate, s_rotateZ, 19789, 19789);
-        POINTER_SKYRIMSE(TActivate, s_activate, 19796, 19796);
+        POINTER_SKYRIMSE(TActivate, s_activate, 19796, 19369);
         POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 19708, 19708);
         POINTER_SKYRIMSE(TRemoveInventoryItem, s_removeInventoryItem, 19689, 19689);
         POINTER_SKYRIMSE(TPlayAnimationAndWait, s_playAnimationAndWait, 56206, 56206);
