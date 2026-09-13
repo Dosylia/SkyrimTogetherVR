@@ -199,16 +199,25 @@ void DebugService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
             if (!m_transport.IsOnline() && GetEnvironmentVariableA("LOCALAPPDATA", localAppData, sizeof(localAppData)))
             {
                 std::ifstream connectFile(std::string(localAppData) + "\\SkyrimTogetherVR\\connect.txt");
+                // Trim both ends (and a UTF-8 BOM from Notepad): a stray leading space made
+                // the address unresolvable (disconnect reason kCannotResolve).
+                const auto trim = [](std::string& s)
+                {
+                    if (s.rfind("\xEF\xBB\xBF", 0) == 0)
+                        s.erase(0, 3);
+                    s.erase(s.find_last_not_of(" \t\r\n") + 1);
+                    s.erase(0, s.find_first_not_of(" \t\r\n") == std::string::npos ? s.size() : s.find_first_not_of(" \t\r\n"));
+                };
                 std::string line;
                 if (connectFile && std::getline(connectFile, line))
                 {
-                    line.erase(line.find_last_not_of(" \t\r\n") + 1);
+                    trim(line);
                     if (!line.empty())
                         strncpy_s(s_address, line.c_str(), _TRUNCATE);
                     std::string password;
                     if (std::getline(connectFile, password))
                     {
-                        password.erase(password.find_last_not_of(" \t\r\n") + 1);
+                        trim(password);
                         m_transport.SetServerPassword(password.c_str());
                     }
                 }

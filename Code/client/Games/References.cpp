@@ -74,7 +74,8 @@ float CalculateRealDamage(Actor* apHittee, float aDamage, bool aKillMove) noexce
 void FadeOutGame(bool aFadingOut, bool aBlackFade, float aFadeDuration, bool aRemainVisible, float aSecondsToFade) noexcept
 {
     using TFadeOutGame = void(bool, bool, float, bool, float);
-    POINTER_SKYRIMSE(TFadeOutGame, fadeOutGame, 52847, 52847);
+    // VR: AE 52847 -> SE 51909 FadeOutGame (AE 52841-52845 sizes = SE 51903-51907; SE name/signature match) -> VR csv 0x903080
+    POINTER_SKYRIMSE(TFadeOutGame, fadeOutGame, 52847, 51909);
     fadeOutGame.Get()(aFadingOut, aBlackFade, aFadeDuration, aRemainVisible, aSecondsToFade);
 }
 

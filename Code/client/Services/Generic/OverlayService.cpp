@@ -334,6 +334,9 @@ void OverlayService::OnDisconnectedEvent(const DisconnectedEvent&) noexcept
 
 void OverlayService::OnWaitingFor3DRemoved(entt::registry& aRegistry, entt::entity aEntity) const noexcept
 {
+    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+        return;
+
     const auto* pPlayerComponent = m_world.try_get<PlayerComponent>(aEntity);
     if (!pPlayerComponent)
         return;
@@ -500,12 +503,24 @@ void OverlayService::OnNotifyPlayerHealthUpdate(const NotifyPlayerHealthUpdate& 
 
 void OverlayService::OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcept
 {
+    if (!m_pOverlay) // no overlay on VR; ExecuteAsync on a null OverlayApp still reaches CefListValue::Create and CHECK-crashes
+    {
+        Utils::ShowHudMessage(acEvent.IsLeader ? "Skyrim Together: party created" : "Skyrim Together: joined party");
+        return;
+    }
+
     if (acEvent.IsLeader)
         m_world.GetOverlayService().GetOverlayApp()->ExecuteAsync("partyCreated");
 }
 
 void OverlayService::OnPartyLeftEvent(const PartyLeftEvent& acEvent) noexcept
 {
+    if (!m_pOverlay) // no overlay on VR (see OnPartyJoinedEvent)
+    {
+        Utils::ShowHudMessage("Skyrim Together: left party");
+        return;
+    }
+
     m_world.GetOverlayService().GetOverlayApp()->ExecuteAsync("partyLeft");
 }
 

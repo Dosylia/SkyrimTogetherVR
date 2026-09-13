@@ -825,6 +825,8 @@ static TInitiateMountPackage* RealInitiateMountPackage = nullptr;
 
 bool Actor::InitiateMountPackage(Actor* apMount) noexcept
 {
+    if (!RealInitiateMountPackage) // VR: hook target 37905 unresolved, pointer stays null
+        return false;
     return TiltedPhoques::ThisCall(RealInitiateMountPackage, this, apMount);
 }
 
@@ -1130,6 +1132,8 @@ void* TP_MAKE_THISCALL(HookPickUpObject, Actor, TESObjectREFR* apObject, int32_t
 
 void Actor::PickUpObject(TESObjectREFR* apObject, int32_t aCount, bool aUnk1, float aUnk2) noexcept
 {
+    if (!RealPickUpObject) // VR: hook target 37521 unresolved, pointer stays null
+        return;
     TiltedPhoques::ThisCall(RealPickUpObject, this, apObject, aCount, aUnk1, aUnk2);
 }
 
@@ -1249,6 +1253,8 @@ bool TP_MAKE_THISCALL(HookSpeakSoundFunction, Actor, const char* apName, uint32_
 
 void Actor::SpeakSound(const char* pFile)
 {
+    if (!RealSpeakSoundFunction) // VR: hook target 37542 unresolved, pointer stays null
+        return;
     uint32_t handle[3]{};
     handle[0] = -1;
     TiltedPhoques::ThisCall(RealSpeakSoundFunction, this, pFile, handle, 0, 0x32, 0, 0, 0, 0, 0, 0, 0, 1, 1);

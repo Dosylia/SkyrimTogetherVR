@@ -142,11 +142,15 @@ void PlayerCharacter::PayCrimeGoldToAllFactions() noexcept
 
 void PlayerCharacter::SetWaypoint(NiPoint3* apPosition, TESWorldSpace* apWorldSpace) noexcept
 {
+    if (!RealSetWaypoint) // VR: hook target 40535 unresolved, pointer stays null
+        return;
     return TiltedPhoques::ThisCall(RealSetWaypoint, this, apPosition, apWorldSpace);
 }
 
 void PlayerCharacter::RemoveWaypoint() noexcept
 {
+    if (!RealRemoveWaypoint) // VR: hook target 40536 unresolved, pointer stays null
+        return;
     return TiltedPhoques::ThisCall(RealRemoveWaypoint, this);
 }
 

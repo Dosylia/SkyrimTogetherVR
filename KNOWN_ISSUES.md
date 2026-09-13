@@ -103,6 +103,150 @@ internal functions STR used.
 
 **Real fix:** find the SE ids for AE 38533/37677 and use them directly.
 
+### Audit: 73 unverified crosswalk overrides still used by live code (2026-09-13)
+Three connected-mode crashes today came from bare `{ id, addr }` entries in `VRAddressOverrides.h`
+(38533, 35503, 20460). A scan found 73 ids that code uses, that are not in the VR CSV, and whose
+override is a bare crosswalk value. None matched an independent re-derivation, so treat all of
+them as wrong.
+
+New matcher (`scratchpad/align.py`): align the AE function-size sequence (±8 ids) against SE sizes
+at offsets near the nearest known AE→SE deltas. Rule `>=10/16 matches and runner-up <=4` scored
+**153/153** on known pairs with the target's own anchor hidden.
+
+Applied (override value replaced, not yet dump-checked):
+
+| AE | SE | VR | Function |
+|---|---|---|---|
+| 19075 | 18606 | `0x27a4c0` | TESObjectCELL GetCOCPlacementInfo |
+| 19846 | 19418 | `0x2ad090` | TESObjectREFR::GetHandle |
+| 37511 | 36511 | `0x5ee4f0` | PayGoldToContainer |
+| 38899 | 37943 | `0x640f30` | EquipManager::UnEquipAll |
+| 58377 | 57804 | `0xa2e820` | hkbBehaviorGraph HandleEvents |
+| 58378 | 57805 | `0xa2ea40` | hkbBehaviorGraph sub |
+| 68221 | 66964 | `0xc413f0` | CRC hash stub |
+
+Fixed individually earlier: 20460 → SE 20026, 35503 → SE 34582.
+
+Fixed from the 15:15 two-player crash dump (both checked in the dump):
+- **35993 → SE 35100, VR `0x59ef30`:** `BGSLoadGameBuffer` ctor used by `BGSLoadFormBuffer`.
+  The old `0x5ce330` crashed in `TESNPC::Deserialize` when the second player joined. The
+  automatic matcher chose 35101 because AE 35992 has no SE twin, so anchor checks still matter.
+- **37717 → SE 36707, VR `0x602f40`:** `SetPlayerTeammate`. The disassembly toggles boolBits
+  `0x4000000` at `0xE0` and `0x80` at `0x1FC`.
+
+Fixed from the 15:23 two-player crash (`rip 0` in `Actor::Create` from `OnCharacterSpawn`): the
+Character ctors 40245/40246 had been removed as unverified hook targets, so `RealCharacterConstructor`
+was null. Both are now resolved and checked in the dump:
+- **40245 → SE 39171, VR `0x69bec0`:** `Character()`. Passes `dl=1` to the Actor ctor.
+- **40246 → SE 39172, VR `0x69bfc0`:** `Character(uint8)`. Forwards `dl`; the 0x2B0 allocator calls it.
+
+Both install the Character vtables starting at `0x1416d6de0`. The pass-through hooks on them are
+live again. `s_characterDtor` (37175) is declared but never assigned or hooked.
+
+Fixed from the 15:51 crash, where the remote player spawned and then `SetWeaponDrawn` crashed:
+- **38979 → SE 38023, VR `0x645240`:** `ActorState::SetWeaponDrawn`. The disassembly writes the
+  3-bit `weaponState` at `actorState2`+0xC, bit 5.
+- **Animation sync, found proactively.** The PerformAction hook had been removed and the rest was
+  crosswalk garbage:
+
+  | AE | SE | VR | Function |
+  |---|---|---|---|
+  | 38949 | 37996 | `0x643f20` | `ActorMediator::PerformAction` (hook is live again) |
+  | 38953 | 37999 | `0x644160` | `PerformComplexAction` |
+  | 39004 | 38048 | `0x646160` | `ApplyAnimationVariables` |
+  | 403566 | 517058 | `0x2febcb0` | Animation-variables global |
+  | 403567 | 517059 | `0x2febcb8` | ActorMediator singleton |
+
+  VR `PerformAction` calls the other two and loads `[0x142febcb0]`; its callers load `[0x142febcb8]`.
+
+**Useful source: the repo's git history has SE 1.5.97 raw addresses** from before the AE move. Commit
+`5da6679e` still has them in `Games/Animation.cpp`. Converting SE address → SE id (via
+`se_ae_offsets.csv`) → VR (via addrlib or the CSV) needs no guessing. Mining older commits
+should resolve many of the remaining unverified ids.
+
+**Git-history mining applied (2026-09-13).** Script: `scratchpad/mine.py`. It reads every historical
+`POINTER_SKYRIMSE(..., 0x14XXXXXXX)` line in `Code/client`, matches it to today's id by file and
+variable, keeps addresses that are exact SE starts in `se_ae_offsets.csv`, then maps SE id → VR.
+It reproduces every dump-verified result (35993, 38953, 39004, 58377/8, 68221, 403566/7).
+
+Applied, not yet dump-checked:
+
+| AE | SE | VR | Function |
+|---|---|---|---|
+| 12401 | 12274 | `0x1454a0` | `Lock::SetLock` (crashed the second player's `OnAssignObjectsResponse`) |
+| 13718 | 13620 | `0x17c4e0` | GetCellFromCoordinates |
+| 14529 | 14383 | `0x19f970` | GetItemCount |
+| 14953 | 14775 | `0x1b0900` | TESTexture ctor |
+| 19364 | 18949 | `0x28ccd0` | PushEvent |
+| 24987 | 24468 | `0x37f980` | `TESQuest::SetStopped` |
+| 25004 | 24482 | `0x3803d0` | `TESQuest::SetStage` |
+| 27040 | 26454 | `0x3eada0` | CreateTints |
+| 34401 | 33623 | `0x550540` | CastSpell |
+| 54425 | 53604 | `0x976690` | RegisterSink |
+| 70639 | 70273 | `0xcd5180` | NiCamera W2S |
+| 70717 | 69335 | `0xcaef60` | CreateTexture |
+| 76207 | 74481 | `0xd8a900` | GetObjectByName |
+| 82074 | 79937 | `0xf1a3b0` | IsMenuOpen |
+| 414675 | 527752 | `0x3423e20` | NiMaskedShader RTTI |
+
+Not applied:
+- `AnimationExperiments.cpp` entries, which look experimental.
+- Ambiguous name matches: 35993's second hit, 57185.
+- 36544 winMain and 37175 (unused dtor).
+- Globals with no VR mapping.
+
+No SE address in history, still open: ExtraDataList setters, 16113, 18518, 18563, 19075*, 19846*,
+21600, combat 33235/33261/33285, 37511*, 37717*, 38533, 38899*, 38979*, 47196, 52627, 52847,
+82088, globals 382393/382400/400312/404125/405282/406126/406160/414391. Starred ids were already
+fixed another way.
+
+**Removed hook targets are also called directly.** The second player crashed in
+`OnAssignObjectsResponse` → `TESObjectREFR::LockChange` → `RealLockChange` (null, `rip 0`).
+- 19512 → SE 19110 (`AddLockChange`, CommonLib `RELOCATION_ID(19110, 19512)`), VR `0x297310`.
+  Its hook is live again.
+- Null guards added (skip on VR) in `Actor::InitiateMountPackage` (37905), `Actor::PickUpObject`
+  (37521), `Actor::SpeakSound` (37542), `PlayerCharacter::SetWaypoint` (40535) and
+  `RemoveWaypoint` (40536). Their hook targets are still unresolved.
+- Git history and size alignment agree for these still-disabled hooks: 14375→14257, 19708→19282,
+  34140→33359, 36291→35402, 37313→36323, 40412→39341, 36564→35565. Enable after dump verification.
+- Equip hooks 38928-38935 differ by one between the two methods, because AE inserted a function.
+  They need a dump check. Direct equip calls already use CommonLib SE ids.
+
+**Remote player shows up nearly naked** (seen 2026-09-13): the torch syncs, but most armour doesn't.
+Suspects:
+- `ExtraContainerChanges::GetArmor` returns nullptr on VR.
+- `Actor::IsWearingBodyPiece` returns true on VR.
+- ExtraDataList setters are unresolved (11612 worn data, 11616 health, 11619 charge, 11620 soul,
+  11822 poison, 12060 enchantment).
+
+**Disabled on VR: `FaceGenSystem::Update` (remote-player face tints).** It needs 76207, 414675,
+70717, 27040 and 14953, all unverified. Remote players keep the base NPC skin and tint colours.
+
+**Still unresolved:** ExtraDataList setters 11612/11616/11619/11620/11822/12060, lock 12401,
+13718, 14529, 14953, 15002/15006, 18518, 18563, 19364 PushEvent, 21600 IsFirstPerson (15/16 but
+runner-up 5), quests 24987/25004, 27040 CreateTints, combat 32802/33235/33261/33285,
+34401 CastSpell, 35993, 36544, 37147, 37175, 37717 SetPlayerTeammate, animation
+38952/38953/38979/39002/39004, 47196, 52627, 52847, 54425 RegisterSink, 57185, 59310, 60079,
+63362/63372/63591, 70639, 70717, 76207, 82074/82088. Globals (382393, 382400, 400312, 401100,
+403566-403568, 403988, 404125, 405282, 406126, 406160, 414391, 414675) can't be size-matched.
+Note that 400188 (`0x1f81900`) was confirmed correct via a crash register.
+
+### Intermittent: script event sent to a freed temporary reference during cell attach (2026-09-13)
+Crash seen once, about 35 seconds after loading a save, probably before connecting (no connection
+lines in the log). The path was TES grid update -> TESObjectCELL attach -> `SkyrimVM::RelayEvent`
+-> `HandlePolicy::HandleIsType(type 0x3D)` on handle `0xFFFFFF000FD7`. Temporary form
+`0xFF000FD7` was still registered, but its vtable and virtual function pointers pointed into heap
+memory, so it had been freed. The dump has no heap, so the form's identity is unknown.
+EngineFixesVR `formcaching` (`hk_GetFormByID`) wraps the form lookup and is a candidate (stale
+cache entry). No Skyrim Together hook is known to be involved.
+
+Ruled out: the `HookFormAllocate` size match. A scan of all 6096 allocator call sites in the VR
+image shows Character allocated at 0x2B0 (VR 0x3882a5 -> ctor 0x69bfc0) and PlayerCharacter at
+0x12D8 (VR 0x5beca6). Both equal our `sizeof(Actor)`/`sizeof(PlayerCharacter)`, so ExActor
+extensions get their extra space on VR.
+
+If it repeats, take a dump that includes the heap to identify the form.
+
 ### FIXED: `TESForm::GetChangeFlags` crashed while syncing remote actors (2026-09-13)
 **File:** `Code/client/Games/Forms.cpp`
 
