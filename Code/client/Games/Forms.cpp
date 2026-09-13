@@ -91,15 +91,25 @@ void TESForm::SetSkipSaveFlag(bool aSet) noexcept
 
 uint32_t TESForm::GetChangeFlags() const noexcept
 {
+    // BGSSaveLoadGame; unk330 is saveLoadChanges (BGSSaveLoadChangesMap*).
+    // VR inserts 0x1FE bytes of load-order index tables in place of savedFiles, so the
+    // member sits at 0x500 there (seen in VR BGSSaveLoadGame::GetChange: mov rcx,[rcx+500h]).
     struct Unk
     {
+#ifdef SKYRIMVR
+        uint8_t unk0[0x500];
+#else
         uint8_t unk0[0x330];
+#endif
         void* unk330;
     };
 
     TP_THIS_FUNCTION(InternalGetChangeFlags, bool, void, uint32_t formId, ChangeFlags& changeFlags);
 
-    POINTER_SKYRIMSE(InternalGetChangeFlags, internalGetChangeFlags, 35503, 35503);
+    // VR: AE 35503 -> SE 34582 (neighbours AE 35505/35507 = SE 34584/34586, function sizes
+    // match 0x70/0xA0/0xE0), VR 0x57f650; checked in dump: (this, formId, ChangeFlags&) -> bool.
+    // The old crosswalk value for 35503 (0x5b2360) crashed while syncing remote actors.
+    POINTER_SKYRIMSE(InternalGetChangeFlags, internalGetChangeFlags, 35503, 34582);
 
     POINTER_SKYRIMSE(Unk*, s_singleton, 403330, 516851);
 

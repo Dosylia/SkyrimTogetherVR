@@ -53,7 +53,7 @@ namespace GameplayFormulas
 float CalculateRealDamage(Actor* apHittee, float aDamage, bool aKillMove) noexcept
 {
     using TGetDifficultyMultiplier = float(int32_t, int32_t, bool);
-    POINTER_SKYRIMSE(TGetDifficultyMultiplier, s_getDifficultyMultiplier, 26503, 26503);
+    POINTER_SKYRIMSE(TGetDifficultyMultiplier, s_getDifficultyMultiplier, 26503, 25920); // VR: SE 25920 "float GetDifficultyMultiplier(uint32_t, ActorValue, bool isPlayer)" (vr_address_tools database.csv, status 4; VR CSV 0x3d0a80; size 0x50 = AE 26503). The crosswalk value 0x3edce0 crashed on the first melee hit
 
     bool isPlayer = apHittee == PlayerCharacter::Get();
 
@@ -135,7 +135,7 @@ static TiltedPhoques::Initializer s_referencesHooks(
     {
         POINTER_SKYRIMSE(TCheckForNewPackage, s_checkForNewPackage, 39114, 39114);
         POINTER_SKYRIMSE(TInitFromPackage, s_initFromPackage, 38959, 38959);
-        POINTER_SKYRIMSE(TSetCurrentPickREFR, s_setCurrentPickREFR, 51093, 51093);
+        POINTER_SKYRIMSE(TSetCurrentPickREFR, s_setCurrentPickREFR, 51093, 50164); // VR: AE 51093 -> SE 50164 Console::SetSelectedRef (se_ae + database.csv)
 
         RealCheckForNewPackage = s_checkForNewPackage.Get();
         RealInitFromPackage = s_initFromPackage.Get();

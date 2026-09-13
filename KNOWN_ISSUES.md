@@ -88,6 +88,35 @@ Last updated: 2026-09-12
 
 ## Temporary workarounds (functionality disabled, not fixed)
 
+### Connected-mode actor calls routed through Papyrus natives on VR (2026-09-13)
+**File:** `Code/client/Games/Skyrim/Actor.cpp`
+
+The first connect to a server crashed in `PlayerService::OnServerSettingsReceived`
+-> `Actor::SetPlayerRespawnMode` -> `SetNoBleedoutRecovery`. It called the
+crosswalk value for untranslated AE id 38533 (`0x664750`) and faulted 9 bytes
+in. On VR, `SetNoBleedoutRecovery` now calls the Papyrus native
+`Actor.SetNoBleedoutRecovery`. `SetFactionRank` (37677, interpolated to
+`0x600220`, never checked against a dump) now calls `Actor.SetFactionRank` the
+same way. The native addresses come from the VM's registration table, so they
+are correct. The natives may do slightly more (argument checks) than the
+internal functions STR used.
+
+**Real fix:** find the SE ids for AE 38533/37677 and use them directly.
+
+### FIXED: `TESForm::GetChangeFlags` crashed while syncing remote actors (2026-09-13)
+**File:** `Code/client/Games/Forms.cpp`
+
+About 50 seconds into a connected session, a remote Mudcrab spawn crashed at VR
+`0x5b238d` (`rcx=0x800000000`). There were two bugs:
+- **Wrong function:** id 35503 used the crosswalk value `0x5b2360`. AE 35503
+  is really SE 34582 (`BGSSaveLoadChangesMap::GetChangeFlags`), VR
+  `0x57f650`. Neighbour ids and function sizes match, and the dump
+  disassembly matches the `(this, formId, ChangeFlags&) -> bool` signature.
+- **Wrong offset:** the `BGSSaveLoadGame` singleton (SE 516851) keeps
+  `saveLoadChanges` at `+0x500` on VR, not `+0x330`. VR
+  `BGSSaveLoadGame::GetChange` reads `[rcx+500h]`. CommonLibVR-NG's `0x1fe`
+  VR offset for `RUNTIME_DATA2` is misleading: the real alignment is `0x200`.
+
 ### `Projectile::LaunchData` fields not synced on VR
 **File:** `Code/client/Games/Skyrim/Projectiles/Projectile.cpp` (`ReadLaunchDataFormIds`)
 
@@ -299,6 +328,198 @@ have not been confirmed correct against real VR disassembly:
   (`0x580` HMD, `0x490` left wand, `0x4F8` right wand) used to capture
   head/hand transforms for pose sync. These are typical/plausible offsets,
   not confirmed against the actual VR `PlayerCharacter` layout.
+
+## Hook bisection results + PAPYRUS_FUNCTION table was empty on VR (2026-09-13)
+
+**Bisect tool:** `FunctionHookManager::Add` numbers every hook and writes
+`%LOCALAPPDATA%\SkyrimTogetherVR\hook_list.txt`. If `hook_bisect.txt` exists there, only listed
+indices (`N`, `A-B`) and `keep 0xDETOUR` addresses are installed. Get `HookFormAllocate`'s
+address from the PDB and always `keep` it (actor extensions depend on it). Lessons: enabling
+**small subsets** produced new, unrelated crashes (hooks are coupled: save/load pairs, VM
+update ↔ script binding). **Removing a small group from the full set** gives clean results.
+
+**Results:**
+- **Only `HookFormAllocate`:** the save loads and plays normally.
+- **Everything except `SetPosition` (17) + `RotateX/Y/Z` (61–63):** no physics crash; the player
+  loads in. **The physics use-after-free is in one of those four.** Still narrowing.
+
+**Separate bugs found on the way:**
+- `BSScript::Variable::Reset` (104296) had crosswalk `0x13bc0b1` (mid-function) → exception
+  inside noexcept → `std::terminate`. Now VR `0x126f1c0` (AE 104297 ↔ SE 97509 both 0x290 → 104296
+  = SE 97508). `IObjectHandlePolicy::Get` now asks the VM on VR instead of the unverified global 414391.
+- **`HookRegisterPapyrusFunction` (104788) had no VR address**, so PapyrusService's name→native
+  table was empty and **every `PAPYRUS_FUNCTION` was null** (crash: `HookActivate` →
+  `GetOpenState` → call 0). Fixed on VR by hooking the VM vtable's `BindNativeMethod` (slot 0x18)
+  from inside `HookBindEverythingToScript`, before the game registers its natives.
+
+## SOLVED: physics use-after-free = Actor vtable has a SECOND VR-only slot (2026-09-13)
+
+Bisect result: all hooks except `RotateX/Y/Z` still crashed, so **`HookSetPosition` is the
+culprit**. For non-player actors it calls `apThis->SetPosition(pos, false)`, a virtual. From a
+VR Character vtable dump (`VTABLE_Character` VR `0x16d6de0`):
+- VR `0xA8` `0x5dad60` (player override `0x6f6020`) = DetachCharController (SE 0xA7, +1)
+- VR `0xA9` `0x5dc110` = RemoveCharController (SE 0xA8, +1); it reads `[rcx+F0]` currentProcess
+- **VR `0xAA` `0x5dc170` = VR-only, and it calls slot 0xA9**
+- **VR `0xAB` `0x5dc380` = SetPosition(pos, bool)** (SE 0xA9, **+2**): it calls
+  `TESObjectREFR::SetPosition` `0x2a8010`
+
+With only the `TESObjectREFR` insertion, our `SetPosition` went to VR `0xAA`, which removed the
+character controller of every NPC whose position was set → dangling `bhkCharRigidBodyController`
+in the physics world. Fixed: `Actor.h` declares a VR-only `VR_Unk_AA()` before `SetPosition`.
+
+**Not verified:** Actor virtuals declared after SetPosition that our code calls (`Resurrect`,
+`PayFine`, `SetRefraction`, `AttachArrow`, `PutCreatedPackage`, `UpdateAlpha`, `MoveToHigh`...)
+now assume exactly +2 on VR. Check any of them against the VR vtable before trusting them.
+The bisect file has been disabled (`hook_bisect.txt.disabled`), so all hooks run again.
+
+## (superseded) player physics controller use-after-free during save load (2026-09-13)
+
+The current crash: Havok post-simulation callback (`bhkWorldM`/`ahkpWorld` `postSimCb`) → a
+`bhkCharRigidBodyController` virtual call at `0x140e48638` on an object whose vtable slot
+holds a heap pointer, i.e. freed memory. Crash Logger's stack walk ties it to the player
+("Queen Emma", `PlayerWorldNode`). **Crash Logger VR then crashes in its own symbol code and
+calls `TerminateProcess`**, which is why several runs died with no log or dump.
+
+Ruled out so far:
+- **Allocation sizes:** the VR player is 0x12D8 and Characters 0x2B0, confirmed by
+  `mov edx, 12D8h` / `2B0h` before calls to MemoryManager::Allocate (VR `0xc3d0e0`).
+  `HookFormAllocate` is committed before game main. Other 0x2B0 allocations are memory-heap
+  objects at init (harmless).
+- **Engine Fixes VR `MemoryManager`:** it's `false`.
+- **UpdateReference3D hook signature:** the target only uses `rcx`.
+- **The 27 interpolated addresses:** 17 have names in `1.5.97_comments.csv`, and all match our
+  use (RemoveItem, GetContainer, ReadFormIdFromBuffer, DropObject,
+  SkyrimVM::ProcessRegisteredUpdates, ...).
+
+Found along the way: **before the VR vtable shift was added, `Actor::SetPosition` (SE slot 0xA9)
+called VR slot 0xA9 = SE 0xA8 `RemoveCharController`** for every NPC position change
+(`HookSetPosition`). It's fixed by the shift, but it shows how wrong slots silently break physics.
+
+Next step: the watcher now has hardware breakpoints on VR `PlayerCharacter::DetachCharController`
+(`0x1406f6020`, vtable slot 0xA8) and `RemoveCharController` (`0x1405dc110`, 0xA9, filtered to
+the player), to log who frees the player's controller.
+
+## Silent exits = CEF CHECK failures: the overlay doesn't exist on VR (2026-09-13)
+
+After the layout port, the game started dying during save load with **no log, no dump, no
+WER event**. A debugger watcher (`cdb -p`, breakpoints on `TerminateProcess` /
+`RtlExitUserProcess`, second-chance handlers) caught it: `int3` + `ud2` inside `libcef.dll`,
+Chromium's `IMMEDIATE_CRASH` for a failed `CHECK`. It was called from
+`OverlayService::RunDebugDataUpdates` → `CefListValue::Create`. On VR `OverlayService::Create`
+never runs (it's driven by the D3D11/renderer hooks that are disabled on VR), so
+`m_pOverlay` is null and **CEF was never initialized**. Any CEF API call then kills the process.
+Our vectored handler only reports AV/GS, so none of this was logged. The path became
+reachable once the player singleton and layouts were right, and `OnUpdate` started running.
+
+**Fix:** every `OverlayService` method that touches CEF now returns early when `m_pOverlay` is
+null. `PartyService::OnPartyInfo`/`OnPartyInvite` still update party state and only skip the
+UI part. `InputService::SetUIActive` checks `GetOverlayApp()`.
+
+**Consequence:** Skyrim Together's UI (connect dialog, party, chat, debug data) is
+completely absent on VR. Connecting to a server will need another route (console/command,
+or a VR-native UI). Any new crash inside `libcef.dll` means another unguarded CEF call.
+
+**Tooling note:** the watcher command file must handle `bpe` (continue on first chance). A
+bare break leaves `cdb` at a prompt, it reads EOF, quits, and **kills the game**.
+
+## Struct layouts: VR uses the SE layout, not AE (2026-09-13)
+
+Crash in `DiscordService::OnLocationChangeEvent`: `[player+0xAD0]` treated as a BGSLocation.
+Skyrim Together's game structs are AE layouts, and **Skyrim VR's are SE layouts plus VR
+additions**:
+- **`ExtraDataList`** got a `virtual ~ExtraDataList()` for AE in commit **553793fc**. That
+  vtable shifts every later member of `TESObjectREFR`, `Actor` and `TESObjectCELL` (which embed
+  it) by 8. It is now `#ifndef SKYRIMVR`. On VR: `TESObjectREFR` 0x98, `Actor` 0x2B0,
+  `TESObjectCELL` 0x140. The Actor asserts use the pre-AE values from that commit, and the cell
+  asserts match CommonLibVR-NG's SE/VR column.
+- **`TESObjectREFR` vtable:** VR has an extra virtual at slot 0x82 (`AttachWeapon`), so
+  every later virtual is one slot higher. A VR-only `VR_AttachWeapon()` is declared after
+  `sub_81`.
+- **`PlayerCharacter`** is far bigger on VR. New `#else` layout from CommonLibVR-NG: objectives
+  B70, skills 10B0, location 11C8, difficulty 11F4, tints 1208/1220, size **0x12D8**. The SE
+  equivalents match this file's pre-AE layout exactly.
+- **`Projectile`** padded to absolute AE offsets. On VR, `fPower` is 0x188 (was 0x190, and it
+  gets written).
+- **Why it matters beyond field reads:** `HookFormAllocate` (`Memory.cpp`) enlarges an
+  allocation to append `ActorExtension` only when the size equals `sizeof(Actor)` /
+  `sizeof(PlayerCharacter)`, while `GetExtension()` casts every Character form regardless. With
+  AE sizes, no VR actor got an extension, and every extension access read/wrote past the real
+  object into the heap.
+
+**Not yet audited:** other structs with AE-era hand-written offsets (`AIProcess`,
+`ActorExtension` consumers, `TESNPC`, `BGSEncounterZone`, menus...), and virtual slot shifts
+in `Actor`'s own vtable beyond the `TESObjectREFR` one (CommonLibVR-NG annotates
+"SE/AE 0x93, VR 0x94" etc. — it looks like the same single shift, but that isn't verified).
+
+## Globals/singletons from the crosswalk are wrong too (2026-09-13)
+
+The first in-world crash: `DiscoveryService::VisitCell` → `TESObjectREFR::GetWorldSpace` with
+`this = 0xffffffff007c9be0`. `PlayerCharacter::Get()` used AE id 401069 → crosswalk
+`0x1c3cbd8`, and that address held exactly that garbage. Our code's global ids use an
+older AE numbering than CommonLib (401069 vs CommonLib's 403521 for the player), so neither
+CommonLibVR-NG ids nor `se_ae.csv` (functions only) map most of them.
+
+**Fixed:**
+- **Singletons, from CommonLibVR-NG names:** player 401069 → `0x2feb9f0` (VR CSV SE 517014);
+  TES 400441 → `0x2feb6f8` (SE 516923).
+- **INI/game settings, found in the dump:** search for the name string, then for a pointer to
+  it. The Setting is `[vtable][value][name]`, so the value is 8 bytes before the name pointer.
+  `bAlwaysActive:General` 380768 → `0x1eabf30` (value 1). **This one was WRITTEN every
+  frame** by `TiltedOnlineApp::Update`, corrupting memory at the old address.
+  `iDifficulty:GamePlay` 381472 → `0x1eaef68` (2). `fAIMinGreetingDistance` 370892 →
+  `0x1e96c58` (85.0).
+
+**Still on crosswalk values (read-only uses, unverified):** 400312 null handle; 403566/403567
+ActorMediator; 404125 AI timer; 406126/406160 HUD world-to-cam matrix and viewport;
+414391 script object handle policy; AnimationExperiments 401100/403568/403988; the
+CombatView debug globals. Any of these can feed garbage into logic; resolve them by name
+the same way when they surface.
+
+## Third bad-address class: untranslated AE ids that exist in the VR CSV as SE ids (2026-09-13)
+
+The save got as far as spawning actors, then crashed in `TESObjectREFR`'s
+`HookAddInventoryItem` with item pointer `0x29`. Its id, 37525, was never translated,
+but **37525 is also a valid SE id in the official VR CSV** (`0x62a180`, a different
+function). So it resolved cleanly to the wrong function. None of the earlier audits
+caught this, because they only looked at untranslated ids that were *missing* from the
+CSV. There were 9 such ids:
+- **Fixed by name** (`se_ae.csv` + `database.csv`): 13894 → SE 10878
+  `BGSDefaultObjectManager::GetSingleton`; 19800 → 19373 `TESObjectREFR::Enable`;
+  51093 → 50164 `Console::SetSelectedRef`; 52933 → 52050 `DebugNotification`.
+- **Fixed from the dump:** 19789 `s_rotateZ` → SE 19362, VR `0x2a7f00` (override). It
+  compares `[rcx+50h]`, while its siblings X/Y compare `+48h`/`+4Ch`.
+- **Unknown, set to 0 on VR** (null-guarded): 37525 AddInventoryItem hook, 37527
+  GetGoldAmount (returns 0), 33282 sortTargetSelectors, 37757 GetDetectionState (debug view).
+
+Because the override table only applies to ids *not* in the CSV, these fixes change the
+VR id in `POINTER_SKYRIMSE` itself (to the SE id, which uses the CSV's own correct entry),
+or use a new SE-id override key.
+
+## Save-load crash: BSThread hooks were on the wrong functions (2026-09-13)
+
+Loading a save crashed in `Base::SetThreadName` with name = `0x768`, called from game
+`0xc80633`. The BSThread hooks used crosswalk values, and both were wrong:
+- `68261 → 0xc80600` (hooked as `BSThread::Initialize`) is a small lock/flag
+  function. **The hook is now disabled on VR** (it only named threads).
+- `69066 → 0xca3800` (Jump to `Hook_SetThreadName`) was a destructor, which the Jump
+  overwrote. The real VR `BSThreadUtils::SetThreadName` is **`0xc6b170`**, found by
+  searching the decrypted game (in a dump) for `b9 88 13 6d 40` (`mov ecx,406D1388h`).
+  Two hits; this one builds `THREADNAME_INFO{0x1000, name, id, 0}` from `(ecx, rdx)`, is
+  0x40 bytes like AE 69066, and `addrlib.csv` lists it as SE 67740. The other hit,
+  `0xa122a8`, is probably Havok's.
+- An earlier session concluded `Hook_SetThreadName` was "required by the custom loader".
+  That was almost certainly the MinHook disable-all bug (mass-nulling ids disabled every
+  hook). The game has been naming threads natively all along, because the Jump was
+  elsewhere.
+
+Audit of raw patches still using unverified ids on VR, now neutralised:
+`Projectile.cpp` 34452 (a `Jump` at +0x374; its comment claimed it was neutralised but
+both `#ifdef` branches used the id), `BSInputDeviceManager.cpp` 68617 (hook only forwards
+rcx/xmm1, and does nothing on VR), `BSRandom.cpp` 68276/14774 (falls back to `aMin`).
+
+`CrashHandler::RemovePreviousDump` used to delete any file whose path contained "crash".
+Dumps now land in the **game folder** (spoofed `GetModuleFileName`), so it's restricted
+to `crash_UTC_*.dmp`. Look for new dumps in `F:\...\SkyrimVR\`.
 
 ## Main menu with no text = data load blocked by a plugin popup (2026-09-13)
 

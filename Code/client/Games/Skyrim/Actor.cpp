@@ -304,6 +304,15 @@ void Actor::SetEssentialEx(bool aSet) noexcept
 
 void Actor::SetNoBleedoutRecovery(bool aSet) noexcept
 {
+#ifdef SKYRIMVR
+    // AE 38533 has no SE/VR mapping; the crosswalk value 0x664750 crashed on connect
+    // (PlayerService::OnServerSettingsReceived -> SetPlayerRespawnMode). Go through the
+    // Papyrus native Actor.SetNoBleedoutRecovery instead, whose address comes from the
+    // VM's own registration table.
+    PAPYRUS_FUNCTION(void, Actor, SetNoBleedoutRecovery, bool);
+    s_pSetNoBleedoutRecovery(this, aSet);
+    return;
+#endif
     TP_THIS_FUNCTION(TSetNoBleedoutRecovery, void, Actor, bool);
     POINTER_SKYRIMSE(TSetNoBleedoutRecovery, s_setNoBleedoutRecovery, 38533, 38533);
     TiltedPhoques::ThisCall(s_setNoBleedoutRecovery, this, aSet);
@@ -480,6 +489,12 @@ TESForm* Actor::GetEquippedAmmo() const noexcept
 
 bool Actor::IsWearingBodyPiece() const noexcept
 {
+#ifdef SKYRIMVR
+    // GetArmor has no VR implementation (see ExtraContainerChanges.cpp). Answer "yes" so
+    // InventoryService::RunNakedNPCBugChecks skips its re-equip workaround instead of
+    // firing it for every NPC. The naked-NPC fix is therefore off on VR.
+    return true;
+#endif
     return GetContainerChanges()->GetArmor(32) != nullptr;
 }
 
@@ -676,7 +691,9 @@ Inventory Actor::GetEquipment() const noexcept
 int32_t Actor::GetGoldAmount() const noexcept
 {
     TP_THIS_FUNCTION(TGetGoldAmount, int32_t, const Actor);
-    POINTER_SKYRIMSE(TGetGoldAmount, s_getGoldAmount, 37527, 37527);
+    POINTER_SKYRIMSE(TGetGoldAmount, s_getGoldAmount, 37527, 0); // VR: unknown; 37527 in the VR CSV is an unrelated SE function
+    if (!s_getGoldAmount.Get())
+        return 0;
     return TiltedPhoques::ThisCall(s_getGoldAmount, this);
 }
 
@@ -763,6 +780,13 @@ void Actor::SetFactions(const Factions& acFactions) noexcept
 
 void Actor::SetFactionRank(const TESFaction* apFaction, int8_t aRank) noexcept
 {
+#ifdef SKYRIMVR
+    // 37677 -> 0x600220 is interpolated and unverified; use the Papyrus native
+    // Actor.SetFactionRank(Faction, int) whose address is known from the VM.
+    PAPYRUS_FUNCTION(void, Actor, SetFactionRank, TESFaction*, int32_t);
+    s_pSetFactionRank(this, const_cast<TESFaction*>(apFaction), static_cast<int32_t>(aRank));
+    return;
+#endif
     TP_THIS_FUNCTION(TSetFactionRankInternal, void, Actor, const TESFaction*, int8_t);
 
     POINTER_SKYRIMSE(TSetFactionRankInternal, s_setFactionRankInternal, 37677, 37677);
@@ -1279,7 +1303,7 @@ static TiltedPhoques::Initializer s_actorHooks(
         POINTER_SKYRIMSE(TDamageActor, s_damageActor, 37335, 36345);
         POINTER_SKYRIMSE(TApplyActorEffect, s_applyActorEffect, 35086, 35086);
         POINTER_SKYRIMSE(TRegenAttributes, s_regenAttributes, 37448, 36452);
-        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525, 37525);
+        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525, 0); // VR: unknown. 37525 exists in the VR CSV as an unrelated SE function (0x62a180) - hooking it crashed save loading in HookAddInventoryItem
         POINTER_SKYRIMSE(TPickUpObject, s_pickUpObject, 37521, 37521);
         POINTER_SKYRIMSE(TDropObject, s_dropObject, 40454, 40454);
         POINTER_SKYRIMSE(TUpdateDetectionState, s_updateDetectionState, 42704, 42704);

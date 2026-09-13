@@ -33,6 +33,15 @@ TESObjectARMO* ExtraContainerChanges::Data::GetArmor(uint32_t aSlotId) noexcept
 {
     TP_THIS_FUNCTION(TGetArmor, TESObjectARMO*, ExtraContainerChanges::Data, uint32_t);
 
+#ifdef SKYRIMVR
+    // InventoryChanges::GetArmorInSlot (AE 16113 / SE 15873) doesn't exist as a function
+    // on VR: CommonLibVR-NG re-implements it by iterating the actor's inventory for worn
+    // armor. The crosswalk value 0x209130 crashed as soon as InventoryService started its
+    // (connected-only) naked-NPC checks. No VR implementation yet - report no armor, and
+    // see Actor::IsWearingBodyPiece for how the only caller copes.
+    (void)aSlotId;
+    return nullptr;
+#endif
     POINTER_SKYRIMSE(TGetArmor, s_getArmor, 16113, 16113);
 
     return TiltedPhoques::ThisCall(s_getArmor, this, aSlotId);

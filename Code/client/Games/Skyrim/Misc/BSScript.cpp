@@ -105,8 +105,15 @@ void BSScript::IFunctionArguments::Statement::SetSize(uint32_t aCount) noexcept
 
 BSScript::IObjectHandlePolicy* BSScript::IObjectHandlePolicy::Get() noexcept
 {
+#ifndef SKYRIMVR
     POINTER_SKYRIMSE(BSScript::IObjectHandlePolicy*, s_policy, 414391, 414391);
     return *s_policy.Get();
+#else
+    // 414391 has no verified VR address (crosswalk only). Ask the VM instead, the
+    // same way ExtractComplexType does; SkyrimVM::Get uses VR CSV id 514315.
+    auto* pVM = GameVM::Get();
+    return pVM && pVM->virtualMachine ? pVM->virtualMachine->GetObjectHandlePolicy() : nullptr;
+#endif
 }
 
 BSFixedString& BSScript::NativeFunctionBase::GetName()

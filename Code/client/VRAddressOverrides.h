@@ -122,7 +122,8 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     // { 34989u, 0x0598b30u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     // { 35086u, 0x059e490u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     // { 35269u, 0x05a6da0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 35503u, 0x05b2360u },
+    { 34582u, 0x057f650u }, // SE 34582 BGSSaveLoadChangesMap::GetChangeFlags (AE 35503) -> VR via addrlib; checked in dump (signature + size 0x70). Used by TESForm::GetChangeFlags with the VR id directly
+    // { 35503u, 0x05b2360u }, removed: crosswalk garbage (VR 0x5b2360 is an unrelated function; crashed syncing remote actors)
     { 35993u, 0x05ce330u },
     { 36000u, 0x059f160u }, // was 0x05ce840: AE 36000 -> SE 35107 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 36035u, 0x05a0b00u }, // was 0x05d25e0: AE 36035 -> SE 35145 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
@@ -220,12 +221,12 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 68115u, 0x0c7bae0u },
     { 68117u, 0x0c7bd10u },
     { 68221u, 0x0c7ee60u },
-    { 68261u, 0x0c80600u },
+    // { 68261u, 0x0c80600u }, removed: 0xc80600 is a lock/flag function, not BSThread::Initialize (hook disabled on VR in BSThread.cpp)
     { 68276u, 0x0c80ce0u },
     { 68545u, 0x0c4e600u }, // was 0x0c8c310: AE 68545 -> SE 67245 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 68617u, 0x0c8eb40u },
     { 68781u, 0x0c96050u },
-    { 69066u, 0x0ca3800u },
+    { 69066u, 0x0c6b170u }, // was 0x0ca3800 (a destructor, overwritten by the SetThreadName Jump): BSThreadUtils::SetThreadName, found by "mov ecx,406D1388h" in the decrypted game; builds THREADNAME_INFO from (ecx=threadId, rdx=name); 0x40 bytes like AE 69066; addrlib lists it as SE 67740
     { 69161u, 0x0ca6990u },
     { 69165u, 0x0c6dc90u }, // was 0x0ca6bc0: AE 69165 -> SE 67823 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 69192u, 0x0ca7a70u },
@@ -240,7 +241,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 82082u, 0x0f92bc0u },
     { 82088u, 0x0f93250u },
     { 104247u, 0x13bbf0du },
-    { 104296u, 0x13bc0b1u },
+    // { 104296u, 0x13bc0b1u }, removed: mid-function address; see the verified entry at the end of the table
     // { 104359u, 0x13bc2dau }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 104483u, 0x129a6c0u }, // was 0x13bc758: AE 104483 -> SE 97745 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 104484u, 0x13bc769u },
@@ -252,9 +253,9 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     // 109689 (RTDynamicCast, AE id) removed: it mapped to 0x13cf190, an SEH
     // unwind funclet, not the function. RTTI.cpp now uses VR id 102238.
     { 188603u, 0x154d810u },
-    { 370892u, 0x1b6d5f8u },
-    { 380768u, 0x1baa654u },
-    { 381472u, 0x1bae534u },
+    { 370892u, 0x1e96c58u }, // was 0x1b6d5f8: fAIMinGreetingDistance value (Setting at 0x1e96c50, value=85.0f in dump)
+    { 380768u, 0x1eabf30u }, // was 0x1baa654: bAlwaysActive:General value (Setting at 0x1eabf28: INISetting vtable, value=1, name ptr at +0x10; found via name string in dump). Was being WRITTEN every frame by TiltedOnlineApp::Update
+    { 381472u, 0x1eaef68u }, // was 0x1bae534: iDifficulty:GamePlay value (Setting at 0x1eaef60, value=2 in dump)
     { 382393u, 0x1bb3870u },
     { 382400u, 0x1bb38f4u },
     { 392214u, 0x1ed6cf8u },
@@ -3080,7 +3081,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 400315u, 0x1c39ca0u },
     { 400320u, 0x1c39cc8u },
     { 400327u, 0x1c39d20u },
-    { 400441u, 0x1c3a320u },
+    { 400441u, 0x2feb6f8u }, // was 0x1c3a320: TES singleton = VR CSV SE 516923 (CommonLibVR-NG RELOCATION_ID(516923, 403450))
     { 400443u, 0x1c3a33cu },
     { 400447u, 0x1c3a370u },
     { 400475u, 0x1c3a518u },
@@ -3089,7 +3090,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 400802u, 0x1c3b738u },
     { 400863u, 0x1c3bd10u },
     { 400864u, 0x1c3bd18u },
-    { 401069u, 0x1c3cbd8u },
+    { 401069u, 0x2feb9f0u }, // was 0x1c3cbd8: PlayerCharacter singleton = VR CSV SE 517014 (CommonLibVR-NG RELOCATION_ID(517014, 403521)); old value held 0xffffffff007c9be0, the bad 'this' in DiscoveryService::VisitCell
     { 401099u, 0x1c3cda8u },
     { 401100u, 0x1c3cdc0u },
     { 401263u, 0x1c3d784u },
@@ -3115,4 +3116,6 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     // TESQuest::SetCompleted, identified via its unique SE caller (DialogueSubtitleStrings, id 34429).
     { 24991u, 0x037fc30u }, // was 0xc6dc90: AE 24991 -> SE 24472 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
     { 32883u, 0x0500890u }, // new: AE 32883 -> SE 32139 by function-size fingerprint (3 preceding sizes identical, id delta matches neighbours) -> VR via addrlib, VR layout matches SE
+    { 19362u, 0x02a7f00u }, // new: SE 19362 TESObjectREFR::SetAngleZ (s_rotateZ). Dump-checked: sibling of SE 19360/19361 (0x2a7d80/0x2a7e40, compare [rcx+48h]/[rcx+4Ch]); this one compares [rcx+50h] = angle.z
+    { 104296u, 0x126f1c0u }, // new: BSScript::Variable::Reset. AE 104296 -> SE 97508 (anchors AE 104294/104299 = SE 97506/97514; AE 104297 and SE 97509 both exactly 0x290 long, so 104296 is 97508) -> VR addrlib 0x126f1c0 (VR spacing 0x140 = SE size). Was null: Variable::Reset called through 0 inside noexcept -> std::terminate during save load
 };

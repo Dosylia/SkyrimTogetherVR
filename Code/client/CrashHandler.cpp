@@ -324,9 +324,14 @@ CrashHandler::~CrashHandler()
 
 void CrashHandler::RemovePreviousDump(std::filesystem::path path)
 {
+    // Only our own dumps. GetModuleFileName(NULL) is spoofed to the game's exe
+    // once the launcher's hooks are active, so this directory is the game
+    // folder - matching any path containing "crash" there could delete other
+    // mods' files.
     for (auto& entry : std::filesystem::directory_iterator(path))
     {
-        if (entry.path().string().find("crash") != std::string::npos)
+        const auto name = entry.path().filename().string();
+        if (entry.is_regular_file() && name.rfind("crash_UTC_", 0) == 0 && entry.path().extension() == ".dmp")
         {
             DeleteFileA(entry.path().string().c_str());
         }

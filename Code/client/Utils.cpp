@@ -32,7 +32,7 @@ void ShowHudMessage(const TiltedPhoques::String& acMessage)
 {
     using TShowHudMessage = void(const char*, const char*, bool);
 
-    POINTER_SKYRIMSE(TShowHudMessage, s_showHudMessage, 52933, 52933);
+    POINTER_SKYRIMSE(TShowHudMessage, s_showHudMessage, 52933, 52050); // VR: AE 52933 -> SE 52050 DebugNotification (se_ae + database.csv)
 
     s_showHudMessage(acMessage.c_str(), nullptr, false);
 }

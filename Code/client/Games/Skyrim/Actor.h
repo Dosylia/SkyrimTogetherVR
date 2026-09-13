@@ -46,6 +46,16 @@ struct Actor : TESObjectREFR
     virtual void SetWeaponDrawn(bool aDraw);
     virtual void sub_A7();
     virtual void sub_A8();
+#ifdef SKYRIMVR
+    // Second VR-only virtual (the first is TESObjectREFR's slot 0x82), so from here on
+    // every Actor virtual is TWO slots higher on VR. Verified in a VR Character vtable
+    // dump: slot 0xAA calls slot 0xA9 (RemoveCharController) internally, and slot 0xAB
+    // takes (pos, bool) and calls TESObjectREFR::SetPosition (0x2a8010) - the real
+    // SetPosition. Without this, SetPosition() called 0xAA, tearing down the NPC's
+    // character controller on every HookSetPosition call -> Havok use-after-free in
+    // bhkCharRigidBodyController during save load.
+    virtual void VR_Unk_AA();
+#endif
     virtual void SetPosition(const NiPoint3& acPoint, bool aSyncHavok = true);
     virtual void sub_AA();
     virtual void Resurrect(bool aResetInventory);
@@ -365,6 +375,7 @@ public:
     // void Save_Reversed(uint32_t aChangeFlags, Buffer::Writer& aWriter);
 };
 
+#ifndef SKYRIMVR
 static_assert(offsetof(Actor, currentProcess) == 0xF8);
 static_assert(offsetof(Actor, flags1) == 0xE8);
 static_assert(offsetof(Actor, actorValueOwner) == 0xB8);
@@ -379,4 +390,22 @@ static_assert(offsetof(Actor, magicItems) == 0x1C8);
 static_assert(offsetof(Actor, equippedShout) == 0x1E8);
 static_assert(offsetof(Actor, actorLock) == 0x284);
 static_assert(sizeof(Actor) == 0x2B8);
+#else
+// Skyrim VR uses the SE layout (no ExtraDataList vtable): the pre-AE values from
+// commit 553793fc.
+static_assert(offsetof(Actor, currentProcess) == 0xF0);
+static_assert(offsetof(Actor, flags1) == 0xE0);
+static_assert(offsetof(Actor, actorValueOwner) == 0xB0);
+static_assert(offsetof(Actor, actorState) == 0xB8);
+static_assert(offsetof(Actor, flags2) == 0x1FC);
+static_assert(offsetof(Actor, unk194) == 0x270);
+static_assert(offsetof(Actor, fVoiceTimer) == 0x108);
+static_assert(offsetof(Actor, unk84) == 0xE8);
+static_assert(offsetof(Actor, unk17C) == 0x17C);
+static_assert(offsetof(Actor, pCombatController) == 0x158);
+static_assert(offsetof(Actor, magicItems) == 0x1C0);
+static_assert(offsetof(Actor, equippedShout) == 0x1E0);
+static_assert(offsetof(Actor, actorLock) == 0x27C);
+static_assert(sizeof(Actor) == 0x2B0);
+#endif
 static_assert(sizeof(Actor::SpellItemEntry) == 0x18);

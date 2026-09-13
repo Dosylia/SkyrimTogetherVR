@@ -125,6 +125,9 @@ void PartyService::OnPartyInfo(const NotifyPartyInfo& acPartyInfo) noexcept
             pWorldEncountersEnabled->f = 1.f;
         }
 
+        if (!m_world.GetOverlayService().GetOverlayApp()) // no overlay on VR - CEF API would CHECK-crash
+            return;
+
         auto pArguments = CefListValue::Create();
 
         auto pPlayerIds = CefListValue::Create();
@@ -143,6 +146,9 @@ void PartyService::OnPartyInvite(const NotifyPartyInvite& acPartyInvite) noexcep
     spdlog::debug("[PartyService]: Got party invite from {}", acPartyInvite.InviterId);
 
     m_invitations[acPartyInvite.InviterId] = acPartyInvite.ExpiryTick;
+
+    if (!m_world.GetOverlayService().GetOverlayApp()) // no overlay on VR - CEF API would CHECK-crash
+        return;
 
     auto pArguments = CefListValue::Create();
     pArguments->SetInt(0, acPartyInvite.InviterId);

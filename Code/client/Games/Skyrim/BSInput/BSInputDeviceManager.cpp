@@ -23,11 +23,14 @@ static TiltedPhoques::Initializer s_initInputDeviceManager(
     {
         #ifndef SKYRIMVR
         const VersionDbPtr<void> pollInputDevices(68617);
-        #else
-        const VersionDbPtr<void> pollInputDevices(68617);
-        #endif
 
         BSInputDeviceManager_PollInputDevices = static_cast<decltype(BSInputDeviceManager_PollInputDevices)>(pollInputDevices.GetPtr());
 
         TP_HOOK_IMMEDIATE(&BSInputDeviceManager_PollInputDevices, &Hook_BSInputDeviceManager_PollInputDevices);
+        #else
+        // Not hooked on VR: 68617 only resolves through the crosswalk (0/69 accurate
+        // for functions), and the hook forwards just (rcx, xmm1), so on a wrong
+        // target the other argument registers would reach it clobbered. The hook
+        // does nothing on VR anyway - GetMainWindow() is always null there.
+        #endif
     });

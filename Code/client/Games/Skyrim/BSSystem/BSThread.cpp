@@ -77,21 +77,30 @@ static TiltedPhoques::Initializer s_BSThreadInit(
     {
         #ifndef SKYRIMVR
         const VersionDbPtr<uint8_t> threadInit(68261);
-        #else
-        const VersionDbPtr<uint8_t> threadInit(68261);
-        #endif
         BSThread_Initialize = static_cast<decltype(BSThread_Initialize)>(threadInit.GetPtr());
         // need to detour this for now :/
         TP_HOOK_IMMEDIATE(&BSThread_Initialize, &Hook_BSThread_Initialize);
+        #else
+        // Not hooked on VR. 68261 resolved through the crosswalk to 0xc80600,
+        // which is a small lock/flag function (EnterCriticalSection on rdx+0x18),
+        // not BSThread::Initialize. Detouring it made Hook_BSThread_Initialize
+        // call Base::SetThreadName with a garbage "name" (0x768) while loading a
+        // save. The hook only names threads for debugging, and the game names
+        // them itself via BSThreadUtils::SetThreadName, so nothing is lost
+        // until the real VR address is found.
+        #endif
 
         #ifndef SKYRIMVR
         const VersionDbPtr<uint8_t> setThreadName(69066);
         #else
         const VersionDbPtr<uint8_t> setThreadName(69066);
         #endif
-        // id 69066 is unverified on VR - writing a JMP at a garbage address
-        // overwrites the prologue of whatever unrelated function lives there
-        // (confirmed in a crash dump: e9 .. jmp written into game code).
+        // VR: 69066 now maps to 0xc6b170 (VRAddressOverrides.h). The old crosswalk
+        // value 0xca3800 was a destructor; this Jump overwrote it. 0xc6b170 was
+        // found by searching the decrypted game for "mov ecx, 406D1388h": it
+        // builds THREADNAME_INFO{0x1000, name, threadId, 0} from (ecx, rdx) and
+        // raises it, i.e. SetThreadName(uint32_t, const char*), and it is 0x40
+        // bytes like AE 69066.
         if (setThreadName.Get())
             TiltedPhoques::Jump(setThreadName.Get(), &Hook_SetThreadName);
 

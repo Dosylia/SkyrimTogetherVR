@@ -31,7 +31,11 @@ struct ExtraDataList
 
     [[nodiscard]] bool HasQuestObjectAlias() noexcept;
 
+#ifndef SKYRIMVR
+    // AE only: this vtable is what shifts every later TESObjectREFR/Actor member by 8
+    // bytes (commit 553793fc). Skyrim VR uses the SE layout - no vtable here.
     virtual ~ExtraDataList();
+#endif
     BSExtraData* data = nullptr;
 
     struct Bitfield

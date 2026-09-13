@@ -158,7 +158,9 @@ static TiltedPhoques::Initializer s_projectileHooks(
         #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> hookLoc(34452);
         #else
-        VersionDbPtr<uint8_t> hookLoc(34452);
+        // Actually neutralised now: both branches used 34452 before, so the Jump
+        // below was still patching an unrelated function +0x374 on VR.
+        VersionDbPtr<uint8_t> hookLoc(0);
         #endif
         if (!hookLoc.Get())
             return;

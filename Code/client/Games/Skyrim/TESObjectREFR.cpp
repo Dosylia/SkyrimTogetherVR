@@ -912,7 +912,7 @@ void TESObjectREFR::EnableImpl() noexcept
 {
     TP_THIS_FUNCTION(TEnableImpl, void, TESObjectREFR, bool aResetInventory);
 
-    POINTER_SKYRIMSE(TEnableImpl, s_enable, 19800, 19800);
+    POINTER_SKYRIMSE(TEnableImpl, s_enable, 19800, 19373); // VR: AE 19800 -> SE 19373 TESObjectREFR::Enable (se_ae + database.csv)
 
     TiltedPhoques::ThisCall(s_enable, this, false);
 }
@@ -1109,7 +1109,7 @@ static TiltedPhoques::Initializer s_objectReferencesHooks(
         POINTER_SKYRIMSE(TLockChange, s_lockChange, 19512, 19512);
         POINTER_SKYRIMSE(TRotate, s_rotateX, 19787, 19787);
         POINTER_SKYRIMSE(TRotate, s_rotateY, 19788, 19788);
-        POINTER_SKYRIMSE(TRotate, s_rotateZ, 19789, 19789);
+        POINTER_SKYRIMSE(TRotate, s_rotateZ, 19789, 19362); // VR: SE 19362 via VRAddressOverrides (0x2a7f00; sibling of rotateX/Y, compares [rcx+50h] = angle.z)
         POINTER_SKYRIMSE(TActivate, s_activate, 19796, 19369);
         POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 19708, 19708);
         POINTER_SKYRIMSE(TRemoveInventoryItem, s_removeInventoryItem, 19689, 19689);

@@ -22,13 +22,16 @@ static TiltedPhoques::Initializer s_randomInit(
         #ifndef SKYRIMVR
         const VersionDbPtr<void> unsignedInt(68276);
         #else
-        const VersionDbPtr<void> unsignedInt(68276);
+        // 0 on VR: 68276 only resolves through the crosswalk (0/69 accurate for
+        // functions), which would make UnsignedInt call an unrelated function.
+        // UnsignedInt already falls back to aMin when these are null.
+        const VersionDbPtr<void> unsignedInt(0);
         #endif
         Real_UnsignedInt = static_cast<decltype(Real_UnsignedInt)>(unsignedInt.GetPtr());
         #ifndef SKYRIMVR
         const VersionDbPtr<void> getGenerator(14774);
         #else
-        const VersionDbPtr<void> getGenerator(14774);
+        const VersionDbPtr<void> getGenerator(0); // see unsignedInt above
         #endif
         GetGenerator = static_cast<decltype(GetGenerator)>(getGenerator.GetPtr());
     });

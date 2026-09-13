@@ -36,6 +36,7 @@
 
 #include <Components.h>
 #include <World.h>
+#include <Utils.h>
 
 #include <Forms/TESObjectCELL.h>
 #include <Forms/TESWorldSpace.h>
@@ -156,8 +157,16 @@ void DebugService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
     // disabled there - see BSGraphicsRenderer.cpp). Runs every frame, so an
     // unguarded dereference here would crash immediately and constantly.
     auto* pMainWindow = BSGraphics::GetMainWindow();
+#ifndef SKYRIMVR
     if (!pMainWindow || !pMainWindow->IsForeground())
         return;
+#else
+    // No main window on VR, so the check above would return every frame and the
+    // F6 connect key below could never work - and F6 is the only way to connect on VR
+    // (the overlay connect UI doesn't exist). Only check focus when a window exists.
+    if (pMainWindow && !pMainWindow->IsForeground())
+        return;
+#endif
 
     if (moveData.pActor)
     {
@@ -182,8 +191,36 @@ void DebugService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
             s_f6Pressed = true;
 
             static char s_address[256] = "127.0.0.1:10578";
+#ifdef SKYRIMVR
+            // VR has no connect UI. Read "address:port" (line 1) and an optional server
+            // password (line 2) from %LOCALAPPDATA%\SkyrimTogetherVR\connect.txt, so a
+            // friend's server can be used; falls back to 127.0.0.1:10578.
+            char localAppData[MAX_PATH];
+            if (!m_transport.IsOnline() && GetEnvironmentVariableA("LOCALAPPDATA", localAppData, sizeof(localAppData)))
+            {
+                std::ifstream connectFile(std::string(localAppData) + "\\SkyrimTogetherVR\\connect.txt");
+                std::string line;
+                if (connectFile && std::getline(connectFile, line))
+                {
+                    line.erase(line.find_last_not_of(" \t\r\n") + 1);
+                    if (!line.empty())
+                        strncpy_s(s_address, line.c_str(), _TRUNCATE);
+                    std::string password;
+                    if (std::getline(connectFile, password))
+                    {
+                        password.erase(password.find_last_not_of(" \t\r\n") + 1);
+                        m_transport.SetServerPassword(password.c_str());
+                    }
+                }
+            }
+#endif
             if (!m_transport.IsOnline())
+            {
+#ifdef SKYRIMVR
+                Utils::ShowHudMessage(TiltedPhoques::String("Skyrim Together: connecting to ") + s_address);
+#endif
                 m_transport.Connect(s_address);
+            }
             else
                 m_transport.Close();
         }

@@ -33,6 +33,24 @@ void TP_MAKE_THISCALL(HookRegisterPapyrusFunction, BSScript::IVirtualMachine, Na
 
 void TP_MAKE_THISCALL(HookBindEverythingToScript, BSScript::IVirtualMachine*)
 {
+#ifdef SKYRIMVR
+    // RegisterPapyrusFunction (104788) has no VR address, so the hook that fills
+    // PapyrusService's name -> native-function table was never installed, and every
+    // PAPYRUS_FUNCTION(...) in the client resolved to null (first seen as a call to 0
+    // from HookActivate -> GetOpenState). That function *is* the VM's BindNativeMethod
+    // implementation, vtable slot 0x18 - the slot our own BindNativeMethod calls below
+    // already use successfully on VR. Hook it from the vtable now, before
+    // RealBindEverythingToScript registers the game's natives.
+    static bool s_registerHookInstalled = false;
+    if (!s_registerHookInstalled && apThis && *apThis)
+    {
+        auto** ppVTable = *reinterpret_cast<void***>(*apThis);
+        RealRegisterPapyrusFunction = static_cast<TRegisterPapyrusFunction*>(ppVTable[0x18]);
+        TP_HOOK_IMMEDIATE(&RealRegisterPapyrusFunction, HookRegisterPapyrusFunction);
+        s_registerHookInstalled = true;
+    }
+#endif
+
     (*apThis)->BindNativeMethod(new BSScript::IsRemotePlayerFunc("IsRemotePlayer", "SkyrimTogetherUtils", PapyrusFunctions::IsRemotePlayer, BSScript::Variable::kBoolean));
     (*apThis)->BindNativeMethod(new BSScript::IsPlayerFunc("IsPlayer", "SkyrimTogetherUtils", PapyrusFunctions::IsPlayer, BSScript::Variable::kBoolean));
     (*apThis)->BindNativeMethod(new BSScript::DidLaunchSkyrimTogetherFunc("DidLaunchSkyrimTogether", "SkyrimTogetherVerifyLaunchScript", PapyrusFunctions::DidLaunchSkyrimTogether, BSScript::Variable::kBoolean));

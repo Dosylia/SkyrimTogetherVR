@@ -133,6 +133,7 @@ struct PlayerCharacter : Actor
         uint64_t instanceCount;
     };
 
+#ifndef SKYRIMVR
     uint8_t pad1[0x588 - sizeof(Actor)];
     GameArray<ObjectiveInstance> objectives;
     uint8_t pad588[0x9B0 - 0x598];
@@ -146,11 +147,41 @@ struct PlayerCharacter : Actor
     GameArray<TintMask*>* overlayTints;
 
     uint8_t padPlayerEnd[0xBE0 - 0xB30];
+#else
+    // Skyrim VR layout, absolute offsets from CommonLibVR-NG's VR_PLAYER_RUNTIME_DATA:
+    // objectives B70, VR_INFO skills 10B0, currentLocation 11C8, GAME_STATE difficulty
+    // 11F4, tintMasks 1208/1220, PlayerFlags at 12D0 (size 8) -> sizeof 0x12D8. The SE
+    // equivalents (580/9B0/AC8/AF8/B10/B28, size BE0) match this file's pre-AE layout
+    // from commit 553793fc exactly, which cross-checks the VR numbers.
+    uint8_t pad1[0xB70 - sizeof(Actor)];
+    GameArray<ObjectiveInstance> objectives;
+    uint8_t padB88[0x10B0 - 0xB88];
+    Skills** pSkills;
+    uint8_t pad10B8[0x11C8 - 0x10B8];
+    TESForm* locationForm;
+    uint8_t pad11D0[0x11F4 - 0x11D0];
+    int32_t difficulty;
+    uint8_t pad11F8[0x1208 - 0x11F8];
+    GameArray<TintMask*> baseTints;
+    GameArray<TintMask*>* overlayTints;
+
+    uint8_t padPlayerEnd[0x12D8 - 0x1228];
+#endif
 };
 
+#ifndef SKYRIMVR
 static_assert(offsetof(PlayerCharacter, objectives) == 0x588);
 static_assert(offsetof(PlayerCharacter, pSkills) == 0x9B8);
 static_assert(offsetof(PlayerCharacter, locationForm) == 0xAD0);
 static_assert(offsetof(PlayerCharacter, baseTints) == 0xB18);
 static_assert(offsetof(PlayerCharacter, overlayTints) == 0xB30);
 static_assert(sizeof(PlayerCharacter) == 0xBE8);
+#else
+static_assert(offsetof(PlayerCharacter, objectives) == 0xB70);
+static_assert(offsetof(PlayerCharacter, pSkills) == 0x10B0);
+static_assert(offsetof(PlayerCharacter, locationForm) == 0x11C8);
+static_assert(offsetof(PlayerCharacter, difficulty) == 0x11F4);
+static_assert(offsetof(PlayerCharacter, baseTints) == 0x1208);
+static_assert(offsetof(PlayerCharacter, overlayTints) == 0x1220);
+static_assert(sizeof(PlayerCharacter) == 0x12D8);
+#endif
