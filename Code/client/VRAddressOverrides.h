@@ -36,7 +36,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 11616u, 0x01266a0u },
     { 11619u, 0x0126ab0u },
     { 11620u, 0x0126c00u },
-    { 11806u, 0x01314d0u },
+    { 11806u, 0x0129a30u }, // was 0x01314d0: AE 11806 -> SE 11660 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 11822u, 0x0132240u },
     { 12052u, 0x01401b0u },
     { 12060u, 0x0140360u },
@@ -46,18 +46,18 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 13723u, 0x0186000u },
     { 13878u, 0x018c330u },
     { 14298u, 0x019d5e0u },
-    { 14375u, 0x019f140u },
+    // { 14375u, 0x019f140u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 14529u, 0x01a6220u },
-    { 14617u, 0x01a9990u },
+    { 14617u, 0x01a3f60u }, // was 0x01a9990: AE 14617 -> SE 14461 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
     { 14774u, 0x01b08c0u },
     { 14953u, 0x01b8350u },
     { 15002u, 0x01bb6a0u },
     { 15006u, 0x01bb820u },
-    { 16005u, 0x0200d00u },
+    { 16005u, 0x01e7740u }, // was 0x0200d00: AE 16005 -> SE 15767 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
     { 16040u, 0x0203680u },
     { 16113u, 0x0209130u },
-    { 16142u, 0x0209fe0u },
-    { 16143u, 0x020a010u },
+    { 16142u, 0x01fce80u }, // was 0x0209fe0: AE 16142 -> SE 15902 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    { 16143u, 0x01fcfb0u }, // was 0x020a010: AE 16143 -> SE 15903 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     // 17201 removed: doesn't exist in the official VR Address Library at all
     // (confirmed against version-1-4-15-0.csv) - this crosswalk-derived entry
     // pointed at an unrelated function and caused a stack-corrupting crash in
@@ -68,145 +68,145 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 18573u, 0x0278190u },
     { 19075u, 0x0294070u },
     { 19364u, 0x02a8160u },
-    { 19512u, 0x02b02c0u },
-    { 19689u, 0x02b3ed0u },
-    { 19702u, 0x02b4110u },
-    { 19708u, 0x02b4840u },
-    { 19742u, 0x02b5e00u },
-    { 19784u, 0x02b7bb0u },
-    { 19787u, 0x02b7c70u },
-    { 19788u, 0x02b7d10u },
-    { 19790u, 0x02b7ef0u },
+    // { 19512u, 0x02b02c0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 19689u, 0x029f110u }, // was 0x02b3ed0: AE 19689 -> SE 19263 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    { 19702u, 0x029fac0u }, // was 0x02b4110: AE 19702 -> SE 19276 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    // { 19708u, 0x02b4840u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 19742u, 0x02a5710u }, // was 0x02b5e00: AE 19742 -> SE 19315 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
+    { 19784u, 0x02a7ba0u }, // was 0x02b7bb0: AE 19784 -> SE 19357 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    { 19787u, 0x02a7d80u }, // was 0x02b7c70: AE 19787 -> SE 19360 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
+    { 19788u, 0x02a7e40u }, // was 0x02b7d10: AE 19788 -> SE 19361 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
+    { 19790u, 0x02a8010u }, // was 0x02b7ef0: AE 19790 -> SE 19363 (vr_address_tools se_ae.csv) -> VR via db; function start checked in dump
     { 19796u, 0x02b8310u },
     { 19812u, 0x02b8920u },
     { 19846u, 0x02b9860u },
-    { 20203u, 0x02ccac0u },
-    { 20221u, 0x02cdcc0u },
+    { 20203u, 0x02b8480u }, // was 0x02ccac0: AE 20203 -> SE 19798 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    { 20221u, 0x02b89e0u }, // was 0x02cdcc0: AE 20221 -> SE 19816 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via db, VR layout matches SE; not yet dump-checked
     { 20223u, 0x02cde80u },
     { 20460u, 0x02d6460u },
     { 21600u, 0x03067f0u },
-    { 21622u, 0x0307c90u },
-    { 23231u, 0x0342f50u },
-    { 24568u, 0x038aa50u },
+    // { 21622u, 0x0307c90u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 23231u, 0x0332a90u }, // was 0x0342f50: AE 23231 -> SE 22754 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    { 24568u, 0x0367980u }, // was 0x038aa50: AE 24568 -> SE 24065 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 24987u, 0x039d3a0u },
     { 25003u, 0x039e640u },
     { 25004u, 0x039e690u },
-    { 25066u, 0x03a2150u },
-    { 26231u, 0x03e16b0u },
+    { 25066u, 0x0388110u }, // was 0x03a2150: AE 25066 -> SE 24537 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
+    { 26231u, 0x03c1a20u }, // was 0x03e16b0: AE 26231 -> SE 25684 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
     { 26241u, 0x03e1780u },
     { 26242u, 0x03e1790u },
     { 26243u, 0x03e17b0u },
-    { 26244u, 0x03e17c0u },
+    { 26244u, 0x03c4970u }, // was 0x03e17c0: AE 26244 -> SE 25697 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 26503u, 0x03edce0u },
     { 27040u, 0x04002f0u },
-    { 27244u, 0x04066d0u },
+    // { 27244u, 0x04066d0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 32802u, 0x052cf30u },
     { 32885u, 0x052f2d0u },
     { 32886u, 0x052f2f0u },
     { 33235u, 0x0533c10u },
-    { 33236u, 0x0533c50u },
+    // { 33236u, 0x0533c50u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 33261u, 0x05402d0u },
     { 33285u, 0x05410a0u },
-    { 34053u, 0x0563710u },
-    { 34140u, 0x05681b0u },
-    { 34144u, 0x0568340u },
-    { 34370u, 0x0571420u },
+    // { 34053u, 0x0563710u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 34140u, 0x05681b0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 34144u, 0x0546260u }, // was 0x0568340: AE 34144 -> SE 33363 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
+    // { 34370u, 0x0571420u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 34401u, 0x0572930u },
     { 34408u, 0x0572c50u },
     { 34410u, 0x0572ee0u },
     { 34452u, 0x05754d0u },
-    { 34512u, 0x0579df0u },
-    { 34525u, 0x057aea0u },
-    { 34526u, 0x057af40u },
-    { 34529u, 0x057b000u },
-    { 34989u, 0x0598b30u },
-    { 35086u, 0x059e490u },
-    { 35269u, 0x05a6da0u },
+    { 34512u, 0x0557070u }, // was 0x0579df0: AE 34512 -> SE 33728 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    { 34525u, 0x0557830u }, // was 0x057aea0: AE 34525 -> SE 33741 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via db, VR layout matches SE; not yet dump-checked
+    { 34526u, 0x05579c0u }, // was 0x057af40: AE 34526 -> SE 33742 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
+    { 34529u, 0x0557f80u }, // was 0x057b000: AE 34529 -> SE 33745 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    // { 34989u, 0x0598b30u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 35086u, 0x059e490u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 35269u, 0x05a6da0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 35503u, 0x05b2360u },
     { 35993u, 0x05ce330u },
-    { 36000u, 0x05ce840u },
-    { 36035u, 0x05d25e0u },
-    { 36047u, 0x05d2fe0u },
-    { 36048u, 0x05d3010u },
+    { 36000u, 0x059f160u }, // was 0x05ce840: AE 36000 -> SE 35107 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    { 36035u, 0x05a0b00u }, // was 0x05d25e0: AE 36035 -> SE 35145 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
+    { 36047u, 0x05a0ff0u }, // was 0x05d2fe0: AE 36047 -> SE 35157 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
+    { 36048u, 0x05a1070u }, // was 0x05d3010: AE 36048 -> SE 35158 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 36165u, 0x05d4fc0u },
     { 36166u, 0x05d5000u },
-    { 36291u, 0x05db010u },
+    // { 36291u, 0x05db010u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 36544u, 0x05f2410u },
     { 36548u, 0x05f2a60u },
-    { 36564u, 0x05f4770u },
+    // { 36564u, 0x05f4770u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 37147u, 0x061e640u },
     { 37175u, 0x061f300u },
     { 37198u, 0x061fa68u },
-    { 37313u, 0x0621900u },
+    // { 37313u, 0x0621900u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 37334u, 0x0622240u },
     { 37335u, 0x0622250u },
-    { 37356u, 0x06226a0u },
+    // { 37356u, 0x06226a0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 37448u, 0x06277b0u },
     { 37511u, 0x06295d0u },
-    { 37521u, 0x0629e60u },
-    { 37542u, 0x062b510u },
-    { 37577u, 0x062c830u },
-    { 37677u, 0x0633400u },
+    // { 37521u, 0x0629e60u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 37542u, 0x062b510u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 37577u, 0x062c830u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 37677u, 0x0600220u }, // was 0x0633400: AE 37677 -> SE 36669 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 37698u, 0x0634d90u },
     { 37717u, 0x0635220u },
-    { 37905u, 0x063f330u },
-    { 37975u, 0x06430e0u },
+    // { 37905u, 0x063f330u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 37975u, 0x0612420u }, // was 0x06430e0: AE 37975 -> SE 36950 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 38533u, 0x0664750u },
     { 38717u, 0x0680550u },
     { 38757u, 0x0682b50u },
     { 38894u, 0x0688ec0u },
-    { 38896u, 0x0688f00u },
+    { 38896u, 0x0640c40u }, // was 0x0688f00: AE 38896 -> SE 37940 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 38897u, 0x0688f70u },
     { 38899u, 0x0689290u },
     { 38901u, 0x0689630u },
-    { 38903u, 0x06898c0u },
-    { 38928u, 0x068a550u },
-    { 38929u, 0x068a570u },
-    { 38930u, 0x068a5b0u },
-    { 38933u, 0x068a7f0u },
-    { 38934u, 0x068a910u },
-    { 38935u, 0x068aab0u },
-    { 38949u, 0x068ae90u },
+    { 38903u, 0x06413c0u }, // was 0x06898c0: AE 38903 -> SE 37947 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    // { 38928u, 0x068a550u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 38929u, 0x068a570u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 38930u, 0x068a5b0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 38933u, 0x068a7f0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 38934u, 0x068a910u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 38935u, 0x068aab0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 38949u, 0x068ae90u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 38952u, 0x068aef0u },
     { 38953u, 0x068af10u },
-    { 38959u, 0x068afe0u },
+    // { 38959u, 0x068afe0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 38979u, 0x068b6d0u },
     { 39002u, 0x068e580u },
     { 39004u, 0x068e7b0u },
-    { 39114u, 0x069a110u },
-    { 39643u, 0x06d96f0u },
+    { 39114u, 0x064c170u }, // was 0x069a110: AE 39114 -> SE 38156 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    // { 39643u, 0x06d96f0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 39895u, 0x06e7dc0u },
-    { 40245u, 0x06f75d0u },
-    { 40246u, 0x06f8310u },
+    // { 40245u, 0x06f75d0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 40246u, 0x06f8310u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 40255u, 0x06f8760u },
-    { 40412u, 0x0707340u },
-    { 40454u, 0x0709970u },
+    // { 40412u, 0x0707340u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 40454u, 0x06c00f0u }, // was 0x0709970: AE 40454 -> SE 39382 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 40488u, 0x070b030u },
-    { 40533u, 0x070ca10u },
-    { 40535u, 0x070cbb0u },
-    { 40536u, 0x070cd40u },
-    { 42345u, 0x0756140u },
-    { 42704u, 0x0767a40u },
+    // { 40533u, 0x070ca10u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 40535u, 0x070cbb0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 40536u, 0x070cd40u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 42345u, 0x072c0a0u }, // was 0x0756140: AE 42345 -> SE 41266 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
+    { 42704u, 0x0743170u }, // was 0x0767a40: AE 42704 -> SE 41626 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 44108u, 0x07b5cf0u },
     { 47196u, 0x0818380u },
-    { 47303u, 0x081a600u },
-    { 47307u, 0x081a840u },
-    { 51925u, 0x0904040u },
+    { 47303u, 0x07e7e90u }, // was 0x081a600: AE 47303 -> SE 46039 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    { 47307u, 0x07e8020u }, // was 0x081a840: AE 47307 -> SE 46043 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    { 51925u, 0x08c23e0u }, // was 0x0904040: AE 51925 -> SE 51046 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 52510u, 0x0933d40u },
     { 52518u, 0x0933ea0u },
-    { 52626u, 0x093b1e0u },
+    // { 52626u, 0x093b1e0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 52627u, 0x093b240u },
     { 52847u, 0x094a280u },
     { 52849u, 0x094a3b0u },
     { 53112u, 0x095c430u },
-    { 53915u, 0x0986340u },
-    { 53926u, 0x09869d0u },
+    { 53915u, 0x095aa60u }, // was 0x0986340: AE 53915 -> SE 53105 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
+    { 53926u, 0x095c670u }, // was 0x09869d0: AE 53926 -> SE 53115 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via csv, VR layout matches SE; not yet dump-checked
     { 54425u, 0x099b180u },
-    { 54522u, 0x099f0a0u },
-    { 55497u, 0x09c8200u },
-    { 55739u, 0x09d87d0u },
-    { 56205u, 0x09e6bf0u },
-    { 56206u, 0x09e6d30u },
+    { 54522u, 0x097bd00u }, // was 0x099f0a0: AE 54522 -> SE 53705 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
+    // { 55497u, 0x09c8200u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 55739u, 0x09baf10u }, // was 0x09d87d0: AE 55739 -> SE 55141 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
+    { 56205u, 0x09d02a0u }, // was 0x09e6bf0: AE 56205 -> SE 55674 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
+    { 56206u, 0x09d0320u }, // was 0x09e6d30: AE 56206 -> SE 55675 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 56626u, 0x0a01aa0u },
     { 57185u, 0x0a10880u },
     { 57704u, 0x0a24e40u },
@@ -222,12 +222,12 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 68221u, 0x0c7ee60u },
     { 68261u, 0x0c80600u },
     { 68276u, 0x0c80ce0u },
-    { 68545u, 0x0c8c310u },
+    { 68545u, 0x0c4e600u }, // was 0x0c8c310: AE 68545 -> SE 67245 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 68617u, 0x0c8eb40u },
     { 68781u, 0x0c96050u },
     { 69066u, 0x0ca3800u },
     { 69161u, 0x0ca6990u },
-    { 69165u, 0x0ca6bc0u },
+    { 69165u, 0x0c6dc90u }, // was 0x0ca6bc0: AE 69165 -> SE 67823 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 69192u, 0x0ca7a70u },
     { 70639u, 0x0cf1d80u },
     { 70640u, 0x0cf2050u },
@@ -241,15 +241,16 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 82088u, 0x0f93250u },
     { 104247u, 0x13bbf0du },
     { 104296u, 0x13bc0b1u },
-    { 104359u, 0x13bc2dau },
-    { 104483u, 0x13bc758u },
+    // { 104359u, 0x13bc2dau }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 104483u, 0x129a6c0u }, // was 0x13bc758: AE 104483 -> SE 97745 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 104484u, 0x13bc769u },
     { 104651u, 0x13bcd88u },
     { 104653u, 0x13bcdaau },
     { 104655u, 0x13bcdbbu },
-    { 104788u, 0x13bd2c8u },
-    { 105220u, 0x13be40cu },
-    { 109689u, 0x13cf190u },
+    // { 104788u, 0x13bd2c8u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 105220u, 0x13be40cu }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // 109689 (RTDynamicCast, AE id) removed: it mapped to 0x13cf190, an SEH
+    // unwind funclet, not the function. RTTI.cpp now uses VR id 102238.
     { 188603u, 0x154d810u },
     { 370892u, 0x1b6d5f8u },
     { 380768u, 0x1baa654u },
@@ -553,6 +554,12 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 392574u, 0x1edb2b0u },
     { 392576u, 0x1edb318u },
     { 392577u, 0x1edb340u },
+    // TESSoundFile TypeDescriptor - absent from CommonLibVR-NG. Found by
+    // searching ".?AVTESSoundFile@@" in VR (name at 0x141edb378, descriptor
+    // starts 0x10 earlier). Consistent with both neighbours: TESObjectARMO's
+    // descriptor (0x1edb340) is 0x28 bytes long and ends here, and this one is
+    // 0x28 bytes long and ends at TESAIForm (0x1edb390).
+    { 392578u, 0x1edb368u },
     { 392579u, 0x1edb390u },
     { 392580u, 0x1edb3b0u },
     { 392581u, 0x1edb3d8u },
@@ -3061,7 +3068,13 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 400184u, 0x1f81590u },
     { 400186u, 0x1f81860u },
     { 400187u, 0x1f81880u },
-    { 400188u, 0x1c395b0u },
+    // Game heap (MemoryManager instance). Was 0x1c395b0, which is wrong: on VR,
+    // MemoryManager::GetSingleton (VR id 11045, 0x10d590) does
+    // "lea rbx, [0x141f81900]", and the game's own free path does
+    // "lea rcx, [0x141f81900]; call 0x140c3d3e0" (VR id 66861, FormFree). The
+    // bad value made Memory::Allocate/Free hand the allocator an unrelated
+    // object as its heap on every client allocation.
+    { 400188u, 0x1f81900u },
     { 400269u, 0x1c39a18u },
     { 400312u, 0x1c39c68u },
     { 400315u, 0x1c39ca0u },
@@ -3091,7 +3104,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 405282u, 0x1c53d48u },
     { 406126u, 0x1c58540u },
     { 406160u, 0x1c587d8u },
-    { 410506u, 0x1c71214u },
+    { 410506u, 0x316ad98u }, // was 0x1c71214: AE 410506 -> SE 523926 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
     { 411155u, 0x1c75e00u },
     { 411347u, 0x1c77af0u },
     { 411348u, 0x1c77b18u },
@@ -3100,5 +3113,6 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 414675u, 0x1c8f6c0u },
     // Found via call-graph matching against the unpacked SE/VR binaries (2026-09-12):
     // TESQuest::SetCompleted, identified via its unique SE caller (DialogueSubtitleStrings, id 34429).
-    { 24991u, 0xc6dc90u },
+    { 24991u, 0x037fc30u }, // was 0xc6dc90: AE 24991 -> SE 24472 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
+    { 32883u, 0x0500890u }, // new: AE 32883 -> SE 32139 by function-size fingerprint (3 preceding sizes identical, id delta matches neighbours) -> VR via addrlib, VR layout matches SE
 };

@@ -158,7 +158,7 @@ static TiltedPhoques::Initializer s_projectileHooks(
         #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> hookLoc(34452);
         #else
-        VersionDbPtr<uint8_t> hookLoc(0);
+        VersionDbPtr<uint8_t> hookLoc(34452);
         #endif
         if (!hookLoc.Get())
             return;

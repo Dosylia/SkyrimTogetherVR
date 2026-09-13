@@ -33,21 +33,31 @@ bool PlayerCamera::WorldPtToScreenPt3(const NiPoint3& in, NiPoint3& out, float z
 
 void PlayerCamera::ForceFirstPerson() noexcept
 {
+#ifdef SKYRIMVR
+    // CommonLibVR-NG's own PlayerCamera::ForceFirstPerson explicitly refuses
+    // to run on VR ("if (REL::Module::IsVR()) return false;") even though the
+    // id (49858) does resolve to a real VR address - forcing a first/third
+    // person switch doesn't map cleanly onto VR's own camera/view handling.
+    // Matching that judgment call rather than trusting "the address resolves"
+    // as proof it's safe to call.
+    return;
+#else
     TP_THIS_FUNCTION(TForceFirstPerson, void, PlayerCamera);
-    // Defensive: ThisCall through an unresolved id would call a null pointer.
     POINTER_SKYRIMSE(TForceFirstPerson, forceFirstPerson, 50790, 49858);
-    if (!forceFirstPerson.Get())
-        return;
     TiltedPhoques::ThisCall(forceFirstPerson, this);
+#endif
 }
 
 void PlayerCamera::ForceThirdPerson() noexcept
 {
+#ifdef SKYRIMVR
+    // See ForceFirstPerson above - CommonLibVR-NG deliberately no-ops this on
+    // VR despite the id (49863) resolving to a real address.
+    return;
+#else
     TP_THIS_FUNCTION(TForceThirdPerson, void, PlayerCamera);
-    // Defensive: ThisCall through an unresolved id would call a null pointer.
     POINTER_SKYRIMSE(TForceThirdPerson, forceThirdPerson, 50796, 49863);
-    if (!forceThirdPerson.Get())
-        return;
     TiltedPhoques::ThisCall(forceThirdPerson, this);
+#endif
 }
 

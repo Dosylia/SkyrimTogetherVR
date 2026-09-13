@@ -21,6 +21,141 @@ std::string SerializeTimePoint(const time_point& time, const std::string& format
     return ss.str();
 }
 
+// Describes a code address: which allocation it lives in, and which file that
+// allocation was mapped from (if any). The game is mapped by our own custom PE
+// loader into a plain private buffer, so it has no module entry and
+// GetModuleFileName/SymFromAddr can't name it - GetMappedFileNameA returns
+// nothing for private memory either. Reporting the allocation base is still
+// enough to tell "our exe" from "the custom-loaded game image" from "a real
+// DLL", which is the distinction that matters when reading the scan below.
+static void DescribeCodeAddress(void* apAddress, char* apOut, size_t aOutSize)
+{
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(apAddress, &mbi, sizeof(mbi)))
+    {
+        _snprintf_s(apOut, aOutSize, _TRUNCATE, "<unqueryable>");
+        return;
+    }
+
+    char name[MAX_PATH];
+    name[0] = '\0';
+
+    // Named module (our exe, a DLL) - report module-relative offset, which is
+    // what a .pdb lookup needs.
+    HMODULE hModule = nullptr;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           static_cast<LPCSTR>(apAddress), &hModule) &&
+        hModule && GetModuleFileNameA(hModule, name, sizeof(name)))
+    {
+        const char* pBase = strrchr(name, '\\');
+        _snprintf_s(apOut, aOutSize, _TRUNCATE, "%s+0x%llx", pBase ? pBase + 1 : name,
+                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(apAddress) -
+                                                    reinterpret_cast<uintptr_t>(hModule)));
+        return;
+    }
+
+    // Unnamed executable memory: the custom-loaded game image, or generated
+    // code (our own CodeGenerator trampolines / MinHook thunks both live here).
+    _snprintf_s(apOut, aOutSize, _TRUNCATE, "<alloc 0x%llx>+0x%llx",
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(mbi.AllocationBase)),
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(apAddress) -
+                                                reinterpret_cast<uintptr_t>(mbi.AllocationBase)));
+}
+
+static bool IsExecutableAddress(void* apAddress)
+{
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(apAddress, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT)
+        return false;
+
+    const DWORD prot = mbi.Protect;
+    if (prot & (PAGE_GUARD | PAGE_NOACCESS))
+        return false;
+
+    return (prot & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+}
+
+// The minidumps for this process are unusable in practice (see the dump-flag
+// comment further down), so the crash context has to reach the log directly.
+// Two parts:
+//   * registers + the faulting access, so a bad pointer can be recognised
+//     on sight (our recurring failures all involve a garbage `this` in rcx);
+//   * a raw stack scan for executable addresses, standing in for a real stack
+//     walk. RtlVirtualUnwind/StackWalk64 need .pdata unwind info, and the
+//     custom PE loader maps the game without any, so a proper walk stops at
+//     the first game frame. Scanning every qword between rsp and the thread's
+//     stack base and keeping the ones that point into committed executable
+//     memory recovers the return-address chain (plus some false positives from
+//     stale slots - order and plausibility still make the real chain readable).
+static void LogCrashContext(PEXCEPTION_POINTERS pExceptionInfo)
+{
+    const auto* pRecord = pExceptionInfo->ExceptionRecord;
+    const auto* pContext = pExceptionInfo->ContextRecord;
+    char desc[MAX_PATH + 64];
+
+    if (pRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && pRecord->NumberParameters >= 2)
+    {
+        const ULONG_PTR kind = pRecord->ExceptionInformation[0];
+        spdlog::error("  faulting access: {} at 0x{:x}",
+                      kind == 0 ? "read from" : (kind == 1 ? "write to" : "execute at"),
+                      static_cast<uint64_t>(pRecord->ExceptionInformation[1]));
+    }
+
+    DescribeCodeAddress(pRecord->ExceptionAddress, desc, sizeof(desc));
+    spdlog::error("  rip 0x{:x}  ({})", static_cast<uint64_t>(pContext->Rip), desc);
+
+    spdlog::error("  rax 0x{:016x}  rcx 0x{:016x}  rdx 0x{:016x}  rbx 0x{:016x}",
+                  static_cast<uint64_t>(pContext->Rax), static_cast<uint64_t>(pContext->Rcx),
+                  static_cast<uint64_t>(pContext->Rdx), static_cast<uint64_t>(pContext->Rbx));
+    spdlog::error("  rsp 0x{:016x}  rbp 0x{:016x}  rsi 0x{:016x}  rdi 0x{:016x}",
+                  static_cast<uint64_t>(pContext->Rsp), static_cast<uint64_t>(pContext->Rbp),
+                  static_cast<uint64_t>(pContext->Rsi), static_cast<uint64_t>(pContext->Rdi));
+    spdlog::error("  r8  0x{:016x}  r9  0x{:016x}  r10 0x{:016x}  r11 0x{:016x}",
+                  static_cast<uint64_t>(pContext->R8), static_cast<uint64_t>(pContext->R9),
+                  static_cast<uint64_t>(pContext->R10), static_cast<uint64_t>(pContext->R11));
+    spdlog::error("  r12 0x{:016x}  r13 0x{:016x}  r14 0x{:016x}  r15 0x{:016x}",
+                  static_cast<uint64_t>(pContext->R12), static_cast<uint64_t>(pContext->R13),
+                  static_cast<uint64_t>(pContext->R14), static_cast<uint64_t>(pContext->R15));
+
+    // Thread stack bounds from the TIB - the scan must not walk off the end of
+    // the stack (the guard page below StackLimit would fault, and past
+    // StackBase isn't ours).
+    const auto* pTib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
+    auto* pCursor = reinterpret_cast<uintptr_t*>(pContext->Rsp & ~static_cast<uintptr_t>(7));
+    const auto* pStackTop = reinterpret_cast<const uintptr_t*>(pTib->StackBase);
+    const auto* pStackLimit = reinterpret_cast<const uintptr_t*>(pTib->StackLimit);
+
+    if (pCursor < pStackLimit || pCursor >= pStackTop)
+    {
+        spdlog::error("  stack scan skipped: rsp 0x{:x} outside thread stack [0x{:x}, 0x{:x})",
+                      static_cast<uint64_t>(pContext->Rsp), reinterpret_cast<uint64_t>(pStackLimit),
+                      reinterpret_cast<uint64_t>(pStackTop));
+        return;
+    }
+
+    spdlog::error("  stack scan (rsp 0x{:x} .. 0x{:x}), executable addresses only:",
+                  reinterpret_cast<uint64_t>(pCursor), reinterpret_cast<uint64_t>(pStackTop));
+
+    constexpr size_t kMaxSlots = 4096; // 32KB of stack - deep enough for a load-time call chain
+    constexpr size_t kMaxHits = 48;
+
+    size_t hits = 0;
+    for (size_t slot = 0; slot < kMaxSlots && pCursor < pStackTop && hits < kMaxHits; ++slot, ++pCursor)
+    {
+        auto* pCandidate = reinterpret_cast<void*>(*pCursor);
+        if (!IsExecutableAddress(pCandidate))
+            continue;
+
+        DescribeCodeAddress(pCandidate, desc, sizeof(desc));
+        spdlog::error("    [rsp+0x{:04x}] 0x{:012x}  {}", slot * sizeof(uintptr_t),
+                      reinterpret_cast<uint64_t>(pCandidate), desc);
+        ++hits;
+    }
+
+    if (!hits)
+        spdlog::error("    (no executable addresses found - stack likely corrupted)");
+}
+
 LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 {
     // Separate one-shot gates per exception code: an access violation that a
@@ -54,6 +189,8 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
                       pExceptionInfo->ExceptionRecord->ExceptionAddress,
                       pExceptionInfo->ExceptionRecord->ExceptionFlags);
 
+        LogCrashContext(pExceptionInfo);
+
 #if (IS_MASTER)
         volatile static bool bMiniDump = false;
 #else
@@ -61,7 +198,9 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 #endif
         if (bMiniDump)
         {
-            HANDLE hDumpFile = NULL;
+            HANDLE hDumpFile = INVALID_HANDLE_VALUE;
+            BOOL dumpWritten = FALSE;
+            DWORD dumpError = 0;
             try
             {
                 MINIDUMP_EXCEPTION_INFORMATION M;
@@ -85,41 +224,59 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 
                 hDumpFile = CreateFileA(subPath.string().c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                                         FILE_ATTRIBUTE_NORMAL, NULL);
+                if (hDumpFile == INVALID_HANDLE_VALUE)
+                    dumpError = GetLastError();
 
                 // baseline settings from https://stackoverflow.com/a/63123214/5273909
-                // MiniDumpWithFullMemory was tried and reverted: for this
-                // process (1GB+ reserved game_seg buffer plus normal game
-                // heap) it took ~3 minutes and produced a ~7GB file - easy to
-                // mistake for a hang and kill before the write finishes
-                // (which happened), and impractical for repeated iteration
-                // even when it succeeds. MiniDumpWithIndirectlyReferencedMemory
-                // captures memory reachable from register/stack pointers
-                // (enough to inspect a specific crashing pointer) at a much
-                // smaller/faster cost.
-                auto dumpSettings = MiniDumpWithDataSegs | MiniDumpWithProcessThreadData | MiniDumpWithHandleData |
-                                    MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory |
-                                    /*
-                                    //MiniDumpWithPrivateReadWriteMemory | // this one gens bad dump
-                                    MiniDumpWithUnloadedModules |
-                                    MiniDumpWithFullMemoryInfo |
-                                    MiniDumpWithTokenInformation |
-                                    MiniDumpWithPrivateWriteCopyMemory |
-                                    */
-                                    0;
+                //
+                // Keep this minimal. Every larger setting has been tried on this
+                // process and failed, because of the 1GB+ buffer the custom PE
+                // loader reserves for the game image:
+                //   * MiniDumpWithFullMemory: ~7GB, ~3 minutes - indistinguishable
+                //     from a hang, and killed mid-write in practice.
+                //   * MiniDumpWithIndirectlyReferencedMemory: chases pointers into
+                //     that same buffer, producing ~1GB dumps that cdb then rejects
+                //     as truncated ("Memory range data only partially present"),
+                //     and sometimes a 0-byte file. Unusable either way.
+                // MiniDumpNormal always includes thread contexts and stacks, which
+                // is what a call stack needs. MiniDumpWithDataSegs is NOT cheap
+                // here (~1GB: our data segment is the game_seg buffer), but it
+                // is valid and it holds the decrypted game code - the on-disk
+                // SkyrimVR.exe is SteamStub-encrypted, so this dump is the only
+                // place the game can be disassembled. Keep it. Anything the dump can't hold is
+                // covered by LogCrashContext() above, which logs registers and a
+                // stack scan and does not depend on the dump succeeding at all.
+                auto dumpSettings = MiniDumpNormal | MiniDumpWithDataSegs | MiniDumpWithThreadInfo;
 
-                MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), hDumpFile, (MINIDUMP_TYPE)dumpSettings,
-                                  (pExceptionInfo) ? &M : NULL, NULL, NULL);
+                if (hDumpFile != INVALID_HANDLE_VALUE)
+                {
+                    dumpWritten = MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), hDumpFile,
+                                                    (MINIDUMP_TYPE)dumpSettings, (pExceptionInfo) ? &M : NULL, NULL,
+                                                    NULL);
+                    if (!dumpWritten)
+                        dumpError = GetLastError();
+                }
             }
             catch (...) // Mini-dump is best effort only.
             {
             }
 
-            if (!hDumpFile)
-                spdlog::critical(__FUNCTION__ ": coredump may have failed.");
+            // CreateFileA reports failure as INVALID_HANDLE_VALUE (-1), not NULL -
+            // the old "if (!hDumpFile)" test therefore took the success branch for
+            // both outcomes and logged "coredump created" even when no file was
+            // ever opened. That claim sent several debugging sessions looking for
+            // dumps that did not exist; report what actually happened instead.
+            if (hDumpFile == INVALID_HANDLE_VALUE)
+                spdlog::critical(__FUNCTION__ ": coredump file could not be created (error {}).", dumpError);
             else
             {
                 CloseHandle(hDumpFile);
-                spdlog::critical(__FUNCTION__ ": coredump created -> flush logs.");
+                if (dumpWritten)
+                    spdlog::critical(__FUNCTION__ ": coredump created -> flush logs.");
+                else
+                    spdlog::critical(__FUNCTION__ ": MiniDumpWriteDump failed (error {:#x}) -> rely on the logged "
+                                     "crash context above.",
+                                     dumpError);
             }
         }
 

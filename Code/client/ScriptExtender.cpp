@@ -5,7 +5,14 @@
 
 namespace
 {
+#ifndef SKYRIMVR
 constexpr wchar_t kScriptExtenderName[] = L"skse64";
+#else
+// SKSE VR ships as sksevr_1_4_15.dll - the skse64 prefix never matched it, so
+// SKSE (and every SKSE plugin, including Skyrim VR ESL Support) silently never
+// loaded under our launcher.
+constexpr wchar_t kScriptExtenderName[] = L"sksevr";
+#endif
 
 constexpr char kScriptExtenderEntrypoint[] = "StartSKSE";
 
@@ -113,7 +120,10 @@ void LoadScriptExender()
     }
 
     if (!needle)
+    {
+        spdlog::warn("No Script Extender matching game version {} found in {}", exeVerson, gameDir.string());
         return;
+    }
 
     FileVersion fileVersion;
     if (GetFileVersion(*needle, fileVersion) != 0)
@@ -123,6 +133,25 @@ void LoadScriptExender()
     }
 
     auto skseVersion = fmt::format("v{}.{}.{}.{}", fileVersion.versions[0], fileVersion.versions[1], fileVersion.versions[2], fileVersion.versions[3]);
+
+#ifdef SKYRIMVR
+    // SKSE VR is built from the pre-AE skse64 2.0.x line: it exports no
+    // StartSKSE() (that entry point was added to AE-era SKSE for Skyrim
+    // Together), and its version (2.0.12) is below kSKSEMinBuild. Instead its
+    // DllMain calls the runtime initializer directly on DLL_PROCESS_ATTACH
+    // (verified by disassembly: DllMain -> the routine that logs "SKSEVR
+    // runtime: initialize" and "reloc mgr imagebase"), so loading the DLL is
+    // what starts it. It relocates against GetModuleHandle(NULL), which is our
+    // launcher image hosting the game at 0x140000000 - the same base our own
+    // VersionDb uses. Check sksevr.log's imagebase line if hooks misbehave.
+    if (g_SKSEModuleHandle = LoadLibraryW(needle->c_str()))
+        spdlog::info("SKSE VR {} loaded (initialized from DllMain). Messages without a colored [timestamp] prefix "
+                     "come from the Script Extender and its plugins.",
+                     skseVersion);
+    else
+        spdlog::error("Failed to load {} (error {})", needle->string(), GetLastError());
+    return;
+#endif
 
     // nice try.
     int SkseVCum = fileVersion.versions[0] * 1000000 + fileVersion.versions[1] * 10000 + fileVersion.versions[2] * 100 + fileVersion.versions[3];

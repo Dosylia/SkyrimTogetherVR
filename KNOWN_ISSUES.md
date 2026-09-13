@@ -113,6 +113,42 @@ site against SE's) and correct the struct offsets in `Projectile.h`.
 Basic projectile sync (position, does it exist) still works - only this
 metadata is missing.
 
+## Friend-supplied RTTI anchors verified against CommonLibVR-NG (2026-09-13)
+
+A list of SE addresses + suggested VR RTTI/vtable anchors for the parked
+ids was cross-checked directly against CommonLibVR-NG's `Offsets_RTTI.h`/
+`Offsets_VTABLE.h` and source. Results:
+
+- **`32887`** (`IAnimationGraphManagerHolder::SetGraphVariableFloat`) -
+  already correctly fixed (`-> 32143`), confirmed byte-for-byte against
+  CommonLibVR-NG's own `RELOCATION_ID(32143, 32887)` for this exact
+  function. No further action.
+- **RTTI anchors confirmed genuinely correct** (computed VR offset +
+  `0x140000000` matches the given anchor exactly):
+  - `IAnimationGraphManagerHolder` (covers `32883`/`32887`): `0x141ee1038`
+  - `PlayerCamera` (covers `50790`/`50796`): `0x141f45ae0`
+  - `BSTaskletManager` (covers `69554`): `0x141f60270`
+- **Important catch found via this check:** CommonLibVR-NG's own
+  `PlayerCamera::ForceFirstPerson`/`ForceThirdPerson` explicitly refuse to
+  run on VR (`if (REL::Module::IsVR()) return false;`) **even though the id
+  resolves to a real VR address**. An address resolving is not proof it's
+  safe to call - VR's camera/view handling doesn't map onto a first/third
+  person force-switch the same way. Matched that judgment call: both
+  functions are now VR no-ops (`Code/client/Games/Skyrim/Camera/PlayerCamera.cpp`)
+  regardless of whether the id resolves. (Currently unused by any caller in
+  this codebase, so this was a dormant risk, not an active bug.)
+- **Still requiring real Ghidra work, confirmed absent from CommonLibVR-NG
+  entirely** (not just "unmapped id" - the class/function isn't modeled
+  there at all): `32883` (`InternalRevertAnimationGraphManager`), the
+  specific `BSTaskletManager` getter behind `69554`, `32803`
+  (`AnimationExperiments.cpp`'s unnamed helper), `51538`
+  (`FavoritesCanProcess`). (`392578` was also listed here - **wrong, now
+  resolved**, see "RTTI audit" below.)
+  The RTTI/vtable anchors above are legitimate starting points for that
+  work (find the vtable, find constructor cross-references to it in
+  Ghidra, then identify the target member function by its call site), not
+  shortcuts around it.
+
 ## Parked / unresolved address-library IDs
 
 These VR ids could not be resolved by any method tried this session
@@ -123,7 +159,7 @@ rather than crashing - meaning whatever feature depends on them silently
 doesn't work on VR, with no error shown.
 
 - Function ids: `32803`, `32883`, `32887`, `50790`, `50796`, `51538`, `69554`
-- RTTI id: `392578`
+- ~~RTTI id: `392578`~~ resolved to `0x1edb368`, see "RTTI audit" below.
 
 If you need one of these features working, the next step is Ghidra
 call-graph matching against the two binaries (see the session history for
@@ -264,10 +300,299 @@ have not been confirmed correct against real VR disassembly:
   head/hand transforms for pose sync. These are typical/plausible offsets,
   not confirmed against the actual VR `PlayerCharacter` layout.
 
+## Neighbour interpolation: 27 more ids resolved, 142 left (`VR_POINTERS_TODO.md`)
+
+For AE ids with no `se_ae.csv` entry, the SE id can be inferred when the nearest known
+AE→SE neighbours below and above share the same id delta. It is then confirmed by comparing
+function sizes (AE 1.6.318 addresses vs SE 1.5.97 addresses) for the id and its ±2
+neighbours. Leave-one-out validation on known pairs: **1949/1958 correct** with ≥3/5 sizes
+matching, 377/384 otherwise. Applied to `VRAddressOverrides.h` when fingerprint ≥3/5, the SE
+id has a VR address, and VR function size equals SE size: **26 ids**, plus **32883**
+(InternalRevertAnimationGraphManager → SE 32139 → VR `0x500890`) by hand. Entries are marked
+`neighbour interpolation` / `function-size fingerprint`. They are **not yet dump-checked**.
+Hooks re-enabled by this include the SaveLoad form-id read/write, EquipManager equip/unequip,
+DropObject, UpdateDetectionState, CheckForNewPackage and the VM update. `69165`
+(`BSFixedString::Set`) moved to `0xc6dc90`, which is the value the old crosswalk had wrongly
+given to `SetCompleted`. So the crosswalk contains real addresses filed under the wrong ids.
+
+Note for anyone matching by hand: a friend's lookups for 32883/32887 used the AE id as an SE
+id (SE id 32883 is a different function), which is the same mistake the crosswalk made.
+
+The remaining 142, with AE addresses, candidates and search windows, are in
+**`VR_POINTERS_TODO.md`**, generated for hand-matching in Ghidra.
+
+## Early EngineFixesVR crash when MO2's VFS isn't ready (2026-09-13, probably environmental)
+
+A run died 2 seconds after launch in `EngineFixesVR!std::operator<<`, before any
+`tp_client.log` output. Symbolized stack (Engine Fixes' PDB is in the cdb symbol
+cache): `REL::Module::Module` → `"Failed to get handle to module!"` → its logger,
+which isn't initialized yet → null stream → AV. Engine Fixes VR (2024 CommonLib)
+calls `GetModuleHandleA("SkyrimVR.exe")` in a static initializer. Our launcher
+normally makes that succeed (`TP_GetModuleHandleA/W` + `LdrGetDllHandleEx` in
+`stubs/FileMapping.cpp`), but here the DLL was loaded via usvfs' `LoadLibraryExW`
+hook almost at process start, before those hooks were in place.
+
+Other signs that MO2's virtual filesystem wasn't working properly in that process:
+ReShade (`dxgi.dll`) and Engine Fixes both failed to write their logs, and the crash
+dump was written to the real tools folder instead of `overwrite\Root`. It hadn't
+happened in five earlier runs with the same launcher code. The game was started 6
+seconds after MO2 had been force-closed (for a redeploy) and restarted. **If it
+recurs:** fully close MO2, wait for it to finish loading after restart, then launch.
+If it still happens with MO2 settled, it's a real ordering bug in the launcher:
+Engine Fixes getting loaded before `FileMapping` hooks are installed.
+
+## The crosswalk is wrong for functions: measured, partly replaced (2026-09-13)
+
+**Measured accuracy.** For the 69 function/global ids where the correct VR address
+is independently known (CommonLibVR-NG `RELOCATION_ID(se, ae)` + official VR CSV),
+the crosswalk (`VRAddressOverrides.h`) was **right 0 times out of 69**. Its RTTI
+entries are fine (2805/2806). Treat every crosswalk *function* entry as wrong until
+it has been checked.
+
+**Better source: `alandtse/vr_address_tools`** (clone at `C:\dev\vr_address_tools`,
+updated 2026-09-11). Chain: AE id → SE id via `se_ae.csv` → VR address via the
+official VR CSV, falling back to `database.csv` (13296/13298 agree with the official
+CSV) and then `addrlib.csv` (96.6% agree). Validated against **790 known answers:
+315/315 correct** wherever it produced a result (the rest had no `se_ae.csv` entry).
+Updating `C:\dev\CommonLibVR-NG` (505 commits behind) only added 6 relevant pairs.
+
+**Applied to `VRAddressOverrides.h`:**
+- **24 entries corrected** (marked `// was 0x...: AE -> SE -> VR ...`). Every
+  new address was checked in a crash dump: 23 are clean function starts (`cc`
+  padding + prologue, and `getFormById` already carries another mod's detour),
+  and `410506` (NiCamera NiRTTI) points at the string `"NiCamera"`. All 24 old
+  values were different, consistent with 0/69. This includes `24991`
+  (`TESQuest::SetCompleted`): **the earlier note calling it "verified via
+  Ghidra" was wrong**. The crosswalk value `0xc6dc90` sits among thread/system
+  code, and the real one is `0x37fc30`. It also includes `19742`, the
+  `SpawnActorInWorld` hook behind the latest crash.
+- **50 entries removed** (marked `// removed: unverified hook target`): AE ids
+  with no mapping that feed only a `TP_HOOK`. They now resolve to null, so
+  `FunctionHookManager::Add` skips the hook instead of detouring unrelated game
+  code. **12 of these are also called directly** by multiplayer-sync wrappers
+  (`RealPickUpObject`, `RealDropObject`, `RealCharacterConstructor`,
+  `RealSetWaypoint`/`RealRemoveWaypoint`, `RealLockChange`, `RealSimulateTime`,
+  `RealPerformAction`, `RealInitiateMountPackage`, `RealSpeakSoundFunction`, and
+  the `38903` unequip wrappers in `EquipManager.cpp`). If one of those paths runs,
+  it will crash at address 0, which is at least an obvious crash rather than a
+  silent call into wrong code. `37577` is also used by the debug `CombatView`.
+
+**Still unresolved:** ~100 non-hook ids (direct calls/globals) with no mapping
+still point at crosswalk values, plus the direct `VersionDbPtr` plumbing
+(`36544` WinMain, `68261`/`69066`/`57704` BSThread, UI/renderer). Those were
+deliberately left alone because startup depends on some of them. Mass-nulling
+them broke startup once before.
+
+## Hook audit (2026-09-13): 74 hooks still target untranslated AE ids on VR
+
+After SKSE loaded, the next crash was `HookShowSubtitle` → `Cast<Actor>` on an object
+whose "vtable" was a heap address. The hook target, id `52626`, was never translated
+(`POINTER_SKYRIMSE(..., 52626, 52626)`). The crosswalk sent it to `0x93b1e0`, a small
+lookup helper, so the "speaker" argument was never a speaker. `52627` (HideSubtitle)
+went to a bare `ret 0`. Both are disabled on VR in `SubtitleManager.cpp`.
+
+This is the general problem, not a one-off. Of 266 `POINTER_SKYRIMSE` uses, **183
+have a VR id that is not in the official VR CSV, and every one of them is an
+untranslated AE id** (`sse == vr`). These resolve only through the unaudited
+crosswalk, or to null. **74 of them feed a `TP_HOOK`**. These are the dangerous
+ones: they detour game code without us calling anything, and wrong ones fail far
+from the hook, as in the `Cast<>` crash. Per file:
+
+| File | Hooks on untranslated ids |
+| --- | --- |
+| `Games/Skyrim/Actor.cpp` | 15 |
+| `Games/Skyrim/EquipManager.cpp` | 9 |
+| `Games/Skyrim/TESObjectREFR.cpp` | 8 |
+| `Games/Skyrim/PlayerCharacter.cpp` | 6 |
+| `Games/References.cpp` | 5 |
+| `Games/Skyrim/Magic/MagicTarget.cpp`, `Games/Misc/BSScript.cpp` | 4 each |
+| `SkyrimVM64.cpp`, `Games/SaveLoad.cpp`, `Games/Animation.cpp` | 3 each |
+| `ActorMagicCaster.cpp`, `Interface/UI.cpp` | 2 each |
+| `TimeManager`, `Sky`, `LoadingScreen`, `TESNPC`, `SummonCreatureEffect`, `InvisibilityEffect`, `CombatController`, `SubtitleManager` (now off), `MenuTopicManager`, **`Memory.cpp`** | 1 each |
+
+`Memory.cpp` was checked first, and it **was wrong**. The allocate/free hooks
+(`66859`/`66861`) are correctly translated, but the game-heap global `400188` was
+`0x1c395b0` in the crosswalk. VR's `MemoryManager::GetSingleton` (VR id `11045`)
+and the game's own free path both use `0x141f81900`. So `Memory::Allocate`/`Free`
+passed the allocator an unrelated object as its heap on every client allocation,
+a likely source of the corrupted objects seen in several crashes. Fixed to
+`0x1f81900`, which also fits the table's neighbours (`400186 → 0x1f81860`,
+`400187 → 0x1f81880`). This count covers only `POINTER_SKYRIMSE`. Direct
+`VersionDbPtr<>(id)` uses (e.g. `BSThread.cpp`) come on top.
+
+Per hook, in order of preference: find a `RELOCATION_ID(se, ae)` for that AE id in
+CommonLibVR-NG (grep the AE id, the second argument); otherwise interpolate from
+neighbours in the same class and confirm by disassembling the target in a crash
+dump; otherwise disable the hook on VR with a comment. **Do not mass-disable**. That
+was tried once and broke startup (see `BSThread`).
+
+## RTTI audit (2026-09-13): all 2806 RTTI ids checked, and `Cast<>` was broken on VR
+
+**RTTI TypeDescriptor ids** (`Code/client/Games/Skyrim/RTTI.cpp`, AE-numbered
+`392xxx`) resolve on VR through the crosswalk table. All 2806 were compared with
+CommonLibVR-NG's `Offsets_RTTI.h` (`VariantID(se, ae, vr)`, 7917 entries):
+**2805 match exactly, 0 mismatch, 0 collide with an id in the VR CSV.** The RTTI
+part of the crosswalk can be trusted. The *function* part cannot (see below).
+
+The one unresolved id was **`392578` (`TESSoundFile`)**. The earlier note calling it
+"not a function / an RTTI type descriptor at `0x141b592b8`" was wrong. That SE
+address is an `UNWIND_INFO` record (checked in Ghidra), almost certainly from
+looking up the AE id in an SE table, which is the same mistake as the crosswalk.
+Resolved to **`0x1edb368`**:
+- a Ghidra string search for `.?AVTESSoundFile@@` in VR puts the name at
+  `0x141edb378`, and the descriptor starts `0x10` before it;
+- it sits exactly between CommonLibVR-NG's neighbours: `TESObjectARMO` at
+  `0x1edb340` (descriptor is 0x28 bytes, ending at `0x1edb368`) and `TESAIForm` at
+  `0x1edb390` (`TESSoundFile`'s descriptor is 0x28 bytes, ending there);
+- in dump memory, all three descriptors share the `type_info` vftable
+  `0x1419102d0`.
+
+**`internal::DynamicCast` was wrong, which broke every `Cast<>` on VR.** It used AE id
+`109689`, which the crosswalk mapped to `0x13cf190`. On VR that address is an SEH
+unwind funclet (`lea rcx, <global>; jmp <destructor>`). So every `Cast<>` ran a
+destructor on a static object and returned garbage. That is a plausible source of
+the "random" corruption seen so far. CommonLibVR-NG has `RELOCATION_ID(102238,
+109689)`. VR id `102238` is in the official CSV at `0x138baba`, an import thunk
+whose IAT slot holds `VCRUNTIME140!__RTDynamicCast` (verified in the dump). Fixed,
+and the bad crosswalk entry was removed.
+
+**Lesson:** the crosswalk's function entries can land on real code that is simply
+the wrong code, and nothing crashes at the call site. For any id that matters,
+check the target in a dump (`u <addr>`) rather than trusting that it resolves.
+
+## SKSE VR was never loaded -> 279 plugins overflowed VR's 255-slot plugin array (the `TESFile::OpenTES` crash)
+
+**Root cause of the recurring `0x14018a6a6` crash, found 2026-09-13.**
+
+The stack scan showed the caller: a game loop at `0x14017f220` that does, for
+`i < [TESDataHandler+0xD70]`, `OpenTES([TESDataHandler+0xD78 + i*8])`. In the dump,
+`loadedModCount` (`+0xD70`) was **`0x117` = 279**, but on VR `loadedMods` is a fixed
+`TESFile*[0xFF]` (see CommonLibVR-NG `TESDataHandler.h`, `// D78 this should be
+avoided if SkyrimVRESL is available`). Entries past 255 read whatever follows the
+array, hence the non-canonical `this` (`0x00179a16'1c0b4550`).
+
+FUS (RO DAH profile: 286 enabled plugins) depends on **Skyrim VR ESL Support**
+(`skyrimvresl.dll`), which replaces that array with an expanded file collection.
+It is an SKSE plugin, and **our launcher never loaded SKSE VR**: `LoadScriptExender()`
+only accepted `skse64*.dll` with a `StartSKSE` export and build >= 20100. SKSE VR
+is `sksevr_1_4_15.dll`, v2.0.12, with **no exports at all**. The module list in the
+crash dump confirmed it: no `sksevr_*`, no `skyrimvresl` (only `EngineFixesVR`, which
+comes in through its own preloader). This is also why FUS works fine through
+`sksevr_loader.exe` but not through us.
+
+**Fix (`Code/client/ScriptExtender.cpp`, VR only):** match the `sksevr` prefix and
+just `LoadLibraryW` it. SKSE VR's `DllMain` runs its initializer on
+`DLL_PROCESS_ATTACH` (verified by disassembly: entry -> `dllmain_dispatch` ->
+`DllMain` -> the routine logging `"SKSEVR runtime: initialize"` / `"reloc mgr
+imagebase = %016I64X"`). It relocates against `GetModuleHandle(NULL)`, which is our
+launcher image hosting the game at `0x140000000`.
+
+**Still to verify on the first run with this fix:**
+- `Documents\My Games\Skyrim VR\SKSE\sksevr.log` exists, the imagebase is
+  `0000000140000000`, and `skyrimvresl.dll` is listed as loaded.
+- SKSE is loaded from `BeginMain()` (the game's WinMain), later than
+  `sksevr_loader` would inject it. Anything SKSE needs to hook before WinMain may
+  be missed.
+- SKSE's hooks and SKSE plugins (HIGGS, VRIK, PLANCK, ...) now share the process
+  with our own hooks, including the unverified crosswalk ones. New conflicts are
+  expected.
+
+## Minidumps: read the logged crash context first
+
+> **Correction (2026-09-13):** with `MiniDumpNormal | MiniDumpWithDataSegs |
+> MiniDumpWithThreadInfo` the dump is still ~1GB (`WithDataSegs` includes our
+> exe's data segment, which *is* the `game_seg` buffer), but it **is valid**, and
+> it is currently the **only way to disassemble the game**: the on-disk
+> `SkyrimVR.exe` is SteamStub-encrypted, so `cdb -z SkyrimVR.exe` shows garbage.
+> Open the dump instead, and `u`/`dq` the game addresses directly. Keep
+> `WithDataSegs`. The older notes below about the *previous* flags still stand.
+
+The custom PE loader reserves a 1GB+ buffer for the game image, and that single
+fact defeats every meaningful `MiniDumpWriteDump` setting:
+
+| Setting | Result |
+| --- | --- |
+| `MiniDumpWithFullMemory` | ~7GB, ~3 minutes. Looks like a hang; was killed mid-write in practice, leaving corrupt files. |
+| `MiniDumpWithIndirectlyReferencedMemory` | Chases pointers into the same buffer. ~1GB dumps that `cdb` rejects as truncated (`Memory range data only partially present in dump`, `Win32 error 0n1392`), and sometimes a **0-byte** file. |
+
+Both of the 2026-09-13 dumps for the `TESFile::OpenTES` crash were unusable this
+way (0 bytes, and 353MB-but-truncated). 22 such dumps had accumulated to **21GB**
+in `<MO2 instance>\overwrite\Root\`.
+
+Two things were changed in `Code/client/CrashHandler.cpp` as a result:
+
+1. **Dump flags reduced** to `MiniDumpNormal | MiniDumpWithDataSegs |
+   MiniDumpWithThreadInfo`. `MiniDumpNormal` still includes thread contexts and
+   stacks (all a call stack needs), and the dump now actually completes.
+2. **`LogCrashContext()` added** - the crash context goes straight into
+   `tp_client.log` and does not depend on the dump succeeding at all. It logs:
+   - the faulting access (read/write/execute + target address);
+   - all integer registers (a garbage `this` in `rcx` is recognisable on sight);
+   - a **raw stack scan**: every qword between `rsp` and the thread's
+     `NT_TIB::StackBase` that points into committed *executable* memory, with
+     each hit attributed to `module+offset` or `<alloc base>+offset`.
+
+   The stack scan exists because a proper stack walk is impossible here:
+   `RtlVirtualUnwind`/`StackWalk64` need `.pdata` unwind info, and **the custom
+   PE loader maps the game image without any**, so a real walk stops dead at the
+   first game frame. Scanning recovers the return-address chain (with some
+   false positives from stale slots - order and plausibility make the real chain
+   readable). Attribution also distinguishes our exe from the custom-loaded game
+   image from generated code (`CodeGenerator` trampolines, MinHook thunks), which
+   is exactly the distinction needed to tell whether one of our hooks is in the
+   chain.
+
+### `"coredump created"` in older logs is a lie
+
+`CreateFileA` reports failure as `INVALID_HANDLE_VALUE` (-1), not `NULL`, but the
+handler tested `if (!hDumpFile)`. That test took the *success* branch for both
+outcomes, so the log said `coredump created -> flush logs.` even when no file was
+ever opened. This sent several debugging sessions hunting for dumps that did not
+exist. Now fixed, and `MiniDumpWriteDump`'s return value plus `GetLastError()`
+are both checked and logged.
+
+## `ModManager::GetCellFromCoordinates` id 13718 is untranslated and probably null on VR
+
+`Code/client/Games/ModManager.cpp` has `POINTER_SKYRIMSE(TModManager, getCell,
+13718, 13718)` - i.e. the AE id was left in place for VR. Its two nearest
+CommonLibVR-NG neighbours in `TESDataHandler` both shift by a consistent **-98**:
+
+- `GetExtCellDataFromFileByEditorID`: `RELOCATION_ID(13618, 13716)`
+- `CreateReferenceAtLocation`/`SpawnNewREFR`: `RELOCATION_ID(13625, 13723)`
+
+so AE 13718 interpolates to **VR 13620**. Not applied, because neither 13618 nor
+13620 is present in `version-1-4-15-0.csv` at all - the VR Address Library is
+*sparse* (community-generated; many ids simply absent), so this id most likely
+resolves to null on VR and `ThisCall` on it would fault at address 0. Only
+reached on runtime cell lookups, not during load, so it is not the current
+blocker - but it is a live landmine.
+
+Note the wider implication: **a missing CSV entry is a different failure mode
+from a wrong id**, and the sparse VR CSV means some correctly-translated ids
+still won't resolve. `VersionDbPtr::GetPtr()` already logs unresolved ids via
+`OutputDebugStringA` - watch DebugView for those.
+
+## Verified correct against CommonLibVR-NG (no change needed)
+
+- `ModManager::Get()` - `POINTER_SKYRIMSE(ModManager*, modManager, 400269, 514141)`
+  matches `RELOCATION_ID(514141, 400269)` for `TESDataHandler::GetSingleton`.
+- `SpawnNewREFR` - `(13723, 13625)` matches `RELOCATION_ID(13625, 13723)`.
+- **The crashing address `0x14018a6a6` is genuinely `TESFile::OpenTES+0xf6`.**
+  Confirmed two independent ways: `version-1-4-15-0.csv` puts id 13855 at
+  offset `0x18a5b0` with the next entry at `0x18abf0` (so `+0xf6` is well inside
+  that function), and CommonLibVR-NG's `TESFile::OpenTES` uses
+  `RELOCATION_ID(13855, 13931)` whose *first* argument is the SE/VR id. This is
+  not a symbol-misattribution artefact.
+
 ## Debugging methodology that worked this session
 
 For the next crash:
 
+0. **Read `logs\tp_client.log` first.** It is the fastest signal by far: it shows
+   how far startup got, the exception code and address, and (since
+   `LogCrashContext()` was added) registers and a stack scan. Only go to a dump
+   if the log is somehow absent - see the minidump section above for why dumps
+   are the *less* reliable source for this process.
 1. **Get a real dump.** The game's own crash handler
    (`Code/client/CrashHandler.cpp`) only dumps on `EXCEPTION_ACCESS_VIOLATION`
    or `STATUS_STACK_BUFFER_OVERRUN`, and only the *first* one per process, and
