@@ -19,6 +19,11 @@ extern bool IsGameMemoryAddress(const uint8_t* apAddress);
 
 extern "C" __declspec(dllimport) NTSTATUS WINAPI LdrGetDllFullName(HMODULE, PUNICODE_STRING);
 
+#ifdef SKYRIMVR
+// defined in client ScriptExtender.cpp; set just before SKSE VR is loaded
+extern bool g_ScriptExtenderStarting;
+#endif
+
 namespace
 {
 std::wstring s_OverridePath;
@@ -239,6 +244,22 @@ NTSTATUS WINAPI TP_LdrLoadDll(const wchar_t* apPath, uint32_t* apFlags, UNICODE_
             // this signals windows to *NOT TRY* loading it again at a later time.
             return 0xC0000428;
         }
+
+#ifdef SKYRIMVR
+        // The "skse64 plugin preloader" (d3dx9_42.dll proxy, shipped by FUS)
+        // hooks _initterm_e and loads EngineFixesVR during the game's CRT
+        // init. Under this launcher that early load crashes: EF's static
+        // initializer REL::Module::Module() fails GetModuleHandleA("SkyrimVR.exe")
+        // ("Failed to get handle to module!") and then crashes logging it,
+        // because its logger isn't set up yet. When EF is loaded later by SKSE
+        // VR instead (LoadScriptExender), it works - that was the state in every
+        // run that reached the main menu. So refuse the load until our client
+        // starts SKSE, and let SKSE load it. STATUS_DLL_NOT_FOUND rather than the
+        // blocklist's invalid-image-hash status, so the later load isn't refused.
+        const std::wstring_view baseName(name, fileName.length() - (pos + 1));
+        if (!g_ScriptExtenderStarting && baseName.size() == 17 && _wcsnicmp(baseName.data(), L"EngineFixesVR.dll", 17) == 0)
+            return 0xC0000135; // STATUS_DLL_NOT_FOUND
+#endif
     }
 
     return RealLdrLoadDll(apPath, apFlags, apFileName, apHandle);
@@ -286,6 +307,12 @@ void CoreStubsInit()
     // downcalls to LdrGetDllHandleEx, so we have to hook this too.
     VALIDATE(MH_CreateHookApi(L"kernel32.dll", "GetModuleHandleW", &TP_GetModuleHandleW, (void**)&RealGetModuleHandleW));
     VALIDATE(MH_CreateHookApi(L"kernel32.dll", "GetModuleHandleA", &TP_GetModuleHandleA, (void**)&RealGetModuleHandleA));
+
+#ifdef SKYRIMVR
+    extern bool NearImageReserveInstallHooks();
+    if (!NearImageReserveInstallHooks())
+        Die(L"CoreStubsInit(): failed to hook VirtualAlloc/VirtualQuery for the trampoline pool.", true);
+#endif
 
     VALIDATE(MH_EnableHook(nullptr));
 }

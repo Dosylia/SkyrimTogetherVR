@@ -76,6 +76,13 @@ std::string GetSKSEStyleExeVersion()
 }
 } // namespace
 
+#ifdef SKYRIMVR
+// Read by the launcher's LdrLoadDll hook (stubs/FileMapping.cpp): EngineFixesVR
+// is refused until this is set, so it loads via SKSE rather than via the
+// d3dx9_42 plugin preloader during the game's CRT init.
+bool g_ScriptExtenderStarting = false;
+#endif
+
 bool IsScriptExtenderLoaded()
 {
     return g_SKSEModuleHandle;
@@ -144,6 +151,7 @@ void LoadScriptExender()
     // what starts it. It relocates against GetModuleHandle(NULL), which is our
     // launcher image hosting the game at 0x140000000 - the same base our own
     // VersionDb uses. Check sksevr.log's imagebase line if hooks misbehave.
+    g_ScriptExtenderStarting = true; // SKSE loads its plugins from inside LoadLibraryW
     if (g_SKSEModuleHandle = LoadLibraryW(needle->c_str()))
         spdlog::info("SKSE VR {} loaded (initialized from DllMain). Messages without a colored [timestamp] prefix "
                      "come from the Script Extender and its plugins.",

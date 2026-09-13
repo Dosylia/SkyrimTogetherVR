@@ -1,6 +1,6 @@
 # VR pointers still to find
 
-142 addresses that Skyrim Together still has no trustworthy Skyrim VR (1.4.15) address for.
+140 addresses that Skyrim Together still has no trustworthy Skyrim VR (1.4.15) address for.
 Generated 2026-09-13. Everything **not** in this file is either already resolved or verified,
 so nothing here duplicates earlier work.
 
@@ -176,8 +176,6 @@ Several of these currently work through old values (WinMain 36544, BSThread 6826
 | 82074 | `s_isMenuOpen` (Games/Skyrim/Interface/UI.cpp:23) | call | 0x140F044A0 | - | - | AE 82081 = SE 79944 = VR 0xf1a680 |
 | 82088 | `s_CloseAll` (Games/Skyrim/Interface/UI.cpp:31) | call | 0x140F06320 | - | AE 82081 = SE 79944 = VR 0xf1a680 | AE 82167 = SE 80059 = VR 0xf1fbc0 |
 | 104296 | `s_reset` (Games/Skyrim/Misc/BSScript.cpp:24) | call | 0x1413613E0 | - | AE 104294 = SE 97506 = VR 0x126e940 | AE 104299 = SE 97514 = VR 0x126f6f0 |
-| 104653 | `ctor` (Games/Skyrim/Misc/BSScript.h:281) | call | 0x141379C20 | - | AE 104651 = SE 97923 = VR 0x129dd90 | AE 104665 = SE 97935 = VR 0x12abde0 |
-| 104655 | `dtor` (Games/Skyrim/Misc/BSScript.h:274) | call | 0x141379E70 | - | AE 104651 = SE 97923 = VR 0x129dd90 | AE 104665 = SE 97935 = VR 0x12abde0 |
 | 370892 | `s_greetDistance` (Games/References.cpp:44) | call | 0x141E6DA68 | - | - | - |
 | 380768 | `bAlwaysActive` (TiltedOnlineApp.cpp:92) | call | 0x141E83088 | - | - | - |
 | 381472 | `s_difficulty` (Games/References.cpp:38) | call | 0x141E84A28 | - | - | - |

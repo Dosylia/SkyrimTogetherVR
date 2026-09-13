@@ -53,6 +53,14 @@ int main(int argc, char** argv)
         return -1;
     }
 
+#ifdef SKYRIMVR
+    // Pool near the image for SKSE plugin trampolines; see memory/NearImageReserve.cpp.
+    // Not fatal if it fails - plugins then fall back to whatever is free.
+    extern bool NearImageReserveInit();
+    if (!NearImageReserveInit())
+        OutputDebugStringA("NearImageReserve: could not reserve a pool below the image\n");
+#endif
+
     PreloadSystemDlls();
     CoreStubsInit();
 

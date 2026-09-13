@@ -1,0 +1,174 @@
+// Near-image address reservation for SKSE plugin trampolines (VR).
+//
+// CommonLib's SKSE::Trampoline::create (and SKSE's own branch trampoline) must
+// allocate executable memory within +-2GB of the game image, so a rel32 jump
+// can reach it. They find it by walking VirtualQuery from (base - 2GB) and
+// calling VirtualAlloc at the first MEM_FREE region that is big enough.
+//
+// Under this launcher, the game's heap allocations (routed to mimalloc by
+// client Games/Memory.cpp, with Engine Fixes' memory manager inactive) fill
+// that window long before plugins that create trampolines late - DynDOLOD.dll
+// does it at kDataLoaded - get there: "SKSE/Trampoline.cpp(54): failed to
+// create trampoline", a popup, then process termination.
+//
+// Fix: reserve a pool just below the image as early as possible, so ordinary
+// allocations (lpAddress == NULL) can never land in it. VirtualQuery reports
+// the pool's reserved pieces as MEM_FREE, and a VirtualAlloc that targets an
+// explicit address inside a piece releases that piece, performs the real
+// allocation, and re-reserves whatever is left on either side. Only code that
+// deliberately asks for an address near the image - i.e. trampoline
+// allocators - ever gets memory from the pool.
+
+#include <Windows.h>
+#include <MinHook.h>
+
+#include <array>
+#include <cstdint>
+#include <cstdio>
+
+#ifdef SKYRIMVR
+
+namespace
+{
+constexpr uintptr_t kImageBase = 0x140000000;
+constexpr uintptr_t kPoolSize = 0x10000000;   // 256MB of address space (reserved only, no commit)
+constexpr uintptr_t kGranularity = 0x10000;   // allocation granularity on x64 Windows
+constexpr uintptr_t kWindow = 0x7FFF0000;     // stay inside the +-2GB rel32 range
+
+struct Piece
+{
+    uintptr_t base = 0;
+    uintptr_t end = 0; // exclusive; base == end means unused
+};
+
+std::array<Piece, 256> s_pieces{};
+SRWLOCK s_lock = SRWLOCK_INIT;
+
+LPVOID(WINAPI* RealVirtualAlloc)(LPVOID, SIZE_T, DWORD, DWORD) = nullptr;
+SIZE_T(WINAPI* RealVirtualQuery)(LPCVOID, PMEMORY_BASIC_INFORMATION, SIZE_T) = nullptr;
+
+uintptr_t RoundDown(uintptr_t aValue) { return aValue & ~(kGranularity - 1); }
+uintptr_t RoundUp(uintptr_t aValue) { return RoundDown(aValue + kGranularity - 1); }
+
+bool ReservePiece(uintptr_t aBase, uintptr_t aEnd)
+{
+    if (aEnd <= aBase)
+        return true;
+
+    for (auto& piece : s_pieces)
+    {
+        if (piece.base == piece.end)
+        {
+            // RealVirtualAlloc once hooked: this runs inside TP_VirtualAlloc with s_lock held,
+            // and going through the hook again would deadlock on it.
+            const auto pAlloc = RealVirtualAlloc ? RealVirtualAlloc : &VirtualAlloc;
+            if (!pAlloc(reinterpret_cast<LPVOID>(aBase), aEnd - aBase, MEM_RESERVE, PAGE_NOACCESS))
+                return false;
+            piece = {aBase, aEnd};
+            return true;
+        }
+    }
+    return false; // out of piece slots - the remainder just becomes ordinary free space
+}
+
+// Caller holds the lock.
+Piece* FindPiece(uintptr_t aAddress)
+{
+    for (auto& piece : s_pieces)
+        if (piece.base != piece.end && aAddress >= piece.base && aAddress < piece.end)
+            return &piece;
+    return nullptr;
+}
+
+SIZE_T WINAPI TP_VirtualQuery(LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, SIZE_T dwLength)
+{
+    const SIZE_T result = RealVirtualQuery(lpAddress, lpBuffer, dwLength);
+    if (!result || !lpBuffer || dwLength < sizeof(MEMORY_BASIC_INFORMATION))
+        return result;
+
+    AcquireSRWLockShared(&s_lock);
+    if (const Piece* pPiece = FindPiece(reinterpret_cast<uintptr_t>(lpAddress)))
+    {
+        // Present the whole reserved piece as one free region.
+        lpBuffer->BaseAddress = reinterpret_cast<PVOID>(pPiece->base);
+        lpBuffer->AllocationBase = nullptr;
+        lpBuffer->AllocationProtect = 0;
+        lpBuffer->RegionSize = pPiece->end - pPiece->base;
+        lpBuffer->State = MEM_FREE;
+        lpBuffer->Protect = PAGE_NOACCESS;
+        lpBuffer->Type = 0;
+    }
+    ReleaseSRWLockShared(&s_lock);
+    return result;
+}
+
+LPVOID WINAPI TP_VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
+{
+    if (!lpAddress || !dwSize)
+        return RealVirtualAlloc(lpAddress, dwSize, flAllocationType, flProtect);
+
+    const uintptr_t start = RoundDown(reinterpret_cast<uintptr_t>(lpAddress));
+    const uintptr_t end = RoundUp(reinterpret_cast<uintptr_t>(lpAddress) + dwSize);
+
+    AcquireSRWLockExclusive(&s_lock);
+    Piece* pPiece = FindPiece(start);
+    if (!pPiece || end > pPiece->end || !(flAllocationType & MEM_RESERVE))
+    {
+        // Not a fresh allocation inside the pool (e.g. committing into memory
+        // already handed out) - leave it to the OS.
+        ReleaseSRWLockExclusive(&s_lock);
+        return RealVirtualAlloc(lpAddress, dwSize, flAllocationType, flProtect);
+    }
+
+    const Piece piece = *pPiece;
+    *pPiece = {};
+    VirtualFree(reinterpret_cast<LPVOID>(piece.base), 0, MEM_RELEASE);
+    // Another thread's lpAddress == NULL allocation could in theory take this
+    // range between the release and the allocation below; the window is a few
+    // instructions and such allocations are placed bottom-up far lower, so it
+    // is accepted rather than serialized against every VirtualAlloc.
+
+    const LPVOID result = RealVirtualAlloc(lpAddress, dwSize, flAllocationType, flProtect);
+
+    // Re-reserve what is left. If the allocation failed, put the whole piece back.
+    if (result)
+    {
+        ReservePiece(piece.base, start);
+        ReservePiece(end, piece.end);
+    }
+    else
+    {
+        ReservePiece(piece.base, piece.end);
+    }
+    ReleaseSRWLockExclusive(&s_lock);
+
+    char msg[160];
+    sprintf_s(msg, "NearImageReserve: served VirtualAlloc(%p, 0x%zx) from pool -> %p\n", lpAddress, dwSize, result);
+    OutputDebugStringA(msg);
+    return result;
+}
+} // namespace
+
+// Called from main() before anything else allocates much.
+bool NearImageReserveInit()
+{
+    // Just below the image, scanning down in granularity steps until a free
+    // run of kPoolSize is found. The pool's lowest address must stay within
+    // the window of the *far* end of the game's .text, hence kWindow.
+    constexpr uintptr_t kLowest = kImageBase - kWindow + kPoolSize;
+    for (uintptr_t top = kImageBase; top >= kLowest; top -= kPoolSize)
+    {
+        if (ReservePiece(top - kPoolSize, top))
+            return true;
+    }
+    return false;
+}
+
+// Called from CoreStubsInit() after MH_Initialize and before MH_EnableHook.
+bool NearImageReserveInstallHooks()
+{
+    return MH_CreateHookApi(L"KernelBase.dll", "VirtualAlloc", &TP_VirtualAlloc, reinterpret_cast<LPVOID*>(&RealVirtualAlloc)) == MH_OK &&
+           MH_CreateHookApi(L"KernelBase.dll", "VirtualQuery", &TP_VirtualQuery, reinterpret_cast<LPVOID*>(&RealVirtualQuery)) == MH_OK;
+}
+
+#endif

@@ -245,8 +245,8 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 104483u, 0x129a6c0u }, // was 0x13bc758: AE 104483 -> SE 97745 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 104484u, 0x13bc769u },
     { 104651u, 0x13bcd88u },
-    { 104653u, 0x13bcdaau },
-    { 104655u, 0x13bcdbbu },
+    { 104653u, 0x129e220u }, // was 0x13bcdaa (a thunk into BSReadWriteLock::UnlockForRead, VR id 66982; crashed registering Papyrus natives): NativeFunctionBase ctor, AE 104653 -> SE 97925 (anchors AE 104648/104651 = SE 97920/97923, sizes 0x130/0x110/0x140 match) -> VR; dump-checked: stores vtable 0x1418e4f38, builds BSFixedStrings from name/class
+    { 104655u, 0x129e470u }, // was 0x13bcdbb: NativeFunctionBase dtor, AE 104655 -> SE 97927 -> VR; dump-checked: writes vtable 0x1418e4f38, releases BSFixedStrings at +0x48/+0x20/+0x18/+0x10
     // { 104788u, 0x13bd2c8u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     // { 105220u, 0x13be40cu }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     // 109689 (RTDynamicCast, AE id) removed: it mapped to 0x13cf190, an SEH

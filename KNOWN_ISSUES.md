@@ -300,6 +300,40 @@ have not been confirmed correct against real VR disassembly:
   head/hand transforms for pose sync. These are typical/plausible offsets,
   not confirmed against the actual VR `PlayerCharacter` layout.
 
+## Main menu with no text = data load blocked by a plugin popup (2026-09-13)
+
+"Logo and smoke but no menu text" means the game is still loading. The menu text
+appears after SKSE's `kDataLoaded`. A live, non-invasive attach (`cdb -pv -p <pid>
+-c "~* kn 18; qd"`) showed the loading thread sitting in `MessageBoxW` opened by
+**DynDOLOD.dll** from its `kDataLoaded` handler: `SKSE/Trampoline.cpp(54): failed to
+create trampoline`. Popups are invisible in the headset, and CommonLib plugins
+terminate the game when OK is clicked.
+
+**Cause:** CommonLib's `Trampoline::create` needs free memory within ±2GB of the image
+base (`0x140000000`). The VR launcher used SE's 1GB `exeLoadSz` for `game_seg`, so our
+image ran to `0x18094a000`, and heap allocations filled what was left of the window by
+`kDataLoaded`. **Fix:** VR `exeLoadSz` is now `0x05000000` (80MB; `SkyrimVR.exe`
+SizeOfImage is `0x3959000`), so the image ends at `0x14594a000`. `ExeLoader::Load` now
+rejects images larger than the buffer instead of silently skipping sections. Side
+effect: crash dumps with `MiniDumpWithDataSegs` should shrink from ~1GB.
+
+**The `exeLoadSz` change alone did not fix it** (the popup came back). By `kDataLoaded`,
+heap allocations fill the ±2GB window regardless. **Second fix:
+`Code/immersive_launcher/memory/NearImageReserve.cpp`** (VR only). At the start of `main()`
+it reserves a 256MB pool just below the image (`0x130000000`–`0x140000000`), and hooks
+`KernelBase!VirtualQuery` / `VirtualAlloc`. `VirtualQuery` reports the pool as `MEM_FREE`.
+A `VirtualAlloc` with an explicit address inside the pool releases that piece, allocates,
+and re-reserves the rest. Allocations with `lpAddress == NULL` can never land in the pool.
+A standalone test (`cl` + the xmake MinHook 1.3.4 package) filled the address space with
+250GB of reservations and then ran CommonLib's exact `do_create` search: 39/40 trampolines
+came from the pool, all within 256MB of the image, and 200 more succeeded while another
+thread churned 20k ordinary allocations. Served allocations are logged via
+`OutputDebugString` (`NearImageReserve: served ...`), visible in DebugView.
+
+**Debugging tip:** when the game "hangs" on a screen, attach non-invasively and look
+for `MessageBox` frames before anything else. Also, the Crash Logger plugin writes
+`Documents\My Games\Skyrim VR\SKSE\crash-*.log`.
+
 ## Neighbour interpolation: 27 more ids resolved, 142 left (`VR_POINTERS_TODO.md`)
 
 For AE ids with no `se_ae.csv` entry, the SE id can be inferred when the nearest known
@@ -321,7 +355,40 @@ id (SE id 32883 is a different function), which is the same mistake the crosswal
 The remaining 142, with AE addresses, candidates and search windows, are in
 **`VR_POINTERS_TODO.md`**, generated for hand-matching in Ghidra.
 
-## Early EngineFixesVR crash when MO2's VFS isn't ready (2026-09-13, probably environmental)
+## Early EngineFixesVR crash: the d3dx9_42 plugin preloader (2026-09-13)
+
+**Not environmental after all**: it reproduced with MO2 settled. The raw stack showed
+the chain: `launcher::StartUp` → game CRT → our `Hook_initterm_e` (`Memory.cpp`) → the
+**"skse64 plugin preloader" `d3dx9_42.dll`** (FUS ships it) → `LoadLibraryA` →
+ReShade/usvfs → `EngineFixesVR.dll` static init → `GetModuleHandleA("SkyrimVR.exe")`
+fails → crash while logging. The preloader's log (`overwrite\Root\d3dx9_42.log`) shows it
+had **never fired in a Skyrim Together run before 08:49**, the first run of the build that
+removed 50 crosswalk hook entries. One of those bogus detours was presumably
+(accidentally) keeping the preloader's `_initterm_e` path from firing. In every run that
+reached the menu, EF was loaded later by SKSE VR and worked.
+
+**Real root cause (found after the mitigation below failed to trigger):** a
+`FunctionHookManager` bug that my hook-entry removals exposed. `FunctionHookManager::Add`
+returns early for a null target, which destroys the temporary `FunctionHook`, whose
+destructor called `MH_DisableHook(m_pSystemFunction)` with `nullptr`. **MinHook's
+`MH_ALL_HOOKS` is `NULL`**, so every skipped hook disabled *all* hooks in the process,
+including the launcher's `CoreStubsInit` stubs (`LdrLoadDll`, `GetModuleHandleA/W`,
+`GetModuleFileName*`). Evidence: the crash stack went `LoadLibraryExW` → `ntdll!LdrLoadDll`
+with no `TP_LdrLoadDll` frame, and launching became instant instead of ~2 minutes.
+Removing 50 crosswalk entries created 50 null hook targets. Fixed in
+`Libraries/TiltedReverse/Code/reverse/src/FunctionHook.cpp`: `Add` disarms the hook before
+returning, and `~FunctionHook` also requires a non-null target. **Any earlier build that
+skipped a null hook had the same silent problem.** The null-guard itself is from an earlier
+session, so previously "parked" ids may have been disabling launcher stubs all along.
+
+**Mitigation (VR only):** `TP_LdrLoadDll` (`stubs/FileMapping.cpp`) returns
+`STATUS_DLL_NOT_FOUND` for `EngineFixesVR.dll` until `g_ScriptExtenderStarting` is set
+(`ScriptExtender.cpp`, just before SKSE VR is loaded). So EF now always loads via SKSE, as
+in the working runs. It deliberately doesn't use the blocklist's invalid-image-hash
+status, which tells Windows not to retry. Other preloaded plugins
+(`PrivateProfileRedirector`) are still preloaded.
+
+### Earlier (wrong) hypothesis, kept for context: MO2's VFS not ready
 
 A run died 2 seconds after launch in `EngineFixesVR!std::operator<<`, before any
 `tp_client.log` output. Symbolized stack (Engine Fixes' PDB is in the cdb symbol

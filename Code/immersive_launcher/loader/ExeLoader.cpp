@@ -288,6 +288,11 @@ bool ExeLoader::Load(const uint8_t* apProgramBuffer)
     auto* ntHeader = GetRVA<IMAGE_NT_HEADERS>(dosHeader->e_lfanew);
     DecryptCeg(ntHeader);
 
+    // LoadSections silently stops at the first section beyond m_loadLimit, which
+    // would leave the game partially mapped. Fail loudly instead.
+    if (ntHeader->OptionalHeader.SizeOfImage > m_loadLimit)
+        return false;
+
     // these point to launcher.exe's headers
     auto* sourceHeader = GetTargetRVA<IMAGE_DOS_HEADER>(0);
     auto* sourceNtHeader = GetTargetRVA<IMAGE_NT_HEADERS>(sourceHeader->e_lfanew);
