@@ -3,6 +3,7 @@
 #include "Message.h"
 
 #include <Structs/GameId.h>
+#include <Structs/Inventory.h>
 
 struct NotifyEquipmentChanges final : ServerMessage
 {
@@ -18,7 +19,7 @@ struct NotifyEquipmentChanges final : ServerMessage
 
     bool operator==(const NotifyEquipmentChanges& acRhs) const noexcept
     {
-        return GetOpcode() == acRhs.GetOpcode() && ServerId == acRhs.ServerId && ItemId == acRhs.ItemId && EquipSlotId == acRhs.EquipSlotId && Count == acRhs.Count && Unequip == acRhs.Unequip && IsSpell == acRhs.IsSpell && IsShout == acRhs.IsShout;
+        return GetOpcode() == acRhs.GetOpcode() && ServerId == acRhs.ServerId && ItemId == acRhs.ItemId && EquipSlotId == acRhs.EquipSlotId && Count == acRhs.Count && Unequip == acRhs.Unequip && IsSpell == acRhs.IsSpell && IsShout == acRhs.IsShout && CurrentInventory == acRhs.CurrentInventory;
     }
 
     uint32_t ServerId{};
@@ -28,4 +29,7 @@ struct NotifyEquipmentChanges final : ServerMessage
     bool Unequip = false;
     bool IsSpell = false;
     bool IsShout = false;
+    // Worn equipment of the actor as reported by its owner. A message with an empty ItemId is a
+    // pure equipment snapshot (see InventoryService::RunEquipmentSnapshotUpdates).
+    Inventory CurrentInventory{};
 };

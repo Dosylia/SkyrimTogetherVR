@@ -1,4 +1,5 @@
 #include <TiltedOnlinePCH.h>
+#include <PerfScope.h>
 
 #include <Services/OverlayService.h>
 
@@ -299,6 +300,8 @@ void OverlayService::SetPlayerHealthPercentage(uint32_t aFormId) const noexcept
 
 void OverlayService::OnUpdate(const UpdateEvent&) noexcept
 {
+    PerfScope perfScope("OverlayService::OnUpdate");
+
     if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
         return;
 

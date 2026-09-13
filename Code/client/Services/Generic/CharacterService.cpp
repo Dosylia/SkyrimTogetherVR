@@ -1,4 +1,5 @@
 #include "Forms/TESObjectCELL.h"
+#include <PerfScope.h>
 #include "Forms/TESWorldSpace.h"
 #include "Services/PapyrusService.h"
 #include <Services/PartyService.h>
@@ -241,12 +242,30 @@ void CharacterService::OnActorRemoved(const ActorRemovedEvent& acEvent) noexcept
 
 void CharacterService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
 {
-    RunSpawnUpdates();
-    RunLocalUpdates();
-    RunFactionsUpdates();
-    RunRemoteUpdates();
-    RunExperienceUpdates();
-    ApplyCachedWeaponDraws(acUpdateEvent);
+    {
+        PerfScope perfScope("CharacterService::RunSpawnUpdates");
+        RunSpawnUpdates();
+    }
+    {
+        PerfScope perfScope("CharacterService::RunLocalUpdates");
+        RunLocalUpdates();
+    }
+    {
+        PerfScope perfScope("CharacterService::RunFactionsUpdates");
+        RunFactionsUpdates();
+    }
+    {
+        PerfScope perfScope("CharacterService::RunRemoteUpdates");
+        RunRemoteUpdates();
+    }
+    {
+        PerfScope perfScope("CharacterService::RunExperienceUpdates");
+        RunExperienceUpdates();
+    }
+    {
+        PerfScope perfScope("CharacterService::ApplyCachedWeaponDraws");
+        ApplyCachedWeaponDraws(acUpdateEvent);
+    }
 }
 
 void CharacterService::OnConnected(const ConnectedEvent& acConnectedEvent) const noexcept
@@ -1471,14 +1490,22 @@ ActorData CharacterService::BuildActorData(Actor* apActor) const noexcept
 
 void CharacterService::RunLocalUpdates() const noexcept
 {
+    // The local player is sent at ~30 Hz so remote clients can show VR head/hand movement and
+    // player movement smoothly; every other local actor keeps the original 100 ms cadence.
     static std::chrono::steady_clock::time_point lastSendTimePoint;
+    static std::chrono::steady_clock::time_point lastFullSendTimePoint;
+    constexpr auto cDelayBetweenPlayerSnapshots = 33ms;
     constexpr auto cDelayBetweenSnapshots = 100ms;
 
     const auto now = std::chrono::steady_clock::now();
-    if (now - lastSendTimePoint < cDelayBetweenSnapshots)
+    if (now - lastSendTimePoint < cDelayBetweenPlayerSnapshots)
         return;
 
     lastSendTimePoint = now;
+
+    const bool fullSnapshot = now - lastFullSendTimePoint >= cDelayBetweenSnapshots;
+    if (fullSnapshot)
+        lastFullSendTimePoint = now;
 
     ClientReferencesMoveRequest message;
     message.Tick = m_transport.GetClock().GetCurrentTick();
@@ -1491,10 +1518,14 @@ void CharacterService::RunLocalUpdates() const noexcept
         auto& animationComponent = animatedLocalView.get<LocalAnimationComponent>(entity);
         auto& formIdComponent = animatedLocalView.get<FormIdComponent>(entity);
 
+        if (!fullSnapshot && formIdComponent.Id != 0x14)
+            continue;
+
         AnimationSystem::Serialize(m_world, message, localComponent, animationComponent, formIdComponent);
     }
 
-    m_transport.Send(message);
+    if (fullSnapshot || !message.Updates.empty())
+        m_transport.Send(message);
 }
 
 void CharacterService::RunRemoteUpdates() noexcept
@@ -1517,7 +1548,7 @@ void CharacterService::RunRemoteUpdates() noexcept
             pActor = Cast<Actor>(pForm);
         }
 
-        InterpolationSystem::Update(pActor, interpolationComponent, tick);
+        InterpolationSystem::Update(pActor, interpolationComponent, tick, m_transport.GetClock().GetCurrentTick() - 100);
     }
 
     auto animatedView = m_world.view<RemoteComponent, RemoteAnimationComponent, FormIdComponent>();

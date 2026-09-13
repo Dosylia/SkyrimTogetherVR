@@ -851,7 +851,35 @@ bool Actor::IsDead() const noexcept
 bool Actor::IsDragon() const noexcept
 {
     const ActorExtension* pExtension = const_cast<Actor*>(this)->GetExtension();
-    return BehaviorVar::IsDragon(pExtension->GraphDescriptorHash);
+    if (BehaviorVar::IsDragon(pExtension->GraphDescriptorHash))
+        return true;
+
+    // The graph hash is only known once the behavior has been matched, and a modded dragon
+    // behavior is only captured when BehaviorVar::Patch first sees it - usually after the
+    // AssignCharacterRequest went out, so the server kept the normal (too small) range for the
+    // dragon. The race keyword ActorTypeDragon (Skyrim.esm 0x35D59) is known right away.
+    // TESRace (SE and VR): BGSKeywordForm at +0x70, keywords +0x78, count +0x80.
+    constexpr uint8_t cRaceFormType = 14;
+    constexpr uint8_t cKeywordFormType = 4;
+    constexpr uint32_t cActorTypeDragon = 0x35D59;
+
+    const TESForm* pRace = reinterpret_cast<const TESForm*>(race);
+    if (!pRace || static_cast<uint8_t>(pRace->formType) != cRaceFormType)
+        return false;
+
+    const auto* ppKeywords = *reinterpret_cast<TESForm** const*>(reinterpret_cast<const uint8_t*>(pRace) + 0x78);
+    const uint32_t count = *reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(pRace) + 0x80);
+    if (!ppKeywords || count > 256)
+        return false;
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const TESForm* pKeyword = ppKeywords[i];
+        if (pKeyword && static_cast<uint8_t>(pKeyword->formType) == cKeywordFormType && pKeyword->formID == cActorTypeDragon)
+            return true;
+    }
+
+    return false;
 }
 
 void Actor::Kill() noexcept

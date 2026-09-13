@@ -95,8 +95,30 @@ BSPointerHandle<Projectile>* TP_MAKE_THISCALL(HookLaunch, BSPointerHandle<Projec
             // Actor nor the PlayerCharacter (most creatures) - guard before use.
             if (pExtendedActor && pExtendedActor->IsRemote())
             {
+#ifdef SKYRIMVR
+                // The owning client syncs this projectile, so the local copy must not exist - but
+                // VR's MagicCaster::LaunchSpell (SE 33672) looks the returned handle up and reads
+                // the projectile without a null check, so an empty handle crashed the second
+                // player mid-fight (read at +0x124). Launch it for real and remove it on the main
+                // thread instead (Papyrus Disable/Delete aren't safe on the actor update threads).
+                auto* pResult = TiltedPhoques::ThisCall(RealLaunch, apThis, arData);
+                if (pResult && pResult->handle.iBits && entt::locator<World>::has_value())
+                {
+                    World::Get().GetRunner().Queue(
+                        [handle = pResult->handle.iBits]()
+                        {
+                            if (TESObjectREFR* pObject = TESObjectREFR::GetByHandle(handle))
+                            {
+                                pObject->Disable();
+                                pObject->Delete();
+                            }
+                        });
+                }
+                return pResult;
+#else
                 apThis->handle.iBits = 0;
                 return apThis;
+#endif
             }
         }
     }

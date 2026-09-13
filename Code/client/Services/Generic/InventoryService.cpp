@@ -1,4 +1,5 @@
 #include <Services/InventoryService.h>
+#include <PerfScope.h>
 
 #include <Messages/RequestObjectInventoryChanges.h>
 #include <Messages/NotifyObjectInventoryChanges.h>
@@ -26,6 +27,8 @@
 #include <Games/ActorExtension.h>
 #include <Forms/TESNPC.h>
 #include <DefaultObjectManager.h>
+#include <PlayerCharacter.h>
+#include <Forms/MagicItem.h>
 
 InventoryService::InventoryService(World& aWorld, entt::dispatcher& aDispatcher, TransportService& aTransport) noexcept
     : m_world(aWorld)
@@ -41,8 +44,11 @@ InventoryService::InventoryService(World& aWorld, entt::dispatcher& aDispatcher,
 
 void InventoryService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
 {
+    PerfScope perfScope("InventoryService::OnUpdate");
+
     RunWeaponStateUpdates();
     RunNakedNPCBugChecks();
+    RunEquipmentSnapshotUpdates();
 }
 
 void InventoryService::OnInventoryChangeEvent(const InventoryChangeEvent& acEvent) noexcept
@@ -156,7 +162,17 @@ void InventoryService::OnNotifyEquipmentChanges(const NotifyEquipmentChanges& ac
         return;
     }
 
+    // No item: a pure equipment snapshot from the owner, make the hands match it.
+    if (!acMessage.ItemId)
+    {
+        if (pActor->GetExtension()->IsRemote())
+            ApplyHandEquipment(pActor, acMessage.CurrentInventory);
+        return;
+    }
+
     auto& modSystem = World::Get().GetModSystem();
+
+    spdlog::info("Equipment sync: remote actor {:X} {} {:X}:{:X} (spell: {}, shout: {}, slot {:X}:{:X})", pActor->formID, acMessage.Unequip ? "unequips" : "equips", acMessage.ItemId.ModId, acMessage.ItemId.BaseId, acMessage.IsSpell, acMessage.IsShout, acMessage.EquipSlotId.ModId, acMessage.EquipSlotId.BaseId);
 
     uint32_t itemId = modSystem.GetGameId(acMessage.ItemId);
     TESForm* pItem = TESForm::GetById(itemId);
@@ -308,4 +324,151 @@ void InventoryService::RunNakedNPCBugChecks() noexcept
 
         pActor->ResetInventory(false);
     }
+}
+
+void InventoryService::RunEquipmentSnapshotUpdates() noexcept
+{
+    if (!m_transport.IsConnected())
+        return;
+
+    static std::chrono::steady_clock::time_point lastSendTimePoint;
+    constexpr auto cDelayBetweenUpdates = 1000ms;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now - lastSendTimePoint < cDelayBetweenUpdates)
+        return;
+
+    lastSendTimePoint = now;
+
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer)
+        return;
+
+    auto view = m_world.view<FormIdComponent, LocalComponent>();
+    const auto it = std::find_if(view.begin(), view.end(), [view](auto entity) { return view.get<FormIdComponent>(entity).Id == 0x14; });
+    if (it == view.end())
+        return;
+
+    const uint32_t serverId = view.get<LocalComponent>(*it).Id;
+
+    Inventory equipment = pPlayer->GetEquipment();
+
+    // Only what is worn where matters here; charges and such change all the time in combat.
+    const auto isSameEquipment = [](const Inventory& acLhs, const Inventory& acRhs)
+    {
+        if (acLhs.Entries.size() != acRhs.Entries.size() || !(acLhs.CurrentMagicEquipment == acRhs.CurrentMagicEquipment))
+            return false;
+
+        for (size_t i = 0; i < acLhs.Entries.size(); ++i)
+        {
+            const auto& lhs = acLhs.Entries[i];
+            const auto& rhs = acRhs.Entries[i];
+            if (lhs.BaseId != rhs.BaseId || lhs.ExtraWorn != rhs.ExtraWorn || lhs.ExtraWornLeft != rhs.ExtraWornLeft)
+                return false;
+        }
+
+        return true;
+    };
+
+    if (serverId == m_lastSnapshotServerId && isSameEquipment(equipment, m_lastEquipmentSnapshot))
+        return;
+
+    RequestEquipmentChanges request;
+    request.ServerId = serverId;
+    request.CurrentInventory = equipment;
+
+    m_transport.Send(request);
+
+    spdlog::info("Equipment snapshot sent: {} worn entries, left spell {:X}, right spell {:X}", equipment.Entries.size(), equipment.CurrentMagicEquipment.LeftHandSpell.BaseId, equipment.CurrentMagicEquipment.RightHandSpell.BaseId);
+
+    m_lastSnapshotServerId = serverId;
+    m_lastEquipmentSnapshot = std::move(equipment);
+}
+
+void InventoryService::ApplyHandEquipment(Actor* apActor, const Inventory& acEquipment) noexcept
+{
+    constexpr uint8_t cLightFormType = 31;
+
+    auto& modSystem = World::Get().GetModSystem();
+    auto* pEquipManager = EquipManager::Get();
+    auto& defaultObjects = DefaultObjectManager::Get();
+
+    struct HandItem
+    {
+        TESForm* pForm;
+        bool Left;
+    };
+
+    const auto collectHandItems = [&modSystem](const Inventory& acInventory)
+    {
+        Vector<HandItem> items;
+        for (const auto& entry : acInventory.Entries)
+        {
+            if (!entry.IsWorn())
+                continue;
+
+            TESForm* pForm = TESForm::GetById(modSystem.GetGameId(entry.BaseId));
+            if (!pForm || (pForm->formType != FormType::Weapon && static_cast<uint8_t>(pForm->formType) != cLightFormType))
+                continue;
+
+            if (entry.ExtraWorn)
+                items.push_back({pForm, false});
+            if (entry.ExtraWornLeft)
+                items.push_back({pForm, true});
+        }
+        return items;
+    };
+
+    const auto containsItem = [](const Vector<HandItem>& acItems, const HandItem& acItem)
+    { return std::any_of(acItems.begin(), acItems.end(), [&acItem](const HandItem& aItem) { return aItem.pForm == acItem.pForm && aItem.Left == acItem.Left; }); };
+
+    const Vector<HandItem> desiredItems = collectHandItems(acEquipment);
+    const Vector<HandItem> currentItems = collectHandItems(apActor->GetEquipment());
+
+    for (const auto& item : currentItems)
+    {
+        if (containsItem(desiredItems, item))
+            continue;
+
+        spdlog::info("Equipment sync: remote actor {:X} unequips {:X} ({} hand)", apActor->formID, item.pForm->formID, item.Left ? "left" : "right");
+        pEquipManager->UnEquip(apActor, item.pForm, nullptr, 1, item.Left ? defaultObjects.leftEquipSlot : defaultObjects.rightEquipSlot, false, true, false, false, nullptr);
+    }
+
+    for (const auto& item : desiredItems)
+    {
+        if (containsItem(currentItems, item))
+            continue;
+
+        auto* pObject = Cast<TESBoundObject>(item.pForm);
+        if (!pObject)
+            continue;
+
+        // The remote copy only has what it was spawned with, the item may have been picked up since.
+        if (apActor->GetItemCountInInventory(item.pForm) <= 0)
+        {
+            ScopedInventoryOverride _;
+            apActor->AddObjectToContainer(pObject, nullptr, 1, nullptr);
+        }
+
+        spdlog::info("Equipment sync: remote actor {:X} equips {:X} ({} hand)", apActor->formID, item.pForm->formID, item.Left ? "left" : "right");
+        pEquipManager->Equip(apActor, item.pForm, nullptr, 1, item.Left ? defaultObjects.leftEquipSlot : defaultObjects.rightEquipSlot, false, true, false, false);
+    }
+
+    const auto syncSpell = [&](const GameId& acDesiredSpell, uint32_t aHand)
+    {
+        TESForm* pDesired = acDesiredSpell ? TESForm::GetById(modSystem.GetGameId(acDesiredSpell)) : nullptr;
+        TESForm* pCurrent = apActor->magicItems[aHand];
+        if (pDesired == pCurrent)
+            return;
+
+        spdlog::info("Equipment sync: remote actor {:X} {} hand spell {:X} -> {:X}", apActor->formID, aHand == 0 ? "left" : "right", pCurrent ? pCurrent->formID : 0, pDesired ? pDesired->formID : 0);
+
+        if (pDesired)
+            pEquipManager->EquipSpell(apActor, pDesired, aHand);
+        else
+            pEquipManager->UnEquipSpell(apActor, pCurrent, aHand);
+    };
+
+    syncSpell(acEquipment.CurrentMagicEquipment.LeftHandSpell, 0);
+    syncSpell(acEquipment.CurrentMagicEquipment.RightHandSpell, 1);
 }

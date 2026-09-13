@@ -1,4 +1,5 @@
 #include <Services/PlayerService.h>
+#include <PerfScope.h>
 
 #include <World.h>
 
@@ -52,6 +53,8 @@ PlayerService::PlayerService(World& aWorld, entt::dispatcher& aDispatcher, Trans
 
 void PlayerService::OnUpdate(const UpdateEvent& acEvent) noexcept
 {
+    PerfScope perfScope("PlayerService::OnUpdate");
+
     RunRespawnUpdates(acEvent.Delta);
     RunPostDeathUpdates(acEvent.Delta);
     RunDifficultyUpdates();
@@ -201,18 +204,23 @@ void PlayerService::RunRespawnUpdates(const double acDeltaTime) noexcept
     static bool s_startTimer = false;
 
     PlayerCharacter* pPlayer = PlayerCharacter::Get();
-    if (!pPlayer->actorState.IsBleedingOut())
+    // Once the death sequence has started the screen is already fading to black, so finish it even if
+    // the bleedout state ends early. Previously this reset the timer instead: on VR the player dropped
+    // out of bleedout, the respawn never ran and the fade-in never came (stuck on a black screen with
+    // no control).
+    if (!pPlayer->actorState.IsBleedingOut() && !s_startTimer)
     {
         m_cachedMainSpellId = pPlayer->magicItems[0] ? pPlayer->magicItems[0]->formID : 0;
         m_cachedSecondarySpellId = pPlayer->magicItems[1] ? pPlayer->magicItems[1]->formID : 0;
         m_cachedPowerId = pPlayer->equippedShout ? pPlayer->equippedShout->formID : 0;
 
-        s_startTimer = false;
         return;
     }
 
     if (!s_startTimer)
     {
+        spdlog::info("PlayerService: player is down, respawning in 5 seconds");
+
         s_startTimer = true;
         m_respawnTimer = 5.0;
         FadeOutGame(true, true, 3.0f, true, 2.0f);
@@ -229,6 +237,7 @@ void PlayerService::RunRespawnUpdates(const double acDeltaTime) noexcept
 
     if (m_respawnTimer <= 0.0)
     {
+        spdlog::info("PlayerService: respawning player");
         pPlayer->RespawnPlayer();
 
         m_knockdownTimer = 1.5;
@@ -265,14 +274,18 @@ void PlayerService::RunPostDeathUpdates(const double acDeltaTime) noexcept
         m_knockdownTimer -= acDeltaTime;
         if (m_knockdownTimer <= 0.0)
         {
+            spdlog::info("PlayerService: respawn done, fading back in");
+
+            // Fade in first: if anything below misbehaves the player can at least see again.
+            FadeOutGame(false, true, 0.5f, true, 2.f);
+
             PlayerCharacter::SetGodMode(true);
             m_godmodeStart = true;
             m_godmodeTimer = 10.0;
 
             PlayerCharacter* pPlayer = PlayerCharacter::Get();
-            pPlayer->currentProcess->KnockExplosion(pPlayer, &pPlayer->position, 0.f);
-
-            FadeOutGame(false, true, 0.5f, true, 2.f);
+            if (pPlayer->currentProcess)
+                pPlayer->currentProcess->KnockExplosion(pPlayer, &pPlayer->position, 0.f);
 
             m_knockdownStart = false;
         }

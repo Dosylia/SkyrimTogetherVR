@@ -1,6 +1,7 @@
 #include <TiltedOnlinePCH.h>
 
 #include "World.h"
+#include <PerfScope.h>
 
 #include <Services/DiscoveryService.h>
 #include <Services/InputService.h>
@@ -68,11 +69,40 @@ void World::Update() noexcept
 
     const auto cDeltaSeconds = std::chrono::duration_cast<std::chrono::duration<double>>(cDelta).count();
 
+    PerfFrame::Get().Reset();
+    const auto cUpdateStart = std::chrono::steady_clock::now();
+
     m_dispatcher.trigger(PreUpdateEvent(cDeltaSeconds));
 
     // Force run this before so we get the tasks scheduled to run
-    m_runner.OnUpdate(UpdateEvent(cDeltaSeconds));
+    {
+        PerfScope perfScope("RunnerService tasks");
+        m_runner.OnUpdate(UpdateEvent(cDeltaSeconds));
+    }
     m_dispatcher.trigger(UpdateEvent(cDeltaSeconds));
+
+    // Stutter report: a frame gap over 25 ms (VR runs at 11-14 ms) or more than 5 ms spent in the mod's
+    // own update. Frame gaps over 2 s are loading screens and ignored. At most one line per second.
+    const double frameMs = cDeltaSeconds * 1000.0;
+    const double updateMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - cUpdateStart).count();
+    if ((frameMs > 25.0 && frameMs < 2000.0) || updateMs > 5.0)
+    {
+        static std::chrono::steady_clock::time_point s_lastReport;
+        static uint32_t s_suppressed = 0;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - s_lastReport >= std::chrono::seconds(1))
+        {
+            const auto& perf = PerfFrame::Get();
+            spdlog::warn("Perf spike: frame {:.1f} ms, mod update {:.1f} ms, slowest mod section {} {:.1f} ms ({} more spikes since last report)", frameMs, updateMs,
+                         perf.SlowestSection ? perf.SlowestSection : "none", perf.SlowestMs, s_suppressed);
+            s_lastReport = now;
+            s_suppressed = 0;
+        }
+        else
+        {
+            ++s_suppressed;
+        }
+    }
 }
 
 RunnerService& World::GetRunner() noexcept

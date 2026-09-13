@@ -1,5 +1,6 @@
 
 #include <Services/TransportService.h>
+#include <PerfScope.h>
 
 #include <Events/ConnectedEvent.h>
 #include <Events/ConnectionErrorEvent.h>
@@ -180,6 +181,8 @@ void TransportService::OnUpdate()
 
 void TransportService::HandleUpdate(const UpdateEvent& acEvent) noexcept
 {
+    PerfScope perfScope("TransportService::HandleUpdate");
+
     Update();
 }
 

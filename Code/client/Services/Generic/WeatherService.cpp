@@ -1,4 +1,5 @@
 #include <Services/WeatherService.h>
+#include <PerfScope.h>
 
 #include <Events/UpdateEvent.h>
 #include <Events/DisconnectedEvent.h>
@@ -27,6 +28,8 @@ WeatherService::WeatherService(World& aWorld, TransportService& aTransport, entt
 
 void WeatherService::OnUpdate(const UpdateEvent& acEvent) noexcept
 {
+    PerfScope perfScope("WeatherService::OnUpdate");
+
     RunWeatherUpdates(acEvent.Delta);
 }
 

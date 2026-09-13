@@ -110,11 +110,20 @@ NiPoint3 PlayerCharacter::RespawnPlayer() noexcept
         pCell = GetParentCell();
     }
 
-    NiPoint3 pos{};
-    NiPoint3 rot{};
-    pCell->GetCOCPlacementInfo(&pos, &rot, true);
+    if (!pCell)
+        pCell = GetParentCell();
 
-    MoveTo(pCell, pos);
+    NiPoint3 pos = position;
+    NiPoint3 rot{};
+    if (pCell)
+    {
+        pCell->GetCOCPlacementInfo(&pos, &rot, true);
+        MoveTo(pCell, pos);
+    }
+    else
+    {
+        spdlog::warn("RespawnPlayer: no respawn cell found, respawning in place");
+    }
 
     // Make bleedout state unrecoverable again for when the player goes down the next time
     SetNoBleedoutRecovery(true);

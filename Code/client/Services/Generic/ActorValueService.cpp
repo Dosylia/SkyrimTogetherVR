@@ -1,4 +1,5 @@
 #include <TiltedOnlinePCH.h>
+#include <PerfScope.h>
 
 #include <Services/ActorValueService.h>
 #include <World.h>
@@ -95,6 +96,8 @@ void ActorValueService::OnActorRemoved(const ActorRemovedEvent& acEvent) noexcep
 
 void ActorValueService::OnUpdate(const UpdateEvent& acEvent) noexcept
 {
+    PerfScope perfScope("ActorValueService::OnUpdate");
+
     RunSmallHealthUpdates();
     RunDeathStateUpdates();
     RunActorValuesUpdates();
@@ -256,6 +259,7 @@ void ActorValueService::RunDeathStateUpdates() noexcept
         if (isDead != localComponent.IsDead)
         {
             localComponent.IsDead = isDead;
+            spdlog::info("Death sync: local actor {:X} is now {}, telling the server", pActor->formID, isDead ? "dead" : "alive");
 
             RequestDeathStateChange requestChange;
             requestChange.Id = localComponent.Id;
@@ -298,7 +302,10 @@ void ActorValueService::OnHealthChangeBroadcast(const NotifyHealthChangeBroadcas
         ActorExtension* pExtension = pActor->GetExtension();
         // Players should never be killed
         if (!pExtension->IsPlayer())
+        {
             pActor->Kill();
+            spdlog::info("Death sync: health broadcast killed actor {:X} (now dead: {})", pActor->formID, pActor->IsDead());
+        }
     }
 
     // TODO(cosideci): find fix for player health sync so this can be used again
@@ -387,5 +394,8 @@ void ActorValueService::OnDeathStateChange(const NotifyDeathStateChange& acMessa
         return;
 
     if (pActor->IsDead() != acMessage.IsDead)
+    {
         acMessage.IsDead ? pActor->Kill() : pActor->Respawn();
+        spdlog::info("Death sync: remote actor {:X} set {} by its owner (now dead: {})", pActor->formID, acMessage.IsDead ? "dead" : "alive", pActor->IsDead());
+    }
 }

@@ -1,4 +1,5 @@
 #include <Services/CombatService.h>
+#include <PerfScope.h>
 #include <Services/TransportService.h>
 
 #include <Events/UpdateEvent.h>
@@ -29,6 +30,8 @@ CombatService::CombatService(World& aWorld, TransportService& aTransport, entt::
 
 void CombatService::OnUpdate(const UpdateEvent& acEvent) const noexcept
 {
+    PerfScope perfScope("CombatService::OnUpdate");
+
     RunTargetUpdates(static_cast<float>(acEvent.Delta));
 }
 

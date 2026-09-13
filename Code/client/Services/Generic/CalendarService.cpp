@@ -1,4 +1,5 @@
 #include <Services/CalendarService.h>
+#include <PerfScope.h>
 
 #include <Events/DisconnectedEvent.h>
 #include <Events/UpdateEvent.h>
@@ -83,6 +84,8 @@ void CalendarService::ToggleGameClock(bool aEnable)
 
 void CalendarService::HandleUpdate(const UpdateEvent& aEvent) noexcept
 {
+    PerfScope perfScope("CalendarService::HandleUpdate");
+
     if (s_gameClockLocked)
     {
         const auto updateDelta = static_cast<float>(aEvent.Delta);

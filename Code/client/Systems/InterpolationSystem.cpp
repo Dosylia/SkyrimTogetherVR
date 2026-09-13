@@ -13,7 +13,7 @@
 #include <Games/Skyrim/VRBodySync.h>
 #endif
 
-void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterpolationComponent, const uint64_t aTick) noexcept
+void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterpolationComponent, const uint64_t aTick, const uint64_t aPoseTick) noexcept
 {
     auto& movements = aInterpolationComponent.TimePoints;
 
@@ -46,16 +46,41 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
 
     aInterpolationComponent.Position = position;
 
+    // The VR upper-body pose uses its own, much shorter playback delay (aPoseTick) than movement:
+    // hands and held items lagging 300 ms behind felt unsynced. Find the snapshot pair around it.
     auto& vrPose = aInterpolationComponent.InterpolatedVRPose;
-    if (first.VRPoseData.HasData && second.VRPoseData.HasData)
+    vrPose.HasData = false;
     {
-        vrPose.HasData = true;
-        for (size_t i = 0; i < VRPose::kBoneCount; ++i)
-            vrPose.Bones[i] = glm::slerp(static_cast<glm::quat>(first.VRPoseData.Bones[i]), static_cast<glm::quat>(second.VRPoseData.Bones[i]), delta);
-    }
-    else
-    {
-        vrPose.HasData = false;
+        const uint64_t poseTick = aPoseTick ? aPoseTick : aTick;
+        const InterpolationComponent::TimePoint* pBefore = nullptr;
+        const InterpolationComponent::TimePoint* pAfter = nullptr;
+        for (const auto& point : movements)
+        {
+            if (!point.VRPoseData.HasData)
+                continue;
+            if (point.Tick <= poseTick)
+                pBefore = &point;
+            else
+            {
+                pAfter = &point;
+                break;
+            }
+        }
+        if (!pBefore)
+            pBefore = pAfter;
+        if (!pAfter)
+            pAfter = pBefore;
+
+        if (pBefore && pAfter)
+        {
+            float poseDelta = 1.f;
+            if (pAfter->Tick > pBefore->Tick)
+                poseDelta = TiltedPhoques::Min(static_cast<float>(poseTick - TiltedPhoques::Min(poseTick, pBefore->Tick)) / static_cast<float>(pAfter->Tick - pBefore->Tick), 1.0f);
+
+            vrPose.HasData = true;
+            for (size_t i = 0; i < VRPose::kBoneCount; ++i)
+                vrPose.Bones[i] = glm::slerp(static_cast<glm::quat>(pBefore->VRPoseData.Bones[i]), static_cast<glm::quat>(pAfter->VRPoseData.Bones[i]), poseDelta);
+        }
     }
 
 #ifdef SKYRIMVR

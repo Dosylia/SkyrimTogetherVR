@@ -9,6 +9,9 @@ struct NotifyInventoryChanges;
 struct InventoryChangeEvent;
 struct EquipmentChangeEvent;
 struct NotifyEquipmentChanges;
+struct Actor;
+
+#include <Structs/Inventory.h>
 
 /**
  * @brief Manages inventories of actors and containers.
@@ -61,10 +64,23 @@ private:
     * and resets their inventory.
     */
     void RunNakedNPCBugChecks() noexcept;
+    /**
+     * Sends the local player's worn equipment whenever it differs from what was last sent.
+     * Single equip events get lost or arrive in the wrong state on VR, this keeps the other
+     * clients converging on what the player really holds.
+     */
+    void RunEquipmentSnapshotUpdates() noexcept;
+    /**
+     * Makes a remote actor's hand items (weapons, torches, spells) match an equipment snapshot.
+     */
+    void ApplyHandEquipment(Actor* apActor, const Inventory& acEquipment) noexcept;
 
     World& m_world;
     entt::dispatcher& m_dispatcher;
     TransportService& m_transport;
+
+    uint32_t m_lastSnapshotServerId = 0;
+    Inventory m_lastEquipmentSnapshot{};
 
     entt::scoped_connection m_updateConnection;
     entt::scoped_connection m_inventoryConnection;

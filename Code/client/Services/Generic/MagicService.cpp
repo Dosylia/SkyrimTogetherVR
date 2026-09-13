@@ -1,4 +1,5 @@
 #include <Services/MagicService.h>
+#include <PerfScope.h>
 
 #include <World.h>
 
@@ -49,6 +50,8 @@ MagicService::MagicService(World& aWorld, entt::dispatcher& aDispatcher, Transpo
 
 void MagicService::OnUpdate(const UpdateEvent& acEvent) noexcept
 {
+    PerfScope perfScope("MagicService::OnUpdate");
+
     if (!m_transport.IsConnected())
         return;
 
@@ -187,7 +190,8 @@ void MagicService::OnNotifySpellCast(const NotifySpellCast& acMessage) const noe
             std::optional<uint32_t> serverIdRes = Utils::GetServerId(entity);
             if (!serverIdRes.has_value())
             {
-                spdlog::error("{}: failed to find server id", __FUNCTION__);
+                // Expected for actors still waiting for their server assignment.
+                spdlog::debug("{}: failed to find server id", __FUNCTION__);
                 continue;
             }
 

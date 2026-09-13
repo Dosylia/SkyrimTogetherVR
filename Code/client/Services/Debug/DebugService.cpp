@@ -1,4 +1,5 @@
 #include <BranchInfo.h>
+#include <PerfScope.h>
 
 #include <Havok/hkbStateMachine.h>
 #include <Structs/AnimationGraphDescriptorManager.h>
@@ -153,6 +154,8 @@ extern thread_local bool g_forceAnimation;
 
 void DebugService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
 {
+    PerfScope perfScope("DebugService::OnUpdate");
+
     // GetMainWindow() is null on VR (Hook_Renderer_Init, which sets it, is
     // disabled there - see BSGraphicsRenderer.cpp). Runs every frame, so an
     // unguarded dereference here would crash immediately and constantly.

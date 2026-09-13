@@ -86,8 +86,17 @@ private:
     World& m_world;
     entt::dispatcher& m_dispatcher;
 
-    //! @brief Cached actor forms detected in the previous frame.
-    Set<uint32_t> m_forms;
+    struct KnownForm
+    {
+        TESObjectREFR* pReference = nullptr;
+        uint64_t LastSeenVisit = 0;
+        std::chrono::steady_clock::time_point MissingSince{};
+    };
+
+    //! @brief Actor forms detected so far. An actor that stops being detected stays here for a
+    //! short grace period before it is reported as removed (see VisitForms).
+    std::unordered_map<uint32_t, KnownForm> m_forms;
+    uint64_t m_visitCounter = 0;
     /**
      * The center grid coordinates are the coordinates of the cell in the cell grid
      * where the cells around it in a 5 by 5 grid (by default) are loaded.

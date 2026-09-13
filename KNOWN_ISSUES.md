@@ -250,7 +250,50 @@ to `SetPosition`, so on VR these now call the functions directly:
 The watcher now also dumps the VR Character vtable (`vtbl_character.bin`, 0x1416d6de0) so every
 Actor virtual past 0xAB can be checked against known function addresses.
 
-**Weather is not synced.** The client has Sky hooks but no weather service or messages. Low priority.
+**Second player crashed mid-fight in `MagicCaster::LaunchSpell`** (SE 33672, VR 0x554d22, read at
++0x124). Call chain: `ActorMagicCaster` update → `Fire` → `FindTargets` → `LaunchSpell` →
+`Projectile::Launch` (VR `0x776440`), then a handle lookup that returned null. For remote shooters,
+`HookLaunch` returned a zero handle to suppress the local projectile (the owner syncs it), and this
+VR path doesn't null-check. On VR the hook now launches normally and queues `Disable()` +
+`Delete()` for that projectile on the main thread.
+
+**Stutter while connected** (same test): not the server (8 s CPU in 40 min, 17 MB). The client
+spikes line up with actor ownership churn: spawn, inventory reset, 3D load, and `BehaviorVar`
+reading replacer directories from disk mid-game. The shared follower (Lydia) bouncing between
+clients makes it much worse.
+
+**Stuck black screen after dying** (18:49 test). `PlayerService::RunRespawnUpdates` reset its timer
+whenever the player wasn't in bleedout, even after the death sequence had started and faded the
+screen out. On VR the player left bleedout early, so the respawn and the fade-in
+(`RunPostDeathUpdates`) never ran. Now:
+- Once started, the sequence runs to completion.
+- The fade-in happens before god mode and the knockdown.
+- `RespawnPlayer` falls back to the parent cell, or respawns in place, if no cell is found.
+- Each step is logged (`PlayerService: ...`).
+
+**NPC deaths sync inconsistently.**
+- 35086 (`ApplyActorEffect`, SE 34286, VR `0x56e070`, exact 4-function size match) is resolved and
+  its hook is live. Note it only syncs *healing* of non-owned actors.
+- Death sync now logs `Death sync: ...` when a local actor's state is sent, when a health broadcast
+  kills, and when an owner's state is applied.
+- The second player's log shows `Failed to retrieve Actor X ... possibly missing mod` (15 times):
+  some NPCs from the host's world don't exist in theirs (modlist differences), so their deaths
+  can't sync.
+
+**Weather sync exists** (`WeatherService`: the party leader's weather is forced on members). All its
+addresses resolve on VR (25694/25695/25696 via CommonLib, 26244 → SE 25697, 26231 → SE 25684,
+`Sky::currentWeather` at 0x48). It only visibly acts when the leader's weather changes; not confirmed
+in-game yet.
+
+**VR Actor vtable fully checked** (2026-09-13, from the second player's dump,
+`scratchpad/check_vtbl.py`). Every named Actor virtual the client calls sits at its SE slot +1
+(from 0x82) +2 (from 0xA9) and name-matches the SE name DB. One header error, harmless because
+nothing calls it: `MoveToHigh/Low/MiddleLow/MiddleHigh` are declared one slot early (real SE
+0xF1-0xF4; SE 0xF0 is `SetActorStartingPosition`).
+
+**Stutter profiler:** `PerfScope`/`PerfFrame` time every service's per-frame update. `World::Update`
+logs `Perf spike: frame X ms, mod update Y ms, slowest mod section Z` when a frame takes over 25 ms
+or the mod's update over 5 ms (at most once a second).
 
 **Lydia spawn/remove loop in the second player's log:** both saves have the same follower, so both
 clients claim her and ownership bounces. This is a save/gameplay conflict, not a VR port bug.
@@ -271,6 +314,56 @@ Design:
   (slot 0x7D) sets each bone's local rotation from its parent's world transform, then recomputes
   world transforms under Spine1.
 - **VR offsets:** children at node+0x138, parent 0x30, world 0x7C.
+
+**19:3x test: VR hands confirmed working.** Equipment changes then showed up ~20 s late or never
+(the remote player still showed a torch and a heal spell after unequipping). The six EquipManager
+hooks that emit `EquipmentChangeEvent` had been removed as unverified, so only the slow periodic
+inventory sync carried equipment. They are now resolved from live VR code, following the public
+ActorEquipManager functions (CommonLib ids) to the internal functions they call:
+
+| Hook | Function | SE | VR |
+|---|---|---|---|
+| 38928 | EquipSpell | 37973 | `0x642b80` |
+| 38929 | Equip | 37974 | `0x642e30` |
+| 38930 | EquipShout | 37975 | `0x6430e0` |
+| 38933 | UnequipSpell | 37978 | `0x643470` |
+| 38934 | Unequip | 37979 | `0x6436c0` |
+| 38935 | UnequipShout | 37980 | `0x643910` |
+
+`EquipData` (extra 0, count 8, slot 0x10, 0x18, flags 0x20..) and `MagicEquipData` (slot 0,
+queue 8) match the VR callers. The hooks also block remote actors' own equip calls unless the mod
+is applying them.
+
+**19:24 test: still stretched, and held items lag.** The chain logs proved both sides picked the real
+skeleton (correct parents; forearm→hand 16.8 local vs 16.5 remote). Rigid items under the hand
+bones followed the VR pose, but skinned meshes didn't. Their skin data is refreshed by the engine's
+node update inside the animation update, and VRBodySync only recomputed bone world transforms
+afterwards. It now calls the engine's `NiAVObject::Update` (SE 68900, VR csv `0xc9bc10`) on the
+actor root after setting the bone rotations.
+
+Lag: the local player was sent every 100 ms and remote movement plays back 300 ms late. Now the
+player's snapshot goes out every 33 ms (other local actors stay at 100 ms), and the VR pose uses its
+own 100 ms playback delay (`InterpolationSystem::Update` `aPoseTick`). Local VRIK scales the head
+to 0.01 and the hands to 0.85; scale isn't synced.
+
+**Stretched arms, hands not visible (19:08 test).** The pose applied and moved in sync, but the arm
+meshes stretched. Verified against VR `NiAVObject::UpdateWorldData` (0x140ca7000 → 0x140ca7110 →
+0x1402bcec0): the engine composes world = parent × local exactly as VRBodySync does (row-major,
+T = Tp + Rp·(Tl·Sp), S = Sp·Sl), so the maths isn't the cause.
+
+Most likely cause: bone lookup took the *first* node with each name anywhere under the actor, and
+FUS armours with SMP/3BA physics embed their own "NPC L Hand" etc. copies. Bones now follow the
+skeleton chain: breadth-first search under "NPC Root [Root]", each bone searched inside its parent
+bone. A one-time log dumps the chain, world positions, scales and the forearm→hand distance on both
+sides (`VRBodySync[local]` / `VRBodySync[remote]`).
+
+**Hook point fixed again (18:50).** NPCs, including remote players, are never animated through
+`Actor::UpdateAnimation`. The NPC process update (VR function around 0x1407087xx) inlines it and
+calls the graph update SE 36372 (VR `0x5e2010`, name DB `Character::sub_1405D9990`) directly at
+`0x14070883e`, and `UpdateAnimation` calls it too. VRBodySync now hooks 36372 (override added).
+The second player's log confirmed capture and sending (`capturing local VR pose`), so the receiving
+hook was the only missing piece. One-time logs: `received first remote VR pose`,
+`animation update hook is running`, `applying remote VR pose`, `has a pose but no 3D root yet`.
 
 First two-player test (17:33): the sender captured (`capturing local VR pose`) and the receiver got
 data and installed a vtable swap on Character slot 0x7D, but never applied the pose. Slot 0x7D is
@@ -351,6 +444,60 @@ comparing the VR build's `TESObjectWEAP::Fire`/`Projectile::Launch` call
 site against SE's) and correct the struct offsets in `Projectile.h`.
 Basic projectile sync (position, does it exist) still works - only this
 metadata is missing.
+
+### Actor removal grace period + race-keyword dragon check (2026-09-13)
+**Files:** `Code/client/Services/Generic/DiscoveryService.cpp` (`VisitForms`),
+`Code/client/Games/Skyrim/Actor.cpp` (`Actor::IsDragon`)
+
+In co-op a Blood Dragon (35541) "never died and was stuck". The log showed it was
+removed and re-added 73 times in one session, usually after 0.3-4 s: while circling,
+it kept crossing the edge of the loaded cells and lost its 3D. Each removal sent
+`RequestOwnershipTransfer`. With no other valid owner the server destroyed the character
+and created a new one when the dragon came back (new server id every time), so its
+health reset and the other player saw it respawn over and over. The same thing probably
+explains the mammoth "falling from the sky" (re-created remote copy).
+
+**Change:** an actor that stops being detected but is still the same game object is only
+reported as removed after 5 s. A deleted or replaced object (form gone, or form id recycled
+to another pointer) is still removed at once.
+
+**Trade-off:** ownership handover when an actor really leaves is 5 s slower.
+
+`Actor::IsDragon()` used to only compare the behavior graph hash. A modded dragon behavior
+(FUS) is only captured when `BehaviorVar::Patch` first sees it, which is usually after the
+`AssignCharacterRequest`, so the server gave the dragon the normal grid range. It now also
+checks the race for keyword `ActorTypeDragon` (0x35D59).
+
+**Assumption:** the TESRace layout is BGSKeywordForm at +0x70 (keywords +0x78, count +0x80),
+taken from SE/CommonLib and not verified on VR yet. A formType sanity check is in place.
+
+**Still open:** the client grid check in `CharacterService::RunRemoteUpdates` still passes
+`IsDragon = false` for remote entities.
+
+**Fixed:** the first version compared the race against form type 10 (Class). Races are
+type 14, so the keyword check could never match.
+
+### Equipment: snapshot sync on top of single equip events (2026-09-13)
+**Files:** `Code/client/Services/Generic/InventoryService.cpp`
+(`RunEquipmentSnapshotUpdates`, `ApplyHandEquipment`),
+`Code/encoding/Messages/NotifyEquipmentChanges.*`, `Code/server/Services/InventoryService.cpp`
+
+Weapons and spells on the other player were very late, wrong (a stale torch and healing
+spell), or missing, even with the internal equip hooks live. The replayed single events are
+unreliable on VR for three reasons:
+- events with no equip slot are dropped on the sending side;
+- `CurrentInventory` is captured before the equip is applied;
+- VR sends extra "Unarmed" (0x1F4) equips.
+
+**Change:** once a second the local player's worn equipment is compared, by base id and
+worn/worn-left flags plus hand spells. When it changed, a `RequestEquipmentChanges` with an
+empty `ItemId` is sent. The server now relays `CurrentInventory` in `NotifyEquipmentChanges`
+(**protocol change**: server and all clients must be updated together). On the receiving side
+the remote actor's hand items are reconciled to that snapshot: weapons and lights are
+unequipped or equipped (the item is added first if the remote copy lacks it), and left/right
+spells are set. Armor still uses the event path.
+
+**Log lines:** `Equipment snapshot sent` (sender) and `Equipment sync:` (receiver).
 
 ## Friend-supplied RTTI anchors verified against CommonLibVR-NG (2026-09-13)
 

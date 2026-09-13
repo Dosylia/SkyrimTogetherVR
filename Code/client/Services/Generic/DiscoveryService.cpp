@@ -1,4 +1,5 @@
 #include <TiltedOnlinePCH.h>
+#include <PerfScope.h>
 
 #include <Services/DiscoveryService.h>
 #include <Games/TES.h>
@@ -180,26 +181,49 @@ void DiscoveryService::DetectGridCellChange(TESWorldSpace* aWorldSpace, bool aNe
 
 void DiscoveryService::VisitForms() noexcept
 {
-    static Set<uint32_t> s_previousForms;
-    s_previousForms = m_forms;
-
-    const auto visitor = [this](TESObjectREFR* apReference)
-    {
-        const auto formId = apReference->formID;
-
-        if (!m_forms.count(formId))
-        {
-            m_forms.insert(formId);
-
-            m_dispatcher.enqueue(ActorAddedEvent(formId));
-        }
-        else
-            s_previousForms.erase(formId);
-    };
+    // Actors drop out of the high process list / lose their 3D whenever they cross the edge of the
+    // loaded cells. A dragon circling the player did that every few seconds (73 times in one
+    // session): every removal handed ownership back to the server, which destroyed the character
+    // and created a brand new one when the dragon came back - full health, stuck AI, and the other
+    // player saw it respawn over and over. So an actor that is still the same game object only
+    // counts as removed once it has been gone for a grace period.
+    constexpr auto cRemovalGracePeriod = std::chrono::seconds(5);
 
     ProcessLists* const pProcessLists = ProcessLists::Get();
     if (!pProcessLists)
         return;
+
+    const auto now = std::chrono::steady_clock::now();
+    const uint64_t visit = ++m_visitCounter;
+
+    static Vector<uint32_t> s_removedForms;
+    s_removedForms.clear();
+
+    const auto visitor = [this, visit](TESObjectREFR* apReference)
+    {
+        const auto formId = apReference->formID;
+
+        auto it = m_forms.find(formId);
+        if (it != m_forms.end() && it->second.pReference != apReference)
+        {
+            // Same form id but another object (recycled temporary id, or the form was reloaded).
+            m_dispatcher.trigger(ActorRemovedEvent(formId));
+            m_forms.erase(it);
+            it = m_forms.end();
+        }
+
+        if (it == m_forms.end())
+        {
+            m_forms[formId] = KnownForm{apReference, visit, {}};
+
+            m_dispatcher.enqueue(ActorAddedEvent(formId));
+        }
+        else
+        {
+            it->second.LastSeenVisit = visit;
+            it->second.MissingSince = {};
+        }
+    };
 
     for (uint32_t i = 0; i < pProcessLists->highActorHandleArray.length; ++i)
     {
@@ -217,10 +241,24 @@ void DiscoveryService::VisitForms() noexcept
     visitor(PlayerCharacter::Get());
 
     // We dispatch removal events first to prevent needless reallocations
-    for (uint32_t formId : s_previousForms)
+    for (auto& [formId, known] : m_forms)
     {
-        m_dispatcher.trigger(ActorRemovedEvent(formId));
+        if (known.LastSeenVisit == visit)
+            continue;
+
+        if (known.MissingSince == std::chrono::steady_clock::time_point{})
+            known.MissingSince = now;
+
+        // Deleted or replaced objects go right away, only a still existing actor gets the grace period.
+        const bool isSameObject = TESForm::GetById(formId) == static_cast<TESForm*>(known.pReference);
+        if (!isSameObject || now - known.MissingSince >= cRemovalGracePeriod)
+            s_removedForms.push_back(formId);
+    }
+
+    for (uint32_t formId : s_removedForms)
+    {
         m_forms.erase(formId);
+        m_dispatcher.trigger(ActorRemovedEvent(formId));
     }
 
     // Dispatch all adds
@@ -229,6 +267,8 @@ void DiscoveryService::VisitForms() noexcept
 
 void DiscoveryService::OnUpdate(const PreUpdateEvent& acUpdateEvent) noexcept
 {
+    PerfScope perfScope("DiscoveryService::OnUpdate");
+
     TP_UNUSED(acUpdateEvent);
 
     VisitCell();

@@ -120,13 +120,13 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 34526u, 0x05579c0u }, // was 0x057af40: AE 34526 -> SE 33742 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
     { 34529u, 0x0557f80u }, // was 0x057b000: AE 34529 -> SE 33745 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     // { 34989u, 0x0598b30u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 35086u, 0x059e490u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 35086u, 0x056e070u }, // ValueModifierEffect ApplyActorEffect = SE 34286 (AE 35084-35087 sizes 0x140/0xc0/0x350/0x60 = SE 34284-34287 exactly; old SE-era git address 0x140567A89 falls inside it) -> VR via addrlib; hook live again
     // { 35269u, 0x05a6da0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
     { 34582u, 0x057f650u }, // SE 34582 BGSSaveLoadChangesMap::GetChangeFlags (AE 35503) -> VR via addrlib; checked in dump (signature + size 0x70). Used by TESForm::GetChangeFlags with the VR id directly
     // { 35503u, 0x05b2360u }, removed: crosswalk garbage (VR 0x5b2360 is an unrelated function; crashed syncing remote actors)
     { 35993u, 0x059ef30u }, // was 0x05ce330: AE 35993 -> SE 35100 (anchors AE 35991/35996 = SE 35099/35103; AE 35992 has no SE twin; sizes 0x30/0x50 match) -> VR via addrlib; checked in dump: BGSLoadGameBuffer ctor (stores vtable, zeroes +8..+0x20)
     { 36000u, 0x059f160u }, // was 0x05ce840: AE 36000 -> SE 35107 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 36370u, 0x05e1f10u }, // Actor::UpdateAnimation = SE 36370 (name DB Actor::UpdateAnimation_1405D9890) -> VR via addrlib; confirmed in live code as the Character vtable slot 0x7D target; hooked by VRBodySync
+    { 36372u, 0x05e2010u }, // Character animation graph update = SE 36372 (name DB Character::sub_1405D9990) -> VR via addrlib; confirmed in live code as the direct call from the NPC process update (0x14070883e) and from Actor::UpdateAnimation; hooked by VRBodySync
     { 36035u, 0x05a0b00u }, // was 0x05d25e0: AE 36035 -> SE 35145 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 36047u, 0x05a0ff0u }, // was 0x05d2fe0: AE 36047 -> SE 35157 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 36048u, 0x05a1070u }, // was 0x05d3010: AE 36048 -> SE 35158 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
@@ -162,12 +162,12 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 38899u, 0x0640f30u }, // was 0x0689290: AE 38899 -> SE 37943 by function-size sequence alignment (>=10/16 neighbours, runner-up <=4; rule 153/153 on known pairs) -> VR via addrlib; not yet dump-checked
     { 38901u, 0x0689630u },
     { 38903u, 0x06413c0u }, // was 0x06898c0: AE 38903 -> SE 37947 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    // { 38928u, 0x068a550u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 38929u, 0x068a570u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 38930u, 0x068a5b0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 38933u, 0x068a7f0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 38934u, 0x068a910u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 38935u, 0x068aab0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    { 38928u, 0x0642b80u }, // EquipManager internal EquipSpell = SE 37973; confirmed in live VR code: called by the EquipSpell wrapper (SE 37939) that ActorEquipManager::EquipSpell (SE 37940) uses -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
+    { 38929u, 0x0642e30u }, // EquipManager internal Equip = SE 37974; confirmed in live VR code: ActorEquipManager::EquipObject (SE 37938) builds EquipData on the stack and calls it -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
+    { 38930u, 0x06430e0u }, // EquipManager internal EquipShout = SE 37975; confirmed in live VR code: called by ActorEquipManager::EquipShout (SE 37941) -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
+    { 38933u, 0x0643470u }, // EquipManager internal UnequipSpell = SE 37978; confirmed in live VR code: called by the UnequipSpell wrapper (SE 37946) -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
+    { 38934u, 0x06436c0u }, // EquipManager internal Unequip = SE 37979; confirmed in live VR code: called by ActorEquipManager::UnequipObject (SE 37945) -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
+    { 38935u, 0x0643910u }, // EquipManager internal UnequipShout = SE 37980; called from the public UnequipShout next to UnequipSpell (0x140641451); follows the 37973-37980 pattern -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
     { 38949u, 0x0643f20u }, // ActorMediator::PerformAction = SE 37996 (SE-era git address 0x14063AF10) -> VR via addrlib; checked in dump: (this, TESActionData*) reads action->actor @+8, calls PerformComplexAction then ApplyAnimationVariables
     { 38952u, 0x068aef0u },
     { 38953u, 0x0644160u }, // PerformComplexAction = SE 37999 (SE-era git address 0x63B0F0; AE 38951-38955 sizes = SE 37997-38001) -> VR via addrlib; checked in dump: called from VR PerformAction
