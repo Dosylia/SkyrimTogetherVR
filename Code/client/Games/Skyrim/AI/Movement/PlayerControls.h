@@ -46,7 +46,7 @@ public:
     #ifndef SKYRIMVR
         char pad0[0x20];
     #else
-        char pad0[0x24]; // VR: extra 4 bytes padding before Data
+        char pad0[0x24];
     #endif
     PlayerControlsData Data;
     std::uint32_t pad054;                    // 054
@@ -84,7 +84,7 @@ static_assert(offsetof(PlayerControls, PlayerControls::bBlockPlayerInput) == 0x1
 #ifndef SKYRIMVR
 static_assert(offsetof(PlayerControls, PlayerControls::Data) == 0x20);
 #else
-static_assert(offsetof(PlayerControls, PlayerControls::Data) == 0x24); // VR has 4 bytes extra padding
+static_assert(offsetof(PlayerControls, PlayerControls::Data) == 0x24);
 #endif
 
 struct BSInputEnableManager

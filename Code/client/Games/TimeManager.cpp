@@ -26,4 +26,3 @@ static TiltedPhoques::Initializer s_loadingScreenHooks(
         RealSimulateTime = s_SimulateTime.Get();
         TP_HOOK(&RealSimulateTime, HookSimulateTime);
     });
-

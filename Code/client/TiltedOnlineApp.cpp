@@ -132,4 +132,3 @@ void TiltedOnlineApp::ApplyNvidiaFix() noexcept
     if (d3dFeatureLevelOut < D3D_FEATURE_LEVEL_11_0)
         spdlog::warn("Unexpected D3D11 feature level detected (< 11.0), may cause issues");
 }
-

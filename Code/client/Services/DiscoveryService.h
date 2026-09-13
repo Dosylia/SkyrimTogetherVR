@@ -93,8 +93,7 @@ private:
         std::chrono::steady_clock::time_point MissingSince{};
     };
 
-    //! @brief Actor forms detected so far. An actor that stops being detected stays here for a
-    //! short grace period before it is reported as removed (see VisitForms).
+    //! @brief Detected actor forms. A missing actor is only reported as removed after a grace period.
     std::unordered_map<uint32_t, KnownForm> m_forms;
     uint64_t m_visitCounter = 0;
     /**

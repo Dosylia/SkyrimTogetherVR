@@ -38,4 +38,3 @@ void BSFixedString::Release() noexcept
 
     TiltedPhoques::ThisCall(s_release, this);
 }
-

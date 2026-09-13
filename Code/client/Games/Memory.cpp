@@ -188,4 +188,3 @@ void HookFormAllocateSentinelInit()
     TP_HOOK_IAT(_initterm_e, "api-ms-win-crt-runtime-l1-1-0.dll");
 }
 #pragma optimize("", on)
-

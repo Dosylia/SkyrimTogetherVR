@@ -10,4 +10,3 @@ void TESTexture::Construct()
 
     TiltedPhoques::ThisCall(s_constructor, this);
 }
-

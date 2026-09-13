@@ -7,4 +7,3 @@ void Lock::SetLock(bool aIsLocked) noexcept
 
     return TiltedPhoques::ThisCall(realSetLock, this, aIsLocked);
 }
-

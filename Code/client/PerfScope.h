@@ -2,9 +2,8 @@
 
 #include <chrono>
 
-//! Lightweight per-frame profiling for stutter hunting. Sections time themselves with PerfScope;
-//! World::Update resets the frame record and logs a single line when a frame spikes, naming the
-//! slowest mod section so a hitch can be attributed to the mod or to the game.
+//! Per-frame profiling for stutter hunting. Sections time themselves with PerfScope, and World::Update
+//! logs the slowest one when a frame spikes, to tell mod hitches from game hitches.
 struct PerfFrame
 {
     const char* SlowestSection = nullptr;

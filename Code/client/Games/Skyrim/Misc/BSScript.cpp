@@ -109,8 +109,7 @@ BSScript::IObjectHandlePolicy* BSScript::IObjectHandlePolicy::Get() noexcept
     POINTER_SKYRIMSE(BSScript::IObjectHandlePolicy*, s_policy, 414391, 414391);
     return *s_policy.Get();
 #else
-    // 414391 has no verified VR address (crosswalk only). Ask the VM instead, the
-    // same way ExtractComplexType does; SkyrimVM::Get uses VR CSV id 514315.
+    // No verified VR address for 414391: ask the VM instead.
     auto* pVM = GameVM::Get();
     return pVM && pVM->virtualMachine ? pVM->virtualMachine->GetObjectHandlePolicy() : nullptr;
 #endif
@@ -309,4 +308,3 @@ bool BSScript::DidLaunchSkyrimTogetherFunc::MarshallAndDispatch(Variable* apBase
     apResult->Set<bool>(true);
     return true;
 }
-

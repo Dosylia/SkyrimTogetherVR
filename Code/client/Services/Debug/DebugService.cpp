@@ -156,20 +156,10 @@ void DebugService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
 {
     PerfScope perfScope("DebugService::OnUpdate");
 
-    // GetMainWindow() is null on VR (Hook_Renderer_Init, which sets it, is
-    // disabled there - see BSGraphicsRenderer.cpp). Runs every frame, so an
-    // unguarded dereference here would crash immediately and constantly.
+    // There is no main window on VR (Hook_Renderer_Init is off), and the keys below must still work.
     auto* pMainWindow = BSGraphics::GetMainWindow();
-#ifndef SKYRIMVR
-    if (!pMainWindow || !pMainWindow->IsForeground())
-        return;
-#else
-    // No main window on VR, so the check above would return every frame and the
-    // F6 connect key below could never work - and F6 is the only way to connect on VR
-    // (the overlay connect UI doesn't exist). Only check focus when a window exists.
     if (pMainWindow && !pMainWindow->IsForeground())
         return;
-#endif
 
     if (moveData.pActor)
     {
@@ -195,15 +185,13 @@ void DebugService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
 
             static char s_address[256] = "127.0.0.1:10578";
 #ifdef SKYRIMVR
-            // VR has no connect UI. Read "address:port" (line 1) and an optional server
-            // password (line 2) from %LOCALAPPDATA%\SkyrimTogetherVR\connect.txt, so a
-            // friend's server can be used; falls back to 127.0.0.1:10578.
+            // VR has no connect UI: read "address:port" and an optional password line from
+            // %LOCALAPPDATA%\SkyrimTogetherVR\connect.txt.
             char localAppData[MAX_PATH];
             if (!m_transport.IsOnline() && GetEnvironmentVariableA("LOCALAPPDATA", localAppData, sizeof(localAppData)))
             {
                 std::ifstream connectFile(std::string(localAppData) + "\\SkyrimTogetherVR\\connect.txt");
-                // Trim both ends (and a UTF-8 BOM from Notepad): a stray leading space made
-                // the address unresolvable (disconnect reason kCannotResolve).
+                // Trim spaces and Notepad's UTF-8 BOM, which make the address unresolvable.
                 const auto trim = [](std::string& s)
                 {
                     if (s.rfind("\xEF\xBB\xBF", 0) == 0)

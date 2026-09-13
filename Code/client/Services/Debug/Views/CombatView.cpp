@@ -48,7 +48,7 @@ bool IsValidTarget(CombatTargetSelector* apThis, Actor* apAttacker, Actor* apTar
 DetectionState* GetDetectionState(Actor* apAttacker, Actor* apTarget)
 {
     TP_THIS_FUNCTION(TGetDetectionState, DetectionState*, Actor, Actor* apTarget);
-    POINTER_SKYRIMSE(TGetDetectionState, getDetectionState, 37757, 0); // VR: unknown; 37757 in the VR CSV is an unrelated SE function
+    POINTER_SKYRIMSE(TGetDetectionState, getDetectionState, 37757, 0); // No VR address
     if (!getDetectionState.Get())
         return nullptr;
     return TiltedPhoques::ThisCall(getDetectionState, apAttacker, apTarget);
@@ -225,4 +225,3 @@ void DebugService::DrawCombatView()
 
     ImGui::End();
 }
-

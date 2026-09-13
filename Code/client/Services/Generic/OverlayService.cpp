@@ -135,6 +135,8 @@ OverlayService::~OverlayService() noexcept
 {
 }
 
+// VR never creates the overlay (no D3D11 hook), so m_pOverlay stays null there. Every CEF call must
+// be guarded: CEF isn't initialized and any use of its API (even CefListValue::Create) kills the process.
 void OverlayService::Create(RenderSystemD3D11* apRenderSystem) noexcept
 {
     m_pProvider = TiltedPhoques::MakeUnique<D3D11RenderProvider>(apRenderSystem);
@@ -154,7 +156,7 @@ void OverlayService::Create(RenderSystemD3D11* apRenderSystem) noexcept
 
 void OverlayService::Render() noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     auto pPlayer = PlayerCharacter::Get();
@@ -169,7 +171,7 @@ void OverlayService::Render() noexcept
 
 void OverlayService::Reset() const noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     m_pOverlay->GetClient()->Reset();
@@ -177,7 +179,7 @@ void OverlayService::Reset() const noexcept
 
 void OverlayService::Reload() noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     SetInGame(false);
@@ -191,7 +193,7 @@ void OverlayService::Reload() noexcept
 
 void OverlayService::Initialize() noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     m_pOverlay->ExecuteAsync("init");
@@ -199,7 +201,7 @@ void OverlayService::Initialize() noexcept
 
 void OverlayService::SetActive(bool aActive) noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     if (!m_inGame)
@@ -219,7 +221,7 @@ bool OverlayService::GetActive() const noexcept
 
 void OverlayService::SetInGame(bool aInGame) noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     if (m_inGame == aInGame)
@@ -269,7 +271,7 @@ void OverlayService::SendSystemMessage(const std::string& acMessage)
 
 void OverlayService::SetPlayerHealthPercentage(uint32_t aFormId) const noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     Actor* pActor = Cast<Actor>(TESForm::GetById(aFormId));
@@ -302,7 +304,7 @@ void OverlayService::OnUpdate(const UpdateEvent&) noexcept
 {
     PerfScope perfScope("OverlayService::OnUpdate");
 
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     RunDebugDataUpdates();
@@ -311,9 +313,9 @@ void OverlayService::OnUpdate(const UpdateEvent&) noexcept
 
 void OverlayService::OnConnectedEvent(const ConnectedEvent& acEvent) noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
     {
-        Utils::ShowHudMessage("Skyrim Together: connected to server"); // no overlay on VR - tell the player in-game
+        Utils::ShowHudMessage("Skyrim Together: connected to server");
         return;
     }
 
@@ -326,7 +328,7 @@ void OverlayService::OnConnectedEvent(const ConnectedEvent& acEvent) noexcept
 
 void OverlayService::OnDisconnectedEvent(const DisconnectedEvent&) noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
     {
         Utils::ShowHudMessage("Skyrim Together: disconnected");
         return;
@@ -337,7 +339,7 @@ void OverlayService::OnDisconnectedEvent(const DisconnectedEvent&) noexcept
 
 void OverlayService::OnWaitingFor3DRemoved(entt::registry& aRegistry, entt::entity aEntity) const noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     const auto* pPlayerComponent = m_world.try_get<PlayerComponent>(aEntity);
@@ -364,7 +366,7 @@ void OverlayService::OnWaitingFor3DRemoved(entt::registry& aRegistry, entt::enti
 
 void OverlayService::OnPlayerComponentRemoved(entt::registry& aRegistry, entt::entity aEntity) const noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     const auto& playerComponent = m_world.get<PlayerComponent>(aEntity);
@@ -403,7 +405,7 @@ void OverlayService::OnPlayerDialogue(const NotifyPlayerDialogue& acMessage) noe
 
 void OverlayService::OnConnectionError(const ConnectionErrorEvent& acConnectedEvent) const noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
     {
         Utils::ShowHudMessage(TiltedPhoques::String("Skyrim Together: connection failed - ") + acConnectedEvent.ErrorDetail);
         return;
@@ -416,7 +418,7 @@ void OverlayService::OnConnectionError(const ConnectionErrorEvent& acConnectedEv
 
 void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     auto pArguments = CefListValue::Create();
@@ -432,7 +434,7 @@ void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcep
 
 void OverlayService::OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     auto pArguments = CefListValue::Create();
@@ -443,7 +445,7 @@ void OverlayService::OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept
 
 void OverlayService::OnPlayerLevel(const NotifyPlayerLevel& acMessage) noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     auto pArguments = CefListValue::Create();
@@ -454,7 +456,7 @@ void OverlayService::OnPlayerLevel(const NotifyPlayerLevel& acMessage) noexcept
 
 void OverlayService::OnPlayerCellChanged(const NotifyPlayerCellChanged& acMessage) const noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     auto pArguments = CefListValue::Create();
@@ -493,7 +495,7 @@ void OverlayService::OnNotifyTeleport(const NotifyTeleport& acMessage) noexcept
 
 void OverlayService::OnNotifyPlayerHealthUpdate(const NotifyPlayerHealthUpdate& acMessage) noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     const float percentage = acMessage.Percentage >= 0.f ? acMessage.Percentage : 0.f;
@@ -506,7 +508,7 @@ void OverlayService::OnNotifyPlayerHealthUpdate(const NotifyPlayerHealthUpdate& 
 
 void OverlayService::OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcept
 {
-    if (!m_pOverlay) // no overlay on VR; ExecuteAsync on a null OverlayApp still reaches CefListValue::Create and CHECK-crashes
+    if (!m_pOverlay) // No overlay on VR
     {
         Utils::ShowHudMessage(acEvent.IsLeader ? "Skyrim Together: party created" : "Skyrim Together: joined party");
         return;
@@ -518,7 +520,7 @@ void OverlayService::OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcep
 
 void OverlayService::OnPartyLeftEvent(const PartyLeftEvent& acEvent) noexcept
 {
-    if (!m_pOverlay) // no overlay on VR (see OnPartyJoinedEvent)
+    if (!m_pOverlay) // No overlay on VR
     {
         Utils::ShowHudMessage("Skyrim Together: left party");
         return;
@@ -529,7 +531,7 @@ void OverlayService::OnPartyLeftEvent(const PartyLeftEvent& acEvent) noexcept
 
 void OverlayService::RunDebugDataUpdates() noexcept
 {
-    if (!m_pOverlay) // never created on VR (no D3D11 overlay hook) - CEF isn't initialized, and its API CHECK-crashes the process
+    if (!m_pOverlay) // No overlay on VR
         return;
 
     static std::chrono::steady_clock::time_point lastSendTimePoint;

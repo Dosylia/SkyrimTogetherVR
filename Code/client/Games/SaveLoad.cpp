@@ -128,4 +128,3 @@ static TiltedPhoques::Initializer s_saveLoadHooks(
         TP_HOOK(&RealBGSSaveFormBuffer_WriteFormId, BGSSaveFormBuffer_WriteFormId);
         TP_HOOK(&RealBGSSaveFormBuffer_WriteId, BGSSaveFormBuffer_WriteId);
     });
-

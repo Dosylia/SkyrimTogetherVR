@@ -20,7 +20,7 @@ extern bool IsGameMemoryAddress(const uint8_t* apAddress);
 extern "C" __declspec(dllimport) NTSTATUS WINAPI LdrGetDllFullName(HMODULE, PUNICODE_STRING);
 
 #ifdef SKYRIMVR
-// defined in client ScriptExtender.cpp; set just before SKSE VR is loaded
+// Defined in client ScriptExtender.cpp, set just before SKSE VR is loaded.
 extern bool g_ScriptExtenderStarting;
 #endif
 
@@ -246,16 +246,9 @@ NTSTATUS WINAPI TP_LdrLoadDll(const wchar_t* apPath, uint32_t* apFlags, UNICODE_
         }
 
 #ifdef SKYRIMVR
-        // The "skse64 plugin preloader" (d3dx9_42.dll proxy, shipped by FUS)
-        // hooks _initterm_e and loads EngineFixesVR during the game's CRT
-        // init. Under this launcher that early load crashes: EF's static
-        // initializer REL::Module::Module() fails GetModuleHandleA("SkyrimVR.exe")
-        // ("Failed to get handle to module!") and then crashes logging it,
-        // because its logger isn't set up yet. When EF is loaded later by SKSE
-        // VR instead (LoadScriptExender), it works - that was the state in every
-        // run that reached the main menu. So refuse the load until our client
-        // starts SKSE, and let SKSE load it. STATUS_DLL_NOT_FOUND rather than the
-        // blocklist's invalid-image-hash status, so the later load isn't refused.
+        // The d3dx9_42 plugin preloader (shipped by FUS) loads EngineFixesVR during the game's CRT init,
+        // which crashes under this launcher. Refuse it until SKSE starts; SKSE then loads it fine.
+        // STATUS_DLL_NOT_FOUND, so the later load isn't blocked too.
         const std::wstring_view baseName(name, fileName.length() - (pos + 1));
         if (!g_ScriptExtenderStarting && baseName.size() == 17 && _wcsnicmp(baseName.data(), L"EngineFixesVR.dll", 17) == 0)
             return 0xC0000135; // STATUS_DLL_NOT_FOUND

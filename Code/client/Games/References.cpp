@@ -53,7 +53,7 @@ namespace GameplayFormulas
 float CalculateRealDamage(Actor* apHittee, float aDamage, bool aKillMove) noexcept
 {
     using TGetDifficultyMultiplier = float(int32_t, int32_t, bool);
-    POINTER_SKYRIMSE(TGetDifficultyMultiplier, s_getDifficultyMultiplier, 26503, 25920); // VR: SE 25920 "float GetDifficultyMultiplier(uint32_t, ActorValue, bool isPlayer)" (vr_address_tools database.csv, status 4; VR CSV 0x3d0a80; size 0x50 = AE 26503). The crosswalk value 0x3edce0 crashed on the first melee hit
+    POINTER_SKYRIMSE(TGetDifficultyMultiplier, s_getDifficultyMultiplier, 26503, 25920);
 
     bool isPlayer = apHittee == PlayerCharacter::Get();
 
@@ -74,7 +74,6 @@ float CalculateRealDamage(Actor* apHittee, float aDamage, bool aKillMove) noexce
 void FadeOutGame(bool aFadingOut, bool aBlackFade, float aFadeDuration, bool aRemainVisible, float aSecondsToFade) noexcept
 {
     using TFadeOutGame = void(bool, bool, float, bool, float);
-    // VR: AE 52847 -> SE 51909 FadeOutGame (AE 52841-52845 sizes = SE 51903-51907; SE name/signature match) -> VR csv 0x903080
     POINTER_SKYRIMSE(TFadeOutGame, fadeOutGame, 52847, 51909);
     fadeOutGame.Get()(aFadingOut, aBlackFade, aFadeDuration, aRemainVisible, aSecondsToFade);
 }
@@ -136,7 +135,7 @@ static TiltedPhoques::Initializer s_referencesHooks(
     {
         POINTER_SKYRIMSE(TCheckForNewPackage, s_checkForNewPackage, 39114, 39114);
         POINTER_SKYRIMSE(TInitFromPackage, s_initFromPackage, 38959, 38959);
-        POINTER_SKYRIMSE(TSetCurrentPickREFR, s_setCurrentPickREFR, 51093, 50164); // VR: AE 51093 -> SE 50164 Console::SetSelectedRef (se_ae + database.csv)
+        POINTER_SKYRIMSE(TSetCurrentPickREFR, s_setCurrentPickREFR, 51093, 50164);
 
         RealCheckForNewPackage = s_checkForNewPackage.Get();
         RealInitFromPackage = s_initFromPackage.Get();
@@ -146,4 +145,3 @@ static TiltedPhoques::Initializer s_referencesHooks(
         TP_HOOK(&RealInitFromPackage, HookInitFromPackage);
         TP_HOOK(&RealSetCurrentPickREFR, HookSetCurrentPickREFR);
     });
-

@@ -39,15 +39,7 @@ EventDispatcherManager* EventDispatcherManager::Get() noexcept
 {
     using TGetEventDispatcherManager = EventDispatcherManager*();
 
-    // 14298 is this symbol's AE id, not its SE/VR one (confirmed against
-    // CommonLibVR-NG's ScriptEventSourceHolder::GetSingleton, which uses
-    // RELOCATION_ID(14108, 14298) - SE id first, AE id second). VR shares
-    // old-gen SE's numbering, not AE's, so 14298 doesn't exist in the VR
-    // Address Library at all and fell through to an unverified crosswalk
-    // guess that crashed inside the real game code it pointed at. 14108 is
-    // confirmed present in the official VR Address Library CSV.
     POINTER_SKYRIMSE(TGetEventDispatcherManager, s_getEventDispatcherManager, 14298, 14108);
 
     return s_getEventDispatcherManager.Get()();
 }
-

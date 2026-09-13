@@ -21,13 +21,8 @@ std::string SerializeTimePoint(const time_point& time, const std::string& format
     return ss.str();
 }
 
-// Describes a code address: which allocation it lives in, and which file that
-// allocation was mapped from (if any). The game is mapped by our own custom PE
-// loader into a plain private buffer, so it has no module entry and
-// GetModuleFileName/SymFromAddr can't name it - GetMappedFileNameA returns
-// nothing for private memory either. Reporting the allocation base is still
-// enough to tell "our exe" from "the custom-loaded game image" from "a real
-// DLL", which is the distinction that matters when reading the scan below.
+// Names a code address as "module+offset", or "<alloc base>+offset" for memory without a module.
+// The game image is mapped by our own PE loader into private memory, so it has no module name.
 static void DescribeCodeAddress(void* apAddress, char* apOut, size_t aOutSize)
 {
     MEMORY_BASIC_INFORMATION mbi{};
@@ -40,8 +35,6 @@ static void DescribeCodeAddress(void* apAddress, char* apOut, size_t aOutSize)
     char name[MAX_PATH];
     name[0] = '\0';
 
-    // Named module (our exe, a DLL) - report module-relative offset, which is
-    // what a .pdb lookup needs.
     HMODULE hModule = nullptr;
     if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                            static_cast<LPCSTR>(apAddress), &hModule) &&
@@ -54,8 +47,7 @@ static void DescribeCodeAddress(void* apAddress, char* apOut, size_t aOutSize)
         return;
     }
 
-    // Unnamed executable memory: the custom-loaded game image, or generated
-    // code (our own CodeGenerator trampolines / MinHook thunks both live here).
+    // The custom-loaded game image, or generated code (trampolines, hook thunks).
     _snprintf_s(apOut, aOutSize, _TRUNCATE, "<alloc 0x%llx>+0x%llx",
                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(mbi.AllocationBase)),
                 static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(apAddress) -
@@ -75,18 +67,10 @@ static bool IsExecutableAddress(void* apAddress)
     return (prot & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
 }
 
-// The minidumps for this process are unusable in practice (see the dump-flag
-// comment further down), so the crash context has to reach the log directly.
-// Two parts:
-//   * registers + the faulting access, so a bad pointer can be recognised
-//     on sight (our recurring failures all involve a garbage `this` in rcx);
-//   * a raw stack scan for executable addresses, standing in for a real stack
-//     walk. RtlVirtualUnwind/StackWalk64 need .pdata unwind info, and the
-//     custom PE loader maps the game without any, so a proper walk stops at
-//     the first game frame. Scanning every qword between rsp and the thread's
-//     stack base and keeping the ones that point into committed executable
-//     memory recovers the return-address chain (plus some false positives from
-//     stale slots - order and plausibility still make the real chain readable).
+// Logs registers and a raw stack scan, because minidumps of this process are mostly unusable.
+// A real stack walk needs unwind info, which the custom-loaded game image doesn't have. Scanning
+// the stack for pointers into executable memory recovers the return-address chain instead
+// (with some false positives from stale slots).
 static void LogCrashContext(PEXCEPTION_POINTERS pExceptionInfo)
 {
     const auto* pRecord = pExceptionInfo->ExceptionRecord;
@@ -117,9 +101,7 @@ static void LogCrashContext(PEXCEPTION_POINTERS pExceptionInfo)
                   static_cast<uint64_t>(pContext->R12), static_cast<uint64_t>(pContext->R13),
                   static_cast<uint64_t>(pContext->R14), static_cast<uint64_t>(pContext->R15));
 
-    // Thread stack bounds from the TIB - the scan must not walk off the end of
-    // the stack (the guard page below StackLimit would fault, and past
-    // StackBase isn't ours).
+    // Stay inside the thread's stack: the guard page below StackLimit would fault.
     const auto* pTib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
     auto* pCursor = reinterpret_cast<uintptr_t*>(pContext->Rsp & ~static_cast<uintptr_t>(7));
     const auto* pStackTop = reinterpret_cast<const uintptr_t*>(pTib->StackBase);
@@ -136,7 +118,7 @@ static void LogCrashContext(PEXCEPTION_POINTERS pExceptionInfo)
     spdlog::error("  stack scan (rsp 0x{:x} .. 0x{:x}), executable addresses only:",
                   reinterpret_cast<uint64_t>(pCursor), reinterpret_cast<uint64_t>(pStackTop));
 
-    constexpr size_t kMaxSlots = 4096; // 32KB of stack - deep enough for a load-time call chain
+    constexpr size_t kMaxSlots = 4096; // 32KB of stack
     constexpr size_t kMaxHits = 48;
 
     size_t hits = 0;
@@ -158,11 +140,8 @@ static void LogCrashContext(PEXCEPTION_POINTERS pExceptionInfo)
 
 LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 {
-    // Separate one-shot gates per exception code: an access violation that a
-    // downstream __except recovers from must not consume the single dump
-    // opportunity a later, actually-fatal STATUS_STACK_BUFFER_OVERRUN needs -
-    // that's exactly what was happening (AV dumped and recovered, the /GS
-    // failure that followed it got silently skipped every time).
+    // One gate per exception type: a recovered access violation must not use up the report for a
+    // later, fatal /GS failure.
     static int alreadyCrashedAV = 0;
     static int alreadyCrashedGS = 0;
     auto retval = EXCEPTION_CONTINUE_SEARCH;
@@ -175,11 +154,8 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
     const bool isNewAV = exceptionCode == EXCEPTION_ACCESS_VIOLATION && alreadyCrashedAV++ == 0;
     const bool isNewGS = exceptionCode == STATUS_STACK_BUFFER_OVERRUN && alreadyCrashedGS++ == 0;
 
-    // Check for severe, not continuable and not software-originated exception.
-    // Also catch STATUS_STACK_BUFFER_OVERRUN (/GS cookie failures, raised via
-    // __fastfail) - these were previously invisible here (no dump, no WER
-    // detail beyond a bare fault offset), making stack-corruption bugs
-    // essentially undiagnosable.
+    // Access violations, and /GS stack cookie failures (STATUS_STACK_BUFFER_OVERRUN), which used to
+    // leave no trace at all.
     if (isNewAV || isNewGS)
     {
         spdlog::critical (__FUNCTION__ ": crash occurred!"); 
@@ -228,24 +204,9 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
                     dumpError = GetLastError();
 
                 // baseline settings from https://stackoverflow.com/a/63123214/5273909
-                //
-                // Keep this minimal. Every larger setting has been tried on this
-                // process and failed, because of the 1GB+ buffer the custom PE
-                // loader reserves for the game image:
-                //   * MiniDumpWithFullMemory: ~7GB, ~3 minutes - indistinguishable
-                //     from a hang, and killed mid-write in practice.
-                //   * MiniDumpWithIndirectlyReferencedMemory: chases pointers into
-                //     that same buffer, producing ~1GB dumps that cdb then rejects
-                //     as truncated ("Memory range data only partially present"),
-                //     and sometimes a 0-byte file. Unusable either way.
-                // MiniDumpNormal always includes thread contexts and stacks, which
-                // is what a call stack needs. MiniDumpWithDataSegs is NOT cheap
-                // here (~1GB: our data segment is the game_seg buffer), but it
-                // is valid and it holds the decrypted game code - the on-disk
-                // SkyrimVR.exe is SteamStub-encrypted, so this dump is the only
-                // place the game can be disassembled. Keep it. Anything the dump can't hold is
-                // covered by LogCrashContext() above, which logs registers and a
-                // stack scan and does not depend on the dump succeeding at all.
+                // Larger dump types fail on this process because of the 1GB+ game image buffer (full
+                // memory: ~7GB and minutes to write; indirect memory: truncated dumps). DataSegs is ~1GB
+                // but holds the decrypted game code, the only copy that can be disassembled.
                 auto dumpSettings = MiniDumpNormal | MiniDumpWithDataSegs | MiniDumpWithThreadInfo;
 
                 if (hDumpFile != INVALID_HANDLE_VALUE)
@@ -261,11 +222,7 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
             {
             }
 
-            // CreateFileA reports failure as INVALID_HANDLE_VALUE (-1), not NULL -
-            // the old "if (!hDumpFile)" test therefore took the success branch for
-            // both outcomes and logged "coredump created" even when no file was
-            // ever opened. That claim sent several debugging sessions looking for
-            // dumps that did not exist; report what actually happened instead.
+            // CreateFileA fails with INVALID_HANDLE_VALUE, not NULL: the old check always claimed success.
             if (hDumpFile == INVALID_HANDLE_VALUE)
                 spdlog::critical(__FUNCTION__ ": coredump file could not be created (error {}).", dumpError);
             else
@@ -324,10 +281,7 @@ CrashHandler::~CrashHandler()
 
 void CrashHandler::RemovePreviousDump(std::filesystem::path path)
 {
-    // Only our own dumps. GetModuleFileName(NULL) is spoofed to the game's exe
-    // once the launcher's hooks are active, so this directory is the game
-    // folder - matching any path containing "crash" there could delete other
-    // mods' files.
+    // This is the game folder (the launcher spoofs the module path), so only delete our own dumps.
     for (auto& entry : std::filesystem::directory_iterator(path))
     {
         const auto name = entry.path().filename().string();

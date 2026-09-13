@@ -21,4 +21,3 @@ static TiltedPhoques::Initializer s_npcInitHooks(
 
         // TP_HOOK(&RealSetLeveledNpc, HookSetLeveledNpc);
     });
-

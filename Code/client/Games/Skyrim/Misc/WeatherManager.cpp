@@ -8,4 +8,3 @@ WeatherManager* WeatherManager::Get()
 
     return *s_instance.Get();
 }
-

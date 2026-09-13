@@ -52,4 +52,3 @@ static TiltedPhoques::Initializer s_loadingScreenHooks(
 
         // TP_HOOK(&RealRequestLoadingText, RequestLoadingText);
     });
-

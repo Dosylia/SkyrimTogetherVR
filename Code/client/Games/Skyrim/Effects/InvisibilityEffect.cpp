@@ -30,4 +30,3 @@ static TiltedPhoques::Initializer s_invisibilityEffectsHooks(
 
         TP_HOOK(&RealFinish, HookFinish);
     });
-

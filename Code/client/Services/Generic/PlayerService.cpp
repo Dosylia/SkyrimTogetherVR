@@ -204,10 +204,8 @@ void PlayerService::RunRespawnUpdates(const double acDeltaTime) noexcept
     static bool s_startTimer = false;
 
     PlayerCharacter* pPlayer = PlayerCharacter::Get();
-    // Once the death sequence has started the screen is already fading to black, so finish it even if
-    // the bleedout state ends early. Previously this reset the timer instead: on VR the player dropped
-    // out of bleedout, the respawn never ran and the fade-in never came (stuck on a black screen with
-    // no control).
+    // Once the respawn has started the screen is fading to black, so finish it even if bleedout ends
+    // early (on VR it does, which left the player on a black screen).
     if (!pPlayer->actorState.IsBleedingOut() && !s_startTimer)
     {
         m_cachedMainSpellId = pPlayer->magicItems[0] ? pPlayer->magicItems[0]->formID : 0;
@@ -276,7 +274,7 @@ void PlayerService::RunPostDeathUpdates(const double acDeltaTime) noexcept
         {
             spdlog::info("PlayerService: respawn done, fading back in");
 
-            // Fade in first: if anything below misbehaves the player can at least see again.
+            // Fade in first, so the player can see again even if something below fails.
             FadeOutGame(false, true, 0.5f, true, 2.f);
 
             PlayerCharacter::SetGodMode(true);

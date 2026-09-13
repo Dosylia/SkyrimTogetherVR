@@ -20,7 +20,7 @@ static TShowSubtitle* RealShowSubtitle = nullptr;
 void SubtitleManager::ShowSubtitle(TESObjectREFR* apSpeaker, const char* apSubtitleText, TESTopicInfo* apTopicInfo, bool aUnk1) noexcept
 {
 #ifdef SKYRIMVR
-    // See s_subtitleHooks below - the VR address is unknown.
+    // ShowSubtitle has no VR address (see s_subtitleHooks).
     (void)apSpeaker; (void)apSubtitleText; (void)apTopicInfo; (void)aUnk1;
     return;
 #else
@@ -31,7 +31,7 @@ void SubtitleManager::ShowSubtitle(TESObjectREFR* apSpeaker, const char* apSubti
 void* SubtitleManager::HideSubtitle(TESObjectREFR* apSpeaker) noexcept
 {
 #ifdef SKYRIMVR
-    // id 52627 resolved through the crosswalk to 0x93b240, a bare "ret 0" stub.
+    // No VR address for 52627.
     (void)apSpeaker;
     return nullptr;
 #endif
@@ -55,15 +55,8 @@ static TiltedPhoques::Initializer s_subtitleHooks(
     []()
     {
 #ifdef SKYRIMVR
-        // Disabled on VR: 52626 is the AE id, left untranslated. The crosswalk
-        // sent it to 0x93b1e0, which is a small lookup helper (reads [rcx+8],
-        // called from a list-search loop), not ShowSubtitle. Hooking it made
-        // HookShowSubtitle treat an unrelated pointer as the speaker and crash
-        // inside Cast<Actor> (the object's "vtable" was a heap address).
-        // CommonLibVR-NG only maps the neighbouring KillSubtitles
-        // (RELOCATION_ID(51755, 52628) -> VR 0x8fa0a0); the real VR
-        // ShowSubtitle is presumably close to it but unverified. Subtitle sync
-        // is off on VR until it is found.
+        // Subtitle sync is off on VR: ShowSubtitle (52626) has no VR address. The guessed one hooked
+        // an unrelated function and crashed. It should be near KillSubtitles (SE 51755, VR 0x8fa0a0).
         return;
 #endif
         POINTER_SKYRIMSE(TShowSubtitle, s_showSubtitle, 52626, 52626);
@@ -72,4 +65,3 @@ static TiltedPhoques::Initializer s_subtitleHooks(
 
         TP_HOOK(&RealShowSubtitle, HookShowSubtitle);
     });
-

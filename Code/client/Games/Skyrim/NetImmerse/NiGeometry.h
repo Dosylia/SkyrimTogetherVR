@@ -9,9 +9,7 @@ struct NiGeometry : NiAVObject
     virtual ~NiGeometry();
 
 #ifdef SKYRIMVR
-    // VR NiAVObject is 0x138 (SE 0x110) and the model data that follows is larger, so the
-    // geometry runtime data starts at 0x160 instead of 0x120 (CommonLibVR-NG BSGeometry:
-    // GetGeometryRuntimeData 0x120 / VR 0x160; properties[0] alpha, properties[1] shader).
+    // VR NiAVObject is bigger (0x138), so the geometry properties start at 0x160.
     uint8_t vrPad110[0x160 - 0x110];
     NiPointer<NiProperty> unkProperty1; // 160 alpha property
     NiPointer<NiProperty> effect;       // 168 shader property

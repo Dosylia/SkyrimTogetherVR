@@ -7,7 +7,6 @@
 bool IAnimationGraphManagerHolder::SetVariableFloat(BSFixedString* apVariable, float aValue)
 {
     TP_THIS_FUNCTION(TSetFloatVariable, bool, IAnimationGraphManagerHolder, BSFixedString*, float);
-    // Defensive: ThisCall through an unresolved id would call a null pointer.
     POINTER_SKYRIMSE(TSetFloatVariable, InternalSetFloatVariable, 32887, 32143);
     if (!InternalSetFloatVariable.Get())
         return false;
@@ -34,8 +33,6 @@ bool IAnimationGraphManagerHolder::SetVariableBool(BSFixedString* apVariable, bo
 bool IAnimationGraphManagerHolder::RevertAnimationGraphManager()
 {
     TP_THIS_FUNCTION(TRevertAnimationGraphManager, bool, IAnimationGraphManagerHolder);
-    // id 32883 has no known VR address (parked) - Get() is null; ThisCall
-    // would call through a null function pointer and crash.
     POINTER_SKYRIMSE(TRevertAnimationGraphManager, InternalRevertAnimationGraphManager, 32883, 32883);
     if (!InternalRevertAnimationGraphManager.Get())
         return false;
@@ -53,4 +50,3 @@ bool IAnimationGraphManagerHolder::IsReady()
 
     return result;
 }
-

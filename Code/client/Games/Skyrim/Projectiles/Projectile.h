@@ -55,8 +55,7 @@ struct Projectile : TESObjectREFR
     uint32_t hShooter;
     uint8_t unk[0x190 - 0x12C];
 #else
-    // SE/VR layout: 8 bytes earlier than AE (CommonLibVR-NG projectile runtime data at
-    // 0x98 vs 0xA0, power at 0x188 vs 0x190).
+    // VR uses the SE layout, 8 bytes earlier than AE.
     uint8_t unkA0[0x118 - sizeof(TESObjectREFR)];
     void* pActorCause;
     uint32_t hShooter;

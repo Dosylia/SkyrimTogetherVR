@@ -100,4 +100,3 @@ static TiltedPhoques::Initializer s_skyHooks(
         TP_HOOK(&RealForceWeather, HookForceWeather);
         TP_HOOK(&RealUpdateWeather, HookUpdateWeather);
     });
-

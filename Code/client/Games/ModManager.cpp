@@ -79,4 +79,3 @@ static TiltedPhoques::Initializer s_tesHooks(
 
         // TP_HOOK(&RealSpawnNewREFR, SpawnNewREFR);
     });
-

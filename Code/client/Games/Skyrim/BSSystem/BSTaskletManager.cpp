@@ -36,9 +36,7 @@ static TiltedPhoques::Initializer s_BSThreadInit(
         #endif
 
         // tasklet naming
-        // id 69554 has no known VR offset (parked, see VRAddressOverrides.h) - Get()
-        // returns null in that case, and null+0x63 would get handed straight to
-        // SwapCall as a "valid" address. Skip; thread naming is debug-only.
+        // No VR address; only used to name threads for debugging.
         if (getTaskletManagerInstance.Get())
             TiltedPhoques::SwapCall(getTaskletManagerInstance.Get() + 0x63, Construct_TaskletManager, &Hook_Construct_TaskletManager);
     });

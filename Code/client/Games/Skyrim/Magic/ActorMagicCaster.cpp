@@ -68,4 +68,3 @@ static TiltedPhoques::Initializer s_actorMagicCasterHooks(
         TP_HOOK(&RealSpellCast, HookSpellCast);
         TP_HOOK(&RealInterruptCast, HookInterruptCast);
     });
-

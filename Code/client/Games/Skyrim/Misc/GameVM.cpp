@@ -8,4 +8,3 @@ SkyrimVM* SkyrimVM::Get()
 
     return *s_instance.Get();
 }
-

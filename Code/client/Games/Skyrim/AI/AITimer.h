@@ -11,4 +11,3 @@ struct AITimer
     float fTargetTime;
     float fStartTime;
 };
-

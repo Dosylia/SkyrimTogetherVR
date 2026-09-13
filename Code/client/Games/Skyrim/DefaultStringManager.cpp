@@ -10,4 +10,3 @@ DefaultStringManager& DefaultStringManager::Get()
 
     return GetDefaultStringManager();
 }
-

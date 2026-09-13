@@ -7,4 +7,3 @@ bool ActorState::SetWeaponDrawn(bool aDraw) noexcept
 
     return TiltedPhoques::ThisCall(setWeaponState, this, aDraw);
 }
-

@@ -119,4 +119,3 @@ static TiltedPhoques::Initializer s_questInitHooks(
         // kill quest init in cold blood
         // TiltedPhoques::Write<uint8_t>(25003, 0xC3);
     });
-

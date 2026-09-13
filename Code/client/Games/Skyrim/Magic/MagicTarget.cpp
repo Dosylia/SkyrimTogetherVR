@@ -248,4 +248,3 @@ static TiltedPhoques::Initializer s_magicTargetHooks([]() {
     TP_HOOK(&RealHasPerk, HookHasPerk);
     //TP_HOOK(&RealGetPerkRank, HookGetPerkRank);
 });
-

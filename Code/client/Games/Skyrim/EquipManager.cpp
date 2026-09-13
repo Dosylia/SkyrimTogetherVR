@@ -329,4 +329,3 @@ static TiltedPhoques::Initializer s_equipmentHooks(
         TP_HOOK(&RealEquipShout, EquipShoutHook);
         TP_HOOK(&RealUnEquipShout, UnEquipShoutHook);
     });
-

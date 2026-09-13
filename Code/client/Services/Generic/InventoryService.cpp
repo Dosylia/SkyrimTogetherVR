@@ -162,7 +162,7 @@ void InventoryService::OnNotifyEquipmentChanges(const NotifyEquipmentChanges& ac
         return;
     }
 
-    // No item: a pure equipment snapshot from the owner, make the hands match it.
+    // No item: an equipment snapshot (see RunEquipmentSnapshotUpdates).
     if (!acMessage.ItemId)
     {
         if (pActor->GetExtension()->IsRemote())
@@ -353,7 +353,7 @@ void InventoryService::RunEquipmentSnapshotUpdates() noexcept
 
     Inventory equipment = pPlayer->GetEquipment();
 
-    // Only what is worn where matters here; charges and such change all the time in combat.
+    // Compare only what is worn where: charges and similar extra data change constantly in combat.
     const auto isSameEquipment = [](const Inventory& acLhs, const Inventory& acRhs)
     {
         if (acLhs.Entries.size() != acRhs.Entries.size() || !(acLhs.CurrentMagicEquipment == acRhs.CurrentMagicEquipment))
@@ -443,7 +443,7 @@ void InventoryService::ApplyHandEquipment(Actor* apActor, const Inventory& acEqu
         if (!pObject)
             continue;
 
-        // The remote copy only has what it was spawned with, the item may have been picked up since.
+        // The remote copy may not have the item yet (picked up after it was spawned).
         if (apActor->GetItemCountInInventory(item.pForm) <= 0)
         {
             ScopedInventoryOverride _;

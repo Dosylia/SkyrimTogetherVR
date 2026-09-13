@@ -349,4 +349,3 @@ template <> void BSScript::Variable::Set(int32_t aValue) noexcept;
 template <> void BSScript::Variable::Set(float aValue) noexcept;
 template <> void BSScript::Variable::Set(bool aValue) noexcept;
 template <> void BSScript::Variable::Set(const char* acpValue) noexcept;
-

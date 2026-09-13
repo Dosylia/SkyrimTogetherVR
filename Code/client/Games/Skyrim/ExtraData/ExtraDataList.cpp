@@ -140,4 +140,3 @@ bool ExtraDataList::HasQuestObjectAlias() noexcept
     POINTER_SKYRIMSE(THasQuestObjectAlias, s_hasQuestObjectAlias, 12052, 11913);
     return TiltedPhoques::ThisCall(s_hasQuestObjectAlias, this);
 }
-

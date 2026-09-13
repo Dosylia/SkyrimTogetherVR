@@ -61,4 +61,3 @@ static TiltedPhoques::Initializer s_viewportHooks(
     []()
     {
     });
-

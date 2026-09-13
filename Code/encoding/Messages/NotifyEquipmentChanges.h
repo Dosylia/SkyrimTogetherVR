@@ -29,7 +29,6 @@ struct NotifyEquipmentChanges final : ServerMessage
     bool Unequip = false;
     bool IsSpell = false;
     bool IsShout = false;
-    // Worn equipment of the actor as reported by its owner. A message with an empty ItemId is a
-    // pure equipment snapshot (see InventoryService::RunEquipmentSnapshotUpdates).
+    // Worn equipment reported by the owner. An empty ItemId means this is only an equipment snapshot.
     Inventory CurrentInventory{};
 };

@@ -48,4 +48,3 @@ EnchantmentItem* EnchantmentItem::Create(const Inventory::EnchantmentData& aData
 
     return pItem;
 }
-

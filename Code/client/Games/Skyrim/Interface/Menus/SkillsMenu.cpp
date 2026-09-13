@@ -8,12 +8,7 @@ static TiltedPhoques::Initializer s_skillsMenuInit(
         // https://github.com/Vermunds/SkyrimSoulsRE/blob/master/src/Menus/StatsMenuEx.cpp
         // Hoooks from souls RE
         // Fix for menu not appearing
-        // ids 52510/52518 don't exist in the official VR Address Library at
-        // all (unverified crosswalk entries) - raw NOP patches at fixed
-        // offsets into whatever they actually resolve to on VR. Disabled
-        // until verified; SkillsMenu (StatsMenu) may not display correctly
-        // on VR as a result, but that's preferable to corrupting an unrelated
-        // function.
+        // Off on VR: byte patches into unverified addresses would corrupt unrelated code.
 #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> ProcessMessage(52510);
         TiltedPhoques::Nop(ProcessMessage.Get() + 0x84E, 6);

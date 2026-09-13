@@ -107,13 +107,6 @@ TESObjectREFR* TESObjectREFR::GetByHandle(uint32_t aHandle) noexcept
 
     using TGetRefrByHandle = void(uint32_t & aHandle, TESObjectREFR * &apResult);
 
-    // 17201 (formerly used for both SE and VR here) is a leftover from an
-    // earlier, unverified SE->VR crosswalk pass and doesn't exist at all in
-    // the official VR address library - it resolved to an unrelated function,
-    // which corrupted the stack on every call. 12204 is this function's real,
-    // officially-verified id (confirmed against both the VR Address Library
-    // CSV and CommonLibVR-NG's LookupReferenceByHandle, which uses the same
-    // id for SE/VR since address-library ids are stable across versions).
     POINTER_SKYRIMSE(TGetRefrByHandle, s_getRefrByHandle, 17201, 12204);
 
     s_getRefrByHandle.Get()(aHandle, pResult);
@@ -912,7 +905,7 @@ void TESObjectREFR::EnableImpl() noexcept
 {
     TP_THIS_FUNCTION(TEnableImpl, void, TESObjectREFR, bool aResetInventory);
 
-    POINTER_SKYRIMSE(TEnableImpl, s_enable, 19800, 19373); // VR: AE 19800 -> SE 19373 TESObjectREFR::Enable (se_ae + database.csv)
+    POINTER_SKYRIMSE(TEnableImpl, s_enable, 19800, 19373);
 
     TiltedPhoques::ThisCall(s_enable, this, false);
 }
@@ -1109,7 +1102,7 @@ static TiltedPhoques::Initializer s_objectReferencesHooks(
         POINTER_SKYRIMSE(TLockChange, s_lockChange, 19512, 19512);
         POINTER_SKYRIMSE(TRotate, s_rotateX, 19787, 19787);
         POINTER_SKYRIMSE(TRotate, s_rotateY, 19788, 19788);
-        POINTER_SKYRIMSE(TRotate, s_rotateZ, 19789, 19362); // VR: SE 19362 via VRAddressOverrides (0x2a7f00; sibling of rotateX/Y, compares [rcx+50h] = angle.z)
+        POINTER_SKYRIMSE(TRotate, s_rotateZ, 19789, 19362);
         POINTER_SKYRIMSE(TActivate, s_activate, 19796, 19369);
         POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 19708, 19708);
         POINTER_SKYRIMSE(TRemoveInventoryItem, s_removeInventoryItem, 19689, 19689);
@@ -1136,4 +1129,3 @@ static TiltedPhoques::Initializer s_objectReferencesHooks(
         TP_HOOK(&RealPlayAnimationAndWait, HookPlayAnimationAndWait);
         TP_HOOK(&RealPlayAnimation, HookPlayAnimation);
     });
-

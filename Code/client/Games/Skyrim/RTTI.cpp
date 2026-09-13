@@ -3,12 +3,7 @@
 #ifndef SKYRIMVR
 const VersionDbPtr<internal::TDynamicCast> internal::DynamicCast(109689);
 #else
-// 109689 is the AE id. The crosswalk table mapped it to 0x13cf190, which on VR
-// is an SEH unwind funclet ("lea rcx, <global>; jmp <destructor>") - so every
-// Cast<> on VR ran a destructor on some static object and returned garbage.
-// CommonLibVR-NG: RELOCATION_ID(102238, 109689). VR id 102238 resolves to the
-// import thunk at 0x138baba, whose IAT slot holds VCRUNTIME140!__RTDynamicCast
-// (verified in a crash dump).
+// SE/VR id of the __RTDynamicCast import thunk.
 const VersionDbPtr<internal::TDynamicCast> internal::DynamicCast(102238);
 #endif
 

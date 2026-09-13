@@ -33,4 +33,3 @@ static TiltedPhoques::Initializer s_summonCreatureEffectsHooks(
 
         TP_HOOK(&RealInitializeSummonCreatureEffect, HookInitializeSummonCreatureEffect);
     });
-

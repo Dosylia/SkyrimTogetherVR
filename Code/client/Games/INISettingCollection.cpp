@@ -23,4 +23,3 @@ Setting* INISettingCollection::GetSetting(const char* acpName) noexcept
 
     return nullptr;
 }
-

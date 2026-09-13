@@ -148,11 +148,7 @@ struct PlayerCharacter : Actor
 
     uint8_t padPlayerEnd[0xBE0 - 0xB30];
 #else
-    // Skyrim VR layout, absolute offsets from CommonLibVR-NG's VR_PLAYER_RUNTIME_DATA:
-    // objectives B70, VR_INFO skills 10B0, currentLocation 11C8, GAME_STATE difficulty
-    // 11F4, tintMasks 1208/1220, PlayerFlags at 12D0 (size 8) -> sizeof 0x12D8. The SE
-    // equivalents (580/9B0/AC8/AF8/B10/B28, size BE0) match this file's pre-AE layout
-    // from commit 553793fc exactly, which cross-checks the VR numbers.
+    // VR layout (offsets from CommonLibVR-NG).
     uint8_t pad1[0xB70 - sizeof(Actor)];
     GameArray<ObjectiveInstance> objectives;
     uint8_t padB88[0x10B0 - 0xB88];

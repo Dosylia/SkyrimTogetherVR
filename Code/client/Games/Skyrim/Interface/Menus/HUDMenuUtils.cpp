@@ -22,4 +22,3 @@ static TiltedPhoques::Initializer s_Init(
         HUDMenuUtils::CameraWorldToCam = s_matrix.Get();
         HUDMenuUtils::CameraPort = s_port.Get();
     });
-

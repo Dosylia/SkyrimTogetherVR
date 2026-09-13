@@ -47,13 +47,8 @@ struct Actor : TESObjectREFR
     virtual void sub_A7();
     virtual void sub_A8();
 #ifdef SKYRIMVR
-    // Second VR-only virtual (the first is TESObjectREFR's slot 0x82), so from here on
-    // every Actor virtual is TWO slots higher on VR. Verified in a VR Character vtable
-    // dump: slot 0xAA calls slot 0xA9 (RemoveCharController) internally, and slot 0xAB
-    // takes (pos, bool) and calls TESObjectREFR::SetPosition (0x2a8010) - the real
-    // SetPosition. Without this, SetPosition() called 0xAA, tearing down the NPC's
-    // character controller on every HookSetPosition call -> Havok use-after-free in
-    // bhkCharRigidBodyController during save load.
+    // Second VR-only virtual (the first is in TESObjectREFR): every Actor virtual from here on is
+    // two slots higher on VR. Without it SetPosition() called the character controller teardown.
     virtual void VR_Unk_AA();
 #endif
     virtual void SetPosition(const NiPoint3& acPoint, bool aSyncHavok = true);
@@ -391,8 +386,7 @@ static_assert(offsetof(Actor, equippedShout) == 0x1E8);
 static_assert(offsetof(Actor, actorLock) == 0x284);
 static_assert(sizeof(Actor) == 0x2B8);
 #else
-// Skyrim VR uses the SE layout (no ExtraDataList vtable): the pre-AE values from
-// commit 553793fc.
+// VR uses the SE layout.
 static_assert(offsetof(Actor, currentProcess) == 0xF0);
 static_assert(offsetof(Actor, flags1) == 0xE0);
 static_assert(offsetof(Actor, actorValueOwner) == 0xB0);

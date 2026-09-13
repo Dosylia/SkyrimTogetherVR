@@ -34,13 +34,9 @@ void TP_MAKE_THISCALL(HookRegisterPapyrusFunction, BSScript::IVirtualMachine, Na
 void TP_MAKE_THISCALL(HookBindEverythingToScript, BSScript::IVirtualMachine*)
 {
 #ifdef SKYRIMVR
-    // RegisterPapyrusFunction (104788) has no VR address, so the hook that fills
-    // PapyrusService's name -> native-function table was never installed, and every
-    // PAPYRUS_FUNCTION(...) in the client resolved to null (first seen as a call to 0
-    // from HookActivate -> GetOpenState). That function *is* the VM's BindNativeMethod
-    // implementation, vtable slot 0x18 - the slot our own BindNativeMethod calls below
-    // already use successfully on VR. Hook it from the vtable now, before
-    // RealBindEverythingToScript registers the game's natives.
+    // RegisterPapyrusFunction (104788) has no VR address, which left every PAPYRUS_FUNCTION null.
+    // It is the VM's BindNativeMethod (vtable slot 0x18), so hook it from the vtable before the
+    // game registers its natives.
     static bool s_registerHookInstalled = false;
     if (!s_registerHookInstalled && apThis && *apThis)
     {
@@ -129,4 +125,3 @@ static TiltedPhoques::Initializer s_vmHooks(
         TP_HOOK(&RealSignaturesMatch, HookSignaturesMatch);
         // TP_HOOK(&RealCompareVariables, HookCompareVariables);
     });
-

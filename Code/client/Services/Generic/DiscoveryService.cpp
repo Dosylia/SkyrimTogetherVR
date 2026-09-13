@@ -181,12 +181,9 @@ void DiscoveryService::DetectGridCellChange(TESWorldSpace* aWorldSpace, bool aNe
 
 void DiscoveryService::VisitForms() noexcept
 {
-    // Actors drop out of the high process list / lose their 3D whenever they cross the edge of the
-    // loaded cells. A dragon circling the player did that every few seconds (73 times in one
-    // session): every removal handed ownership back to the server, which destroyed the character
-    // and created a brand new one when the dragon came back - full health, stuck AI, and the other
-    // player saw it respawn over and over. So an actor that is still the same game object only
-    // counts as removed once it has been gone for a grace period.
+    // Actors briefly lose their 3D when crossing the edge of the loaded cells (a circling dragon does
+    // it every few seconds). Removing them right away made the server destroy and recreate them each
+    // time, so a still existing actor is only removed after a grace period.
     constexpr auto cRemovalGracePeriod = std::chrono::seconds(5);
 
     ProcessLists* const pProcessLists = ProcessLists::Get();
@@ -249,7 +246,6 @@ void DiscoveryService::VisitForms() noexcept
         if (known.MissingSince == std::chrono::steady_clock::time_point{})
             known.MissingSince = now;
 
-        // Deleted or replaced objects go right away, only a still existing actor gets the grace period.
         const bool isSameObject = TESForm::GetById(formId) == static_cast<TESForm*>(known.pReference);
         if (!isSameObject || now - known.MissingSince >= cRemovalGracePeriod)
             s_removedForms.push_back(formId);

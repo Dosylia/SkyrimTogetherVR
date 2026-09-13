@@ -28,4 +28,3 @@ struct ImageSpaceModifierInstance : public NiObject
 
 static_assert(offsetof(ImageSpaceModifierInstance, target) == 0x18);
 static_assert(sizeof(ImageSpaceModifierInstance) == 0x28);
-

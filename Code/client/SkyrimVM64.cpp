@@ -58,4 +58,3 @@ static TiltedPhoques::Initializer s_mainHooks(
         TP_HOOK(&VMDestructor, HookVMDestructor);
     });
 
-

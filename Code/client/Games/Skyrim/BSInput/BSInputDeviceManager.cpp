@@ -7,10 +7,7 @@ void (*BSInputDeviceManager_PollInputDevices)(BSInputDeviceManager*, float) = nu
 
 void Hook_BSInputDeviceManager_PollInputDevices(BSInputDeviceManager* inputDeviceMgr, float afDelta)
 {
-    // GetMainWindow() is null on VR (Hook_Renderer_Init, which sets it, is
-    // disabled there - see BSGraphicsRenderer.cpp). This runs every input
-    // poll, so an unguarded dereference here would crash immediately and
-    // constantly.
+    // Null on VR, where Hook_Renderer_Init is off.
     auto* pWindow = BSGraphics::GetMainWindow();
     if (pWindow && !pWindow->IsForeground())
         return;
@@ -27,10 +24,5 @@ static TiltedPhoques::Initializer s_initInputDeviceManager(
         BSInputDeviceManager_PollInputDevices = static_cast<decltype(BSInputDeviceManager_PollInputDevices)>(pollInputDevices.GetPtr());
 
         TP_HOOK_IMMEDIATE(&BSInputDeviceManager_PollInputDevices, &Hook_BSInputDeviceManager_PollInputDevices);
-        #else
-        // Not hooked on VR: 68617 only resolves through the crosswalk (0/69 accurate
-        // for functions), and the hook forwards just (rcx, xmm1), so on a wrong
-        // target the other argument registers would reach it clobbered. The hook
-        // does nothing on VR anyway - GetMainWindow() is always null there.
-        #endif
+        #endif // No verified VR address, and the hook does nothing there without a main window.
     });

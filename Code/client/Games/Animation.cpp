@@ -189,4 +189,3 @@ static TiltedPhoques::Initializer s_animationHook(
 
         TP_HOOK(&RealPerformAction, HookPerformAction);
     });
-

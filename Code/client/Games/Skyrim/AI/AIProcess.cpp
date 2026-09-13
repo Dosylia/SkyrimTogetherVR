@@ -6,4 +6,3 @@ void AIProcess::KnockExplosion(Actor* apActor, const NiPoint3* aSourceLocation, 
     POINTER_SKYRIMSE(TKnockExplosion, knockExplosion, 39895, 38858);
     TiltedPhoques::ThisCall(knockExplosion, this, apActor, aSourceLocation, afMagnitude);
 }
-

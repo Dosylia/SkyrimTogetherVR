@@ -46,8 +46,8 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
 
     aInterpolationComponent.Position = position;
 
-    // The VR upper-body pose uses its own, much shorter playback delay (aPoseTick) than movement:
-    // hands and held items lagging 300 ms behind felt unsynced. Find the snapshot pair around it.
+    // The VR pose is played back with a shorter delay (aPoseTick) than movement: hands 300 ms behind felt
+    // out of sync.
     auto& vrPose = aInterpolationComponent.InterpolatedVRPose;
     vrPose.HasData = false;
     {

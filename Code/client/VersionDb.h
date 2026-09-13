@@ -397,10 +397,7 @@ template <class T> struct VersionDbPtr
         {
             m_pPtr = VersionDb::Get().FindAddressById(m_id);
 
-            // Surface which id failed to resolve so an unguarded caller's crash
-            // (dereferencing this as a data pointer, not a function hook) can be
-            // traced back to the offending POINTER_SKYRIMSE(...) declaration
-            // instead of showing up as a bare access violation with no context.
+            // Makes a crash on an unresolved address traceable to its id.
             if (m_pPtr == nullptr)
             {
                 char buf[96];

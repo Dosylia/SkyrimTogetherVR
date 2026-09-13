@@ -43,4 +43,3 @@ static TiltedPhoques::Initializer s_menuTopicHooks(
 
         TP_HOOK(&RealPlayDialogueOption, HookPlayDialogueOption);
     });
-

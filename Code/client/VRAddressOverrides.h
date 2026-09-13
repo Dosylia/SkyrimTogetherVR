@@ -2,28 +2,17 @@
 
 #include <cstdint>
 
-// Auto-generated supplemental SSE->VR address table, merged into VersionDb::LoadCSV()
-// under SKYRIMVR to fill ids missing from the official "VR Address Library for SKSEVR"
-// CSV (which only covers a fraction of what this project needs). Official entries always
-// take precedence over these.
+// VR addresses for ids missing from the official VR Address Library CSV, merged in by
+// VersionDb::LoadCSV(). The CSV always wins; an entry here is only used when its id is not in it.
 //
-// Two sources, two very different confidence levels:
+// Keys are the ids the client code looks up on VR (the last POINTER_SKYRIMSE argument). Most are
+// AE ids that were never translated, mapped to the address of the matching SE/VR function.
 //
-// - RTTI type descriptor entries (ids in the ~392000-692000 range used by RttiLocator<T>)
-//   come from CommonLibVR-NG's Offsets_RTTI.h (github CharmedBaryon/CommonLibVR-NG), which
-//   hand/tool-verifies exact VR offsets for RTTI descriptors specifically. HIGH CONFIDENCE.
-//
-// - Regular function/global hook entries (used by POINTER_SKYRIMSE and direct VersionDbPtr
-//   declarations) were derived by taking this project's SSE address-library id, resolving
-//   it to an SSE address via the address library offsets, then cross-referencing that
-//   address against a community SSE<->VR binary-diff table (vr_address_tools' sse_vr.csv)
-//   to find the corresponding VR address. UNVERIFIED beyond a handful of spot checks.
-//   We validated the *same* method against CommonLibVR-NG's authoritative RTTI table and
-//   got 0/2758 agreement (see git history) - meaning this binary-diff table is unreliable
-//   for data symbols (RTTI descriptors) and its reliability for code/function symbols is
-//   NOT independently confirmed, just plausible (function diffing is what such tools are
-//   built for, unlike data-symbol diffing). Treat these as leads, not verified addresses -
-//   spot-check in a disassembler before depending on one for anything beyond a test launch.
+// Comments: "SE <id> <name>" is the matching SE function. "checked" means it was confirmed against
+// the VR code (disassembly or a crash dump, or an authoritative CommonLibVR-NG id); "unchecked"
+// means it was matched by neighbouring ids and function sizes only. Entries without a comment come
+// from an SE/VR binary-diff table and are unverified. Ids still without any VR address are listed in
+// VR_POINTERS_TODO.md.
 struct VRAddressOverrideEntry
 {
     uint32_t id;
@@ -31,234 +20,150 @@ struct VRAddressOverrideEntry
 };
 
 static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
-    { 11437u, 0x0117c80u },
-    { 11612u, 0x011e470u }, // was crosswalk garbage; ExtraDataList SetWorn = SE 11466 (constant AE->SE offset -146 in this block (CommonLib anchors AE 11598=SE 11452, AE 11617=SE 11471 SetCount; SE 11474 named BSExtraDataList::SetSoul); unique 0x1f0/0x1e0 size match) -> VR via addrlib; not yet dump-checked
-    { 11616u, 0x011ea00u }, // was crosswalk garbage; ExtraDataList SetHealth = SE 11470 (constant AE->SE offset -146 in this block (CommonLib anchors AE 11598=SE 11452, AE 11617=SE 11471 SetCount; SE 11474 named BSExtraDataList::SetSoul)) -> VR via addrlib; not yet dump-checked
-    { 11619u, 0x011ede0u }, // was crosswalk garbage; ExtraDataList SetCharge = SE 11473 (constant AE->SE offset -146 in this block (CommonLib anchors AE 11598=SE 11452, AE 11617=SE 11471 SetCount; SE 11474 named BSExtraDataList::SetSoul)) -> VR via addrlib; not yet dump-checked
-    { 11620u, 0x011ef40u }, // was crosswalk garbage; ExtraDataList SetSoul = SE 11474 (constant AE->SE offset -146 in this block (CommonLib anchors AE 11598=SE 11452, AE 11617=SE 11471 SetCount; SE 11474 named BSExtraDataList::SetSoul)) -> VR csv; not yet dump-checked
-    { 11806u, 0x0129a30u }, // was 0x01314d0: AE 11806 -> SE 11660 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 11822u, 0x012a640u }, // was crosswalk garbage; ExtraDataList SetPoison = SE 11676 (offset -146, anchor AE 11812=SE 11666; AE 11821-11825 size pattern = SE 11675-11679) -> VR via addrlib; not yet dump-checked
-    { 12052u, 0x01401b0u },
-    { 12060u, 0x01372b0u }, // was crosswalk garbage; ExtraDataList SetEnchantment = SE 11921 (CommonLibVR-NG RELOCATION_ID(11921, 12060)) -> VR via addrlib
-    { 12401u, 0x01454a0u }, // Lock::SetLock = SE 12274 (SE 1.5.97 address 0x140134AF0 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
-    { 13631u, 0x017da20u },
-    { 13718u, 0x017c4e0u }, // ModManager GetCellFromCoordinates = SE 13620 (SE 1.5.97 address 0x14016BAC0 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
-    { 13723u, 0x0186000u },
-    { 13878u, 0x018c330u },
-    { 14298u, 0x019d5e0u },
-    // { 14375u, 0x019f140u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 14529u, 0x019f970u }, // TESContainer::GetItemCount = SE 14383 (SE 1.5.97 address 0x14018FC40 from this repo's git history, an exact SE function/global start) -> VR via addrlib/csv; not yet dump-checked
-    { 14617u, 0x01a3f60u }, // was 0x01a9990: AE 14617 -> SE 14461 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
-    { 14774u, 0x01b08c0u },
-    { 14953u, 0x01b0900u }, // TESTexture ctor = SE 14775 (SE 1.5.97 address 0x1401A0BC0 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
-    { 15002u, 0x01bb6a0u },
-    { 15006u, 0x01bb820u },
-    { 16005u, 0x01e7740u }, // was 0x0200d00: AE 16005 -> SE 15767 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
-    { 16040u, 0x0203680u },
-    { 16113u, 0x0209130u },
-    { 16142u, 0x01fce80u }, // was 0x0209fe0: AE 16142 -> SE 15902 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 16143u, 0x01fcfb0u }, // was 0x020a010: AE 16143 -> SE 15903 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    // 17201 removed: doesn't exist in the official VR Address Library at all
-    // (confirmed against version-1-4-15-0.csv) - this crosswalk-derived entry
-    // pointed at an unrelated function and caused a stack-corrupting crash in
-    // TESObjectREFR::GetByHandle. The real id for that function is 12204,
-    // used directly there now instead of going through this override table.
-    { 18518u, 0x0275180u },
-    { 18563u, 0x0277910u },
-    { 18573u, 0x0278190u },
-    { 19075u, 0x027a4c0u }, // was 0x0294070: AE 19075 -> SE 18606 by function-size sequence alignment (>=10/16 neighbours, runner-up <=4; rule 153/153 on known pairs) -> VR via addrlib; not yet dump-checked
-    { 19364u, 0x028ccd0u }, // EventDispatcher PushEvent = SE 18949 (SE 1.5.97 address 0x14027B6D0 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
-    { 19512u, 0x0297310u }, // TESObjectREFR::AddLockChange = SE 19110 (CommonLibVR-NG RELOCATION_ID(19110, 19512); AE 19506-19512 sizes = SE 19104-19110) -> VR via addrlib; hook HookLockChange live again
-    { 19689u, 0x029f110u }, // was 0x02b3ed0: AE 19689 -> SE 19263 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 19702u, 0x029fac0u }, // was 0x02b4110: AE 19702 -> SE 19276 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    // { 19708u, 0x02b4840u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 19742u, 0x02a5710u }, // was 0x02b5e00: AE 19742 -> SE 19315 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 19784u, 0x02a7ba0u }, // was 0x02b7bb0: AE 19784 -> SE 19357 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 19787u, 0x02a7d80u }, // was 0x02b7c70: AE 19787 -> SE 19360 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 19788u, 0x02a7e40u }, // was 0x02b7d10: AE 19788 -> SE 19361 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 19790u, 0x02a8010u }, // was 0x02b7ef0: AE 19790 -> SE 19363 (vr_address_tools se_ae.csv) -> VR via db; function start checked in dump
-    { 19796u, 0x02b8310u },
-    { 19812u, 0x02b8920u },
-    { 19846u, 0x02ad090u }, // was 0x02b9860: AE 19846 -> SE 19418 by function-size sequence alignment (>=10/16 neighbours, runner-up <=4; rule 153/153 on known pairs) -> VR via addrlib; not yet dump-checked
-    { 20203u, 0x02b8480u }, // was 0x02ccac0: AE 20203 -> SE 19798 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 20221u, 0x02b89e0u }, // was 0x02cdcc0: AE 20221 -> SE 19816 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via db, VR layout matches SE; not yet dump-checked
-    { 20223u, 0x02cde80u },
-    // { 20460u, 0x02d6460u }, removed: crosswalk garbage; TESWorldSpace::LoadCell now uses SE id 20026 directly
-    { 21600u, 0x03067f0u },
-    // { 21622u, 0x0307c90u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 23231u, 0x0332a90u }, // was 0x0342f50: AE 23231 -> SE 22754 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 24568u, 0x0367980u }, // was 0x038aa50: AE 24568 -> SE 24065 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 24987u, 0x037f980u }, // TESQuest::SetStopped = SE 24468 (SE 1.5.97 address 0x14036FFE0 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
-    { 25003u, 0x039e640u },
-    { 25004u, 0x03803d0u }, // TESQuest::SetStage = SE 24482 (SE 1.5.97 address 0x140370A30 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
-    { 25066u, 0x0388110u }, // was 0x03a2150: AE 25066 -> SE 24537 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
-    { 26231u, 0x03c1a20u }, // was 0x03e16b0: AE 26231 -> SE 25684 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
-    { 26241u, 0x03e1780u },
-    { 26242u, 0x03e1790u },
-    { 26243u, 0x03e17b0u },
-    { 26244u, 0x03c4970u }, // was 0x03e17c0: AE 26244 -> SE 25697 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 26503u, 0x03edce0u },
-    { 27040u, 0x03eada0u }, // FaceGen CreateTints = SE 26454 (SE 1.5.97 address 0x1403DB420 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
-    // { 27244u, 0x04066d0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 32802u, 0x052cf30u },
-    { 32885u, 0x052f2d0u },
-    { 32886u, 0x052f2f0u },
-    { 33235u, 0x0533c10u },
-    // { 33236u, 0x0533c50u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 33261u, 0x05402d0u },
-    { 33285u, 0x05410a0u },
-    // { 34053u, 0x0563710u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 34140u, 0x05681b0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 34144u, 0x0546260u }, // was 0x0568340: AE 34144 -> SE 33363 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    // { 34370u, 0x0571420u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 34401u, 0x0550540u }, // MagicCaster CastSpell = SE 33623 (SE 1.5.97 address 0x14054C300 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
-    { 34408u, 0x0572c50u },
-    { 34410u, 0x0572ee0u },
-    { 34452u, 0x05754d0u },
-    { 34512u, 0x0557070u }, // was 0x0579df0: AE 34512 -> SE 33728 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 34525u, 0x0557830u }, // was 0x057aea0: AE 34525 -> SE 33741 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via db, VR layout matches SE; not yet dump-checked
-    { 34526u, 0x05579c0u }, // was 0x057af40: AE 34526 -> SE 33742 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
-    { 34529u, 0x0557f80u }, // was 0x057b000: AE 34529 -> SE 33745 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    // { 34989u, 0x0598b30u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 35086u, 0x056e070u }, // ValueModifierEffect ApplyActorEffect = SE 34286 (AE 35084-35087 sizes 0x140/0xc0/0x350/0x60 = SE 34284-34287 exactly; old SE-era git address 0x140567A89 falls inside it) -> VR via addrlib; hook live again
-    // { 35269u, 0x05a6da0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 34582u, 0x057f650u }, // SE 34582 BGSSaveLoadChangesMap::GetChangeFlags (AE 35503) -> VR via addrlib; checked in dump (signature + size 0x70). Used by TESForm::GetChangeFlags with the VR id directly
-    // { 35503u, 0x05b2360u }, removed: crosswalk garbage (VR 0x5b2360 is an unrelated function; crashed syncing remote actors)
-    { 35993u, 0x059ef30u }, // was 0x05ce330: AE 35993 -> SE 35100 (anchors AE 35991/35996 = SE 35099/35103; AE 35992 has no SE twin; sizes 0x30/0x50 match) -> VR via addrlib; checked in dump: BGSLoadGameBuffer ctor (stores vtable, zeroes +8..+0x20)
-    { 36000u, 0x059f160u }, // was 0x05ce840: AE 36000 -> SE 35107 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 36372u, 0x05e2010u }, // Character animation graph update = SE 36372 (name DB Character::sub_1405D9990) -> VR via addrlib; confirmed in live code as the direct call from the NPC process update (0x14070883e) and from Actor::UpdateAnimation; hooked by VRBodySync
-    { 36035u, 0x05a0b00u }, // was 0x05d25e0: AE 36035 -> SE 35145 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 36047u, 0x05a0ff0u }, // was 0x05d2fe0: AE 36047 -> SE 35157 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 36048u, 0x05a1070u }, // was 0x05d3010: AE 36048 -> SE 35158 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 36165u, 0x05d4fc0u },
-    { 36166u, 0x05d5000u },
-    // { 36291u, 0x05db010u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 36544u, 0x05f2410u },
-    { 36548u, 0x05f2a60u },
-    // { 36564u, 0x05f4770u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 37147u, 0x061e640u },
-    { 37175u, 0x061f300u },
-    { 37198u, 0x061fa68u },
-    // { 37313u, 0x0621900u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 37334u, 0x0622240u },
-    { 37335u, 0x0622250u },
-    // { 37356u, 0x06226a0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 37448u, 0x06277b0u },
-    { 37511u, 0x05ee4f0u }, // was 0x06295d0: AE 37511 -> SE 36511 by function-size sequence alignment (>=10/16 neighbours, runner-up <=4; rule 153/153 on known pairs) -> VR via addrlib; not yet dump-checked
-    // { 37521u, 0x0629e60u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 37542u, 0x062b510u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 37577u, 0x062c830u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 37677u, 0x0600220u }, // was 0x0633400: AE 37677 -> SE 36669 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 37698u, 0x0634d90u },
-    { 37717u, 0x0602f40u }, // was 0x0635220: AE 37717 -> SE 36707 (neighbours AE 37710-37714 = SE 36700-36704 by size) -> VR via addrlib; checked in dump: skips player, toggles boolBits 0x4000000 @0xE0 and 0x80 @0x1FC = SetPlayerTeammate(bool, bool)
-    // { 37905u, 0x060e300u }, not applied (user: shared-horse behaviour is fine): candidate InitiateMountPackage = SE 36881 (anchors AE 37904/37907 = SE 36880/36883), VR 0x60e300; hook stays skipped, direct call null-guarded
-    { 37975u, 0x0612420u }, // was 0x06430e0: AE 37975 -> SE 36950 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 38533u, 0x0664750u },
-    { 38717u, 0x0680550u },
-    { 38757u, 0x0682b50u },
-    { 38894u, 0x0688ec0u },
-    { 38896u, 0x0640c40u }, // was 0x0688f00: AE 38896 -> SE 37940 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 38897u, 0x0688f70u },
-    { 38899u, 0x0640f30u }, // was 0x0689290: AE 38899 -> SE 37943 by function-size sequence alignment (>=10/16 neighbours, runner-up <=4; rule 153/153 on known pairs) -> VR via addrlib; not yet dump-checked
-    { 38901u, 0x0689630u },
-    { 38903u, 0x06413c0u }, // was 0x06898c0: AE 38903 -> SE 37947 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 38928u, 0x0642b80u }, // EquipManager internal EquipSpell = SE 37973; confirmed in live VR code: called by the EquipSpell wrapper (SE 37939) that ActorEquipManager::EquipSpell (SE 37940) uses -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
-    { 38929u, 0x0642e30u }, // EquipManager internal Equip = SE 37974; confirmed in live VR code: ActorEquipManager::EquipObject (SE 37938) builds EquipData on the stack and calls it -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
-    { 38930u, 0x06430e0u }, // EquipManager internal EquipShout = SE 37975; confirmed in live VR code: called by ActorEquipManager::EquipShout (SE 37941) -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
-    { 38933u, 0x0643470u }, // EquipManager internal UnequipSpell = SE 37978; confirmed in live VR code: called by the UnequipSpell wrapper (SE 37946) -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
-    { 38934u, 0x06436c0u }, // EquipManager internal Unequip = SE 37979; confirmed in live VR code: called by ActorEquipManager::UnequipObject (SE 37945) -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
-    { 38935u, 0x0643910u }, // EquipManager internal UnequipShout = SE 37980; called from the public UnequipShout next to UnequipSpell (0x140641451); follows the 37973-37980 pattern -> hook live again; EquipData/MagicEquipData layouts verified against the VR callers
-    { 38949u, 0x0643f20u }, // ActorMediator::PerformAction = SE 37996 (SE-era git address 0x14063AF10) -> VR via addrlib; checked in dump: (this, TESActionData*) reads action->actor @+8, calls PerformComplexAction then ApplyAnimationVariables
-    { 38952u, 0x068aef0u },
-    { 38953u, 0x0644160u }, // PerformComplexAction = SE 37999 (SE-era git address 0x63B0F0; AE 38951-38955 sizes = SE 37997-38001) -> VR via addrlib; checked in dump: called from VR PerformAction
-    // { 38959u, 0x068afe0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 38979u, 0x0645240u }, // was 0x068b6d0: AE 38979 -> SE 38023 (AE 38978-38987 sizes = SE 38022-38031) -> VR via addrlib; checked in dump: sets weaponState bits (actorState2 @0xC, bit 5, 3 bits) to 4/1, returns true = SetWeaponDrawn(bool)
-    { 39002u, 0x068e580u },
-    { 39004u, 0x0646160u }, // ApplyAnimationVariables = SE 38048 (SE-era git address 0x14063D0F0; AE 39000-39003 = SE 38044-38047) -> VR csv; checked in dump: called from VR PerformAction with rcx=[0x142febcb0]
-    { 39114u, 0x064c170u }, // was 0x069a110: AE 39114 -> SE 38156 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    // { 39643u, 0x06d96f0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 39895u, 0x06e7dc0u },
-    { 40245u, 0x069bec0u }, // Character::Character() = SE 39171 (anchors AE 40244/40253 = SE 39170/39179, delta -9) -> VR csv; checked in dump: calls Actor ctor with dl=1, installs Character vtables (0x1416d6de0...)
-    { 40246u, 0x069bfc0u }, // Character::Character(uint8) = SE 39172 -> VR via addrlib; checked in dump: forwards dl to Actor ctor, same vtables; called by the 0x2B0 Character allocator at VR 0x3882a5
-    { 40255u, 0x06f8760u },
-    // { 40412u, 0x0707340u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 40454u, 0x06c00f0u }, // was 0x0709970: AE 40454 -> SE 39382 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 40488u, 0x070b030u },
-    // { 40533u, 0x070ca10u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 40535u, 0x070cbb0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 40536u, 0x070cd40u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 42345u, 0x072c0a0u }, // was 0x0756140: AE 42345 -> SE 41266 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 42704u, 0x0743170u }, // was 0x0767a40: AE 42704 -> SE 41626 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 44108u, 0x07b5cf0u },
-    { 47196u, 0x0818380u },
-    { 47303u, 0x07e7e90u }, // was 0x081a600: AE 47303 -> SE 46039 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 47307u, 0x07e8020u }, // was 0x081a840: AE 47307 -> SE 46043 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 51925u, 0x08c23e0u }, // was 0x0904040: AE 51925 -> SE 51046 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 52510u, 0x0933d40u },
-    { 52518u, 0x0933ea0u },
-    // { 52626u, 0x093b1e0u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 52627u, 0x093b240u },
-    // { 52847u, 0x094a280u }, removed: crosswalk garbage (crashed on player death); FadeOutGame now uses SE id 51909 directly
-    { 52849u, 0x094a3b0u },
-    { 53112u, 0x095c430u },
-    { 53915u, 0x095aa60u }, // was 0x0986340: AE 53915 -> SE 53105 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 53926u, 0x095c670u }, // was 0x09869d0: AE 53926 -> SE 53115 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via csv, VR layout matches SE; not yet dump-checked
-    { 54425u, 0x0976690u }, // EventDispatcher RegisterSink = SE 53604 (SE 1.5.97 address 0x14093BFF0 from this repo's git history, an exact SE function/global start) -> VR via addrlib/csv; not yet dump-checked
-    { 54522u, 0x097bd00u }, // was 0x099f0a0: AE 54522 -> SE 53705 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    // { 55497u, 0x09c8200u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 55739u, 0x09baf10u }, // was 0x09d87d0: AE 55739 -> SE 55141 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
-    { 56205u, 0x09d02a0u }, // was 0x09e6bf0: AE 56205 -> SE 55674 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 56206u, 0x09d0320u }, // was 0x09e6d30: AE 56206 -> SE 55675 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 56626u, 0x0a01aa0u },
-    { 57185u, 0x0a10880u },
-    { 57704u, 0x0a24e40u },
-    { 58377u, 0x0a2e820u }, // was 0x0a41790: AE 58377 -> SE 57804 by function-size sequence alignment (>=10/16 neighbours, runner-up <=4; rule 153/153 on known pairs) -> VR via addrlib; not yet dump-checked
-    { 58378u, 0x0a2ea40u }, // was 0x0a41830: AE 58378 -> SE 57805 by function-size sequence alignment (>=10/16 neighbours, runner-up <=4; rule 153/153 on known pairs) -> VR via addrlib; not yet dump-checked
-    { 59310u, 0x0a7b730u },
-    { 60079u, 0x0aa6570u },
-    { 63362u, 0x0b57580u },
-    { 63372u, 0x0b57b00u },
-    { 63591u, 0x0b5f9a0u },
-    { 68115u, 0x0c7bae0u },
-    { 68117u, 0x0c7bd10u },
-    { 68221u, 0x0c413f0u }, // was 0x0c7ee60: AE 68221 -> SE 66964 by function-size sequence alignment (>=10/16 neighbours, runner-up <=4; rule 153/153 on known pairs) -> VR via addrlib; not yet dump-checked
-    // { 68261u, 0x0c80600u }, removed: 0xc80600 is a lock/flag function, not BSThread::Initialize (hook disabled on VR in BSThread.cpp)
-    { 68276u, 0x0c80ce0u },
-    { 68545u, 0x0c4e600u }, // was 0x0c8c310: AE 68545 -> SE 67245 by neighbour interpolation, size fingerprint 4/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 68617u, 0x0c8eb40u },
-    { 68781u, 0x0c96050u },
-    { 69066u, 0x0c6b170u }, // was 0x0ca3800 (a destructor, overwritten by the SetThreadName Jump): BSThreadUtils::SetThreadName, found by "mov ecx,406D1388h" in the decrypted game; builds THREADNAME_INFO from (ecx=threadId, rdx=name); 0x40 bytes like AE 69066; addrlib lists it as SE 67740
-    { 69161u, 0x0ca6990u },
-    { 69165u, 0x0c6dc90u }, // was 0x0ca6bc0: AE 69165 -> SE 67823 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
-    { 69192u, 0x0ca7a70u },
-    { 70639u, 0x0cd5180u }, // NiCamera WorldToScreen = SE 70273 (SE 1.5.97 address 0x140C8E670 from this repo's git history, an exact SE function/global start) -> VR via addrlib/csv; not yet dump-checked
-    { 70640u, 0x0cf2050u },
-    { 70717u, 0x0caef60u }, // FaceGen CreateTexture = SE 69335 (SE 1.5.97 address 0x140C68D20 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
-    { 76207u, 0x0d8a900u }, // BSFaceGenNiNode GetObjectByName = SE 74481 (SE 1.5.97 address 0x140D41970 from this repo's git history, an exact SE function/global start) -> VR via addrlib/csv; not yet dump-checked
-    { 77226u, 0x0e43380u },
-    { 77246u, 0x0e44b40u },
-    { 77299u, 0x0e46410u },
-    { 82074u, 0x0f1a3b0u }, // UI IsMenuOpen = SE 79937 (SE 1.5.97 address 0x140EBE150 from this repo's git history, an exact SE function/global start) -> VR via addrlib/csv; not yet dump-checked
-    { 82082u, 0x0f92bc0u },
-    { 82088u, 0x0f93250u },
-    { 104247u, 0x13bbf0du },
-    // { 104296u, 0x13bc0b1u }, removed: mid-function address; see the verified entry at the end of the table
-    // { 104359u, 0x13bc2dau }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    { 104483u, 0x129a6c0u }, // was 0x13bc758: AE 104483 -> SE 97745 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 104484u, 0x13bc769u },
-    { 104651u, 0x13bcd88u },
-    { 104653u, 0x129e220u }, // was 0x13bcdaa (a thunk into BSReadWriteLock::UnlockForRead, VR id 66982; crashed registering Papyrus natives): NativeFunctionBase ctor, AE 104653 -> SE 97925 (anchors AE 104648/104651 = SE 97920/97923, sizes 0x130/0x110/0x140 match) -> VR; dump-checked: stores vtable 0x1418e4f38, builds BSFixedStrings from name/class
-    { 104655u, 0x129e470u }, // was 0x13bcdbb: NativeFunctionBase dtor, AE 104655 -> SE 97927 -> VR; dump-checked: writes vtable 0x1418e4f38, releases BSFixedStrings at +0x48/+0x20/+0x18/+0x10
-    // { 104788u, 0x13bd2c8u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // { 105220u, 0x13be40cu }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
-    // 109689 (RTDynamicCast, AE id) removed: it mapped to 0x13cf190, an SEH
-    // unwind funclet, not the function. RTTI.cpp now uses VR id 102238.
-    { 188603u, 0x154d810u },
-    { 370892u, 0x1e96c58u }, // was 0x1b6d5f8: fAIMinGreetingDistance value (Setting at 0x1e96c50, value=85.0f in dump)
-    { 380768u, 0x1eabf30u }, // was 0x1baa654: bAlwaysActive:General value (Setting at 0x1eabf28: INISetting vtable, value=1, name ptr at +0x10; found via name string in dump). Was being WRITTEN every frame by TiltedOnlineApp::Update
-    { 381472u, 0x1eaef68u }, // was 0x1bae534: iDifficulty:GamePlay value (Setting at 0x1eaef60, value=2 in dump)
-    { 382393u, 0x1bb3870u },
-    { 382400u, 0x1bb38f4u },
+    // Functions and globals
+    { 11612u, 0x011e470u }, // SE 11466 ExtraDataList::SetWorn, unchecked
+    { 11616u, 0x011ea00u }, // SE 11470 ExtraDataList::SetHealth, unchecked
+    { 11619u, 0x011ede0u }, // SE 11473 ExtraDataList::SetCharge, unchecked
+    { 11620u, 0x011ef40u }, // SE 11474 ExtraDataList::SetSoul, unchecked
+    { 11806u, 0x0129a30u }, // SE 11660 ExtraDataList::SetLevelMod, checked
+    { 11822u, 0x012a640u }, // SE 11676 ExtraDataList::SetPoison, unchecked
+    { 12060u, 0x01372b0u }, // SE 11921 ExtraDataList::SetEnchantment (CommonLibVR-NG), checked
+    { 12401u, 0x01454a0u }, // SE 12274 Lock::SetLock, unchecked
+    { 13718u, 0x017c4e0u }, // SE 13620 ModManager::GetCellFromCoordinates, unchecked
+    { 14529u, 0x019f970u }, // SE 14383 TESContainer::GetItemCount, unchecked
+    { 14617u, 0x01a3f60u }, // SE 14461 TESForm::GetById, checked
+    { 14953u, 0x01b0900u }, // SE 14775 TESTexture ctor, unchecked
+    { 15002u, 0x01bb6a0u }, // AnimationExperiments sub_1401A2220
+    { 15006u, 0x01bb820u }, // AnimationExperiments sub_1401A1D50
+    { 16005u, 0x01e7740u }, // SE 15767 InventoryEntry::IsQuestObject, checked
+    { 16142u, 0x01fce80u }, // SE 15902 InventoryChanges::Save, unchecked
+    { 16143u, 0x01fcfb0u }, // SE 15903 InventoryChanges::Load, unchecked
+    { 18518u, 0x0275180u }, // CombatView getModifiedDistance
+    { 18563u, 0x0277910u }, // ImageSpaceModifierInstance clearImageSpaceModifier
+    { 19075u, 0x027a4c0u }, // SE 18606 TESObjectCELL::GetCOCPlacementInfo, unchecked
+    { 19362u, 0x02a7f00u }, // SE 19362 TESObjectREFR::SetAngleZ, checked
+    { 19364u, 0x028ccd0u }, // SE 18949 EventDispatcher::PushEvent, unchecked
+    { 19512u, 0x0297310u }, // SE 19110 TESObjectREFR::AddLockChange (CommonLibVR-NG), checked
+    { 19689u, 0x029f110u }, // SE 19263 TESObjectREFR::RemoveItem, unchecked
+    { 19702u, 0x029fac0u }, // SE 19276 TESObjectREFR::GetContainer, unchecked
+    { 19742u, 0x02a5710u }, // SE 19315 TESObjectREFR::UpdateReference3D, checked
+    { 19784u, 0x02a7ba0u }, // SE 19357 TESObjectREFR::GetWorldLocation, unchecked
+    { 19787u, 0x02a7d80u }, // SE 19360 TESObjectREFR::SetAngleX, checked
+    { 19788u, 0x02a7e40u }, // SE 19361 TESObjectREFR::SetAngleY, checked
+    { 19790u, 0x02a8010u }, // SE 19363 TESObjectREFR::SetPosition, checked
+    { 19846u, 0x02ad090u }, // SE 19418 TESObjectREFR::GetHandle, unchecked
+    { 20203u, 0x02b8480u }, // SE 19798 GetLocationEncounterZone, unchecked
+    { 20221u, 0x02b89e0u }, // SE 19816 TESObjectREFR::CreateLock, unchecked
+    { 23231u, 0x0332a90u }, // SE 22754 TESQuest::CompleteAllObjectives, unchecked
+    { 24568u, 0x0367980u }, // SE 24065 TESIdleForm property, unchecked
+    { 24987u, 0x037f980u }, // SE 24468 TESQuest::SetStopped, unchecked
+    { 24991u, 0x037fc30u }, // SE 24472 TESQuest::SetCompleted, checked
+    { 25004u, 0x03803d0u }, // SE 24482 TESQuest::SetStage, unchecked
+    { 25066u, 0x0388110u }, // SE 24537 TESQuest::GetAliasedRef, checked
+    { 26231u, 0x03c1a20u }, // SE 25684 Sky::UpdateWeather, checked
+    { 26244u, 0x03c4970u }, // SE 25697 Sky::ReleaseWeatherOverride, unchecked
+    { 27040u, 0x03eada0u }, // SE 26454 FaceGen CreateTints, unchecked
+    { 32802u, 0x052cf30u }, // AnimationExperiments sub_1404ECF50
+    { 32883u, 0x0500890u }, // SE 32139 IAnimationGraphManagerHolder::RevertAnimationGraphManager, unchecked
+    { 33235u, 0x0533c10u }, // CombatController setTarget
+    { 33261u, 0x05402d0u }, // CombatView checkMovement
+    { 33285u, 0x05410a0u }, // CombatController arrayQuickSort
+    { 34144u, 0x0546260u }, // SE 33363 ActorMagicCaster::SpellCast, checked
+    { 34401u, 0x0550540u }, // SE 33623 MagicCaster::CastSpell, unchecked
+    { 34512u, 0x0557070u }, // SE 33728 MagicTarget::DispelAllSpells, unchecked
+    { 34525u, 0x0557830u }, // SE 33741 MagicTarget::CheckAddEffectTargetData, unchecked
+    { 34526u, 0x05579c0u }, // SE 33742 MagicTarget::AddTarget, checked
+    { 34529u, 0x0557f80u }, // SE 33745 MagicTarget::GetTargetAsActor, unchecked
+    { 34582u, 0x057f650u }, // SE 34582 BGSSaveLoadChangesMap::GetChangeFlags, checked
+    { 35086u, 0x056e070u }, // SE 34286 ValueModifierEffect::ApplyActorEffect, unchecked
+    { 35993u, 0x059ef30u }, // SE 35100 BGSLoadGameBuffer ctor, checked
+    { 36000u, 0x059f160u }, // SE 35107 BGSLoadFormBuffer::ReadFormId, unchecked
+    { 36035u, 0x05a0b00u }, // SE 35145 BGSSaveFormBuffer ctor, checked
+    { 36047u, 0x05a0ff0u }, // SE 35157 BGSSaveFormBuffer::WriteId, checked
+    { 36048u, 0x05a1070u }, // SE 35158 BGSSaveFormBuffer::WriteFormId, unchecked
+    { 36372u, 0x05e2010u }, // SE 36372 Character animation graph update (VRBodySync), checked
+    { 36544u, 0x05f2410u }, // TiltedOnlineApp winMain
+    { 37147u, 0x061e640u }, // AnimationExperiments sub_1405CCB20
+    { 37175u, 0x061f300u }, // Actor characterDtor
+    { 37511u, 0x05ee4f0u }, // SE 36511 TESObjectREFR::PayGoldToContainer, unchecked
+    { 37717u, 0x0602f40u }, // SE 36707 Actor::SetPlayerTeammate, checked
+    { 37975u, 0x0612420u }, // SE 36950 Actor::UnequipObject, checked
+    { 38896u, 0x0640c40u }, // SE 37940 ActorEquipManager::EquipSpell (by hand index), checked
+    { 38899u, 0x0640f30u }, // SE 37943 ActorEquipManager::UnequipAll, unchecked
+    { 38903u, 0x06413c0u }, // SE 37947 ActorEquipManager::UnequipSpell (by hand index), checked
+    { 38928u, 0x0642b80u }, // SE 37973 EquipManager internal EquipSpell, checked
+    { 38929u, 0x0642e30u }, // SE 37974 EquipManager internal Equip, checked
+    { 38930u, 0x06430e0u }, // SE 37975 EquipManager internal EquipShout, checked
+    { 38933u, 0x0643470u }, // SE 37978 EquipManager internal UnequipSpell, checked
+    { 38934u, 0x06436c0u }, // SE 37979 EquipManager internal Unequip, checked
+    { 38935u, 0x0643910u }, // SE 37980 EquipManager internal UnequipShout, unchecked
+    { 38949u, 0x0643f20u }, // SE 37996 ActorMediator::PerformAction, checked
+    { 38952u, 0x068aef0u }, // AnimationExperiments PerformIdleAction
+    { 38953u, 0x0644160u }, // SE 37999 ActorMediator::PerformComplexAction, checked
+    { 38979u, 0x0645240u }, // SE 38023 ActorState::SetWeaponDrawn, checked
+    { 39002u, 0x068e580u }, // AnimationExperiments sub_14063CAA0
+    { 39004u, 0x0646160u }, // SE 38048 ApplyAnimationVariables, checked
+    { 39114u, 0x064c170u }, // SE 38156 AIProcess::CheckForNewPackage, unchecked
+    { 40245u, 0x069bec0u }, // SE 39171 Character ctor, checked
+    { 40246u, 0x069bfc0u }, // SE 39172 Character ctor (uint8), checked
+    { 40454u, 0x06c00f0u }, // SE 39382 Actor::DropObject, unchecked
+    { 42345u, 0x072c0a0u }, // SE 41266 PlayerControls::SetEnabled, checked
+    { 42704u, 0x0743170u }, // SE 41626 Actor::UpdateDetectionState, unchecked
+    { 47196u, 0x0818380u }, // CombatView isValidTarget
+    { 47303u, 0x07e7e90u }, // SE 46039 Actor::HasEquippedRangedWeapon, unchecked
+    { 47307u, 0x07e8020u }, // SE 46043 Actor world location check, unchecked
+    { 51925u, 0x08c23e0u }, // SE 51046 LoadingScreen RequestLoadingText, checked
+    { 53112u, 0x095c430u }, // MapMenu hookLoc
+    { 53915u, 0x095aa60u }, // SE 53105 BSScript Statement::SetSize, checked
+    { 53926u, 0x095c670u }, // SE 53115 SkyrimVM::Update, unchecked
+    { 54425u, 0x0976690u }, // SE 53604 EventDispatcher::RegisterSink, unchecked
+    { 54522u, 0x097bd00u }, // SE 53705 EventDispatcher::UnregisterSink, checked
+    { 55739u, 0x09baf10u }, // SE 55141 BindEverythingToScript, checked
+    { 56205u, 0x09d02a0u }, // SE 55674 TESObjectREFR::PlayAnimation, checked
+    { 56206u, 0x09d0320u }, // SE 55675 TESObjectREFR::PlayAnimationAndWait, checked
+    { 57185u, 0x0a10880u }, // AnimationExperiments sub_1409CA9D0
+    { 58377u, 0x0a2e820u }, // SE 57804 hkbBehaviorGraph::HandleEvents, unchecked
+    { 58378u, 0x0a2ea40u }, // SE 57805 hkbBehaviorGraph event helper, unchecked
+    { 59310u, 0x0a7b730u }, // AnimationExperiments sub_140A13150
+    { 60079u, 0x0aa6570u }, // AnimationExperiments sub_140A4DFA0
+    { 63362u, 0x0b57580u }, // AnimationExperiments BSSendEvent
+    { 63372u, 0x0b57b00u }, // AnimationExperiments sub_140AE2DB0
+    { 68221u, 0x0c413f0u }, // SE 66964 CRC hash stub, unchecked
+    { 68545u, 0x0c4e600u }, // SE 67245 BSInputEnableManager::EnableOtherEvent, unchecked
+    { 69066u, 0x0c6b170u }, // SE 67740 BSThreadUtils::SetThreadName, checked
+    { 69165u, 0x0c6dc90u }, // SE 67823 BSFixedString::Set, unchecked
+    { 70639u, 0x0cd5180u }, // SE 70273 NiCamera::WorldPtToScreenPt3, unchecked
+    { 70717u, 0x0caef60u }, // SE 69335 FaceGen CreateTexture, unchecked
+    { 76207u, 0x0d8a900u }, // SE 74481 BSFaceGenNiNode::GetObjectByName, unchecked
+    { 82074u, 0x0f1a3b0u }, // SE 79937 UI::IsMenuOpen, unchecked
+    { 82088u, 0x0f93250u }, // UI CloseAll
+    { 104296u, 0x126f1c0u }, // SE 97508 BSScript::Variable::Reset, checked
+    { 104483u, 0x129a6c0u }, // SE 97745 BSScript Stack::GetPageForFrame, checked
+    { 104653u, 0x129e220u }, // SE 97925 NativeFunctionBase ctor, checked
+    { 104655u, 0x129e470u }, // SE 97927 NativeFunctionBase dtor, checked
+    { 370892u, 0x1e96c58u }, // fAIMinGreetingDistance setting value, checked
+    { 380768u, 0x1eabf30u }, // bAlwaysActive:General setting value, checked
+    { 381472u, 0x1eaef68u }, // iDifficulty:GamePlay setting value, checked
+    { 382393u, 0x1bb3870u }, // CombatView value
+    { 382400u, 0x1bb38f4u }, // CombatView value
+    { 400188u, 0x1f81900u }, // MemoryManager instance (from MemoryManager::GetSingleton), checked
+    { 400312u, 0x1c39c68u }, // TESObjectREFR nullHandle
+    { 400441u, 0x2feb6f8u }, // SE 516923 TES singleton (CommonLibVR-NG), checked
+    { 401069u, 0x2feb9f0u }, // SE 517014 PlayerCharacter singleton (CommonLibVR-NG), checked
+    { 401100u, 0x1c3cdc0u }, // AnimationExperiments qword_142EFF990
+    { 403566u, 0x2febcb0u }, // SE 517058 animation variables global, checked
+    { 403567u, 0x2febcb8u }, // SE 517059 ActorMediator singleton, checked
+    { 403568u, 0x1c494c8u }, // AnimationExperiments qword_142F271C8
+    { 403988u, 0x1c4bde0u }, // AnimationExperiments qword_142F3A1E8
+    { 404125u, 0x1c4d1b0u }, // AITimer value
+    { 405282u, 0x1c53d48u }, // CombatView value
+    { 406126u, 0x1c58540u }, // HUDMenuUtils matrix
+    { 406160u, 0x1c587d8u }, // HUDMenuUtils port
+    { 410506u, 0x316ad98u }, // SE 523926 NiCamera NiRTTI, checked
+    { 414391u, 0x1c8d5e8u }, // BSScript policy
+    { 414675u, 0x3423e20u }, // SE 527752 NiMaskedShader NiRTTI, unchecked
+
+    // RTTI type descriptors, from CommonLibVR-NG Offsets_RTTI.h
     { 392214u, 0x1ed6cf8u },
     { 392215u, 0x1ed6cd0u },
     { 392216u, 0x1ed6d20u },
@@ -556,12 +461,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 392574u, 0x1edb2b0u },
     { 392576u, 0x1edb318u },
     { 392577u, 0x1edb340u },
-    // TESSoundFile TypeDescriptor - absent from CommonLibVR-NG. Found by
-    // searching ".?AVTESSoundFile@@" in VR (name at 0x141edb378, descriptor
-    // starts 0x10 earlier). Consistent with both neighbours: TESObjectARMO's
-    // descriptor (0x1edb340) is 0x28 bytes long and ends here, and this one is
-    // 0x28 bytes long and ends at TESAIForm (0x1edb390).
-    { 392578u, 0x1edb368u },
+    { 392578u, 0x1edb368u }, // TESSoundFile: not in CommonLibVR-NG, found by its type name in the VR binary
     { 392579u, 0x1edb390u },
     { 392580u, 0x1edb3b0u },
     { 392581u, 0x1edb3d8u },
@@ -1151,7 +1051,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 394230u, 0x1efd768u },
     { 394232u, 0x1efd7d8u },
     { 394234u, 0x1efd840u },
-    { 394235u, 0x0u },
+    { 394235u, 0x0000000u },
     { 394236u, 0x1efd890u },
     { 394237u, 0x1efd8b0u },
     { 394238u, 0x1efd8d8u },
@@ -1660,7 +1560,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 396749u, 0x1f47580u },
     { 396751u, 0x1f475e8u },
     { 396752u, 0x1f47608u },
-    { 396753u, 0x0u },
+    { 396753u, 0x0000000u },
     { 396754u, 0x1f47630u },
     { 396759u, 0x1f47770u },
     { 396760u, 0x1f47798u },
@@ -1679,8 +1579,8 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 396790u, 0x1f47da8u },
     { 396791u, 0x1f47dd8u },
     { 396823u, 0x1f48df8u },
-    { 396833u, 0x0u },
-    { 396837u, 0x0u },
+    { 396833u, 0x0000000u },
+    { 396837u, 0x0000000u },
     { 396841u, 0x1f490d0u },
     { 396842u, 0x1f490f0u },
     { 396843u, 0x1f49118u },
@@ -3063,60 +2963,11 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 400177u, 0x1f813b0u },
     { 400178u, 0x1f81420u },
     { 400179u, 0x1f81450u },
-    { 400180u, 0x0u },
+    { 400180u, 0x0000000u },
     { 400181u, 0x1f814b0u },
     { 400182u, 0x1f814e0u },
     { 400183u, 0x1f81480u },
     { 400184u, 0x1f81590u },
     { 400186u, 0x1f81860u },
     { 400187u, 0x1f81880u },
-    // Game heap (MemoryManager instance). Was 0x1c395b0, which is wrong: on VR,
-    // MemoryManager::GetSingleton (VR id 11045, 0x10d590) does
-    // "lea rbx, [0x141f81900]", and the game's own free path does
-    // "lea rcx, [0x141f81900]; call 0x140c3d3e0" (VR id 66861, FormFree). The
-    // bad value made Memory::Allocate/Free hand the allocator an unrelated
-    // object as its heap on every client allocation.
-    { 400188u, 0x1f81900u },
-    { 400269u, 0x1c39a18u },
-    { 400312u, 0x1c39c68u },
-    { 400315u, 0x1c39ca0u },
-    { 400320u, 0x1c39cc8u },
-    { 400327u, 0x1c39d20u },
-    { 400441u, 0x2feb6f8u }, // was 0x1c3a320: TES singleton = VR CSV SE 516923 (CommonLibVR-NG RELOCATION_ID(516923, 403450))
-    { 400443u, 0x1c3a33cu },
-    { 400447u, 0x1c3a370u },
-    { 400475u, 0x1c3a518u },
-    { 400508u, 0x1c3a6a0u },
-    { 400636u, 0x1c3ad98u },
-    { 400802u, 0x1c3b738u },
-    { 400863u, 0x1c3bd10u },
-    { 400864u, 0x1c3bd18u },
-    { 401069u, 0x2feb9f0u }, // was 0x1c3cbd8: PlayerCharacter singleton = VR CSV SE 517014 (CommonLibVR-NG RELOCATION_ID(517014, 403521)); old value held 0xffffffff007c9be0, the bad 'this' in DiscoveryService::VisitCell
-    { 401099u, 0x1c3cda8u },
-    { 401100u, 0x1c3cdc0u },
-    { 401263u, 0x1c3d784u },
-    { 403330u, 0x1c47da4u },
-    { 403566u, 0x2febcb0u }, // animation-variables global (qword_142F271B8) = SE 517058 (SE-era git address) -> VR from dump: VR PerformAction loads rcx from 0x142febcb0 before ApplyAnimationVariables
-    { 403567u, 0x2febcb8u }, // ActorMediator singleton = SE 517059 (SE-era git address 0x142F271C0) -> VR from dump: PerformAction callers load rcx from 0x142febcb8
-    { 403568u, 0x1c494c8u },
-    { 403759u, 0x1c4a728u },
-    { 403988u, 0x1c4bde0u },
-    { 404125u, 0x1c4d1b0u },
-    { 404238u, 0x1c4d910u },
-    { 405282u, 0x1c53d48u },
-    { 406126u, 0x1c58540u },
-    { 406160u, 0x1c587d8u },
-    { 410506u, 0x316ad98u }, // was 0x1c71214: AE 410506 -> SE 523926 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
-    { 411155u, 0x1c75e00u },
-    { 411347u, 0x1c77af0u },
-    { 411348u, 0x1c77b18u },
-    { 411393u, 0x1c78060u },
-    { 414391u, 0x1c8d5e8u },
-    { 414675u, 0x3423e20u }, // NiMaskedShader NiRTTI = SE 527752 (SE 1.5.97 address 0x1431D1AF8 from this repo's git history, an exact SE function/global start) -> VR via addrlib/csv; not yet dump-checked
-    // Found via call-graph matching against the unpacked SE/VR binaries (2026-09-12):
-    // TESQuest::SetCompleted, identified via its unique SE caller (DialogueSubtitleStrings, id 34429).
-    { 24991u, 0x037fc30u }, // was 0xc6dc90: AE 24991 -> SE 24472 (vr_address_tools se_ae.csv) -> VR via csv; function start checked in dump
-    { 32883u, 0x0500890u }, // new: AE 32883 -> SE 32139 by function-size fingerprint (3 preceding sizes identical, id delta matches neighbours) -> VR via addrlib, VR layout matches SE
-    { 19362u, 0x02a7f00u }, // new: SE 19362 TESObjectREFR::SetAngleZ (s_rotateZ). Dump-checked: sibling of SE 19360/19361 (0x2a7d80/0x2a7e40, compare [rcx+48h]/[rcx+4Ch]); this one compares [rcx+50h] = angle.z
-    { 104296u, 0x126f1c0u }, // new: BSScript::Variable::Reset. AE 104296 -> SE 97508 (anchors AE 104294/104299 = SE 97506/97514; AE 104297 and SE 97509 both exactly 0x290 long, so 104296 is 97508) -> VR addrlib 0x126f1c0 (VR spacing 0x140 = SE size). Was null: Variable::Reset called through 0 inside noexcept -> std::terminate during save load
 };

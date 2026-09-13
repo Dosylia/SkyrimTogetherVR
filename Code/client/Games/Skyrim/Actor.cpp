@@ -305,10 +305,7 @@ void Actor::SetEssentialEx(bool aSet) noexcept
 void Actor::SetNoBleedoutRecovery(bool aSet) noexcept
 {
 #ifdef SKYRIMVR
-    // AE 38533 has no SE/VR mapping; the crosswalk value 0x664750 crashed on connect
-    // (PlayerService::OnServerSettingsReceived -> SetPlayerRespawnMode). Go through the
-    // Papyrus native Actor.SetNoBleedoutRecovery instead, whose address comes from the
-    // VM's own registration table.
+    // No VR address for 38533: use the Papyrus native instead.
     PAPYRUS_FUNCTION(void, Actor, SetNoBleedoutRecovery, bool);
     s_pSetNoBleedoutRecovery(this, aSet);
     return;
@@ -490,9 +487,8 @@ TESForm* Actor::GetEquippedAmmo() const noexcept
 bool Actor::IsWearingBodyPiece() const noexcept
 {
 #ifdef SKYRIMVR
-    // GetArmor has no VR implementation (see ExtraContainerChanges.cpp). Answer "yes" so
-    // InventoryService::RunNakedNPCBugChecks skips its re-equip workaround instead of
-    // firing it for every NPC. The naked-NPC fix is therefore off on VR.
+    // GetArmor has no VR address. Answering "yes" turns the naked-NPC workaround off instead of
+    // re-equipping every NPC each second.
     return true;
 #endif
     return GetContainerChanges()->GetArmor(32) != nullptr;
@@ -691,7 +687,7 @@ Inventory Actor::GetEquipment() const noexcept
 int32_t Actor::GetGoldAmount() const noexcept
 {
     TP_THIS_FUNCTION(TGetGoldAmount, int32_t, const Actor);
-    POINTER_SKYRIMSE(TGetGoldAmount, s_getGoldAmount, 37527, 0); // VR: unknown; 37527 in the VR CSV is an unrelated SE function
+    POINTER_SKYRIMSE(TGetGoldAmount, s_getGoldAmount, 37527, 0); // No VR address
     if (!s_getGoldAmount.Get())
         return 0;
     return TiltedPhoques::ThisCall(s_getGoldAmount, this);
@@ -781,8 +777,7 @@ void Actor::SetFactions(const Factions& acFactions) noexcept
 void Actor::SetFactionRank(const TESFaction* apFaction, int8_t aRank) noexcept
 {
 #ifdef SKYRIMVR
-    // 37677 -> 0x600220 is interpolated and unverified; use the Papyrus native
-    // Actor.SetFactionRank(Faction, int) whose address is known from the VM.
+    // The VR address for 37677 is unverified: use the Papyrus native instead.
     PAPYRUS_FUNCTION(void, Actor, SetFactionRank, TESFaction*, int32_t);
     s_pSetFactionRank(this, const_cast<TESFaction*>(apFaction), static_cast<int32_t>(aRank));
     return;
@@ -825,7 +820,7 @@ static TInitiateMountPackage* RealInitiateMountPackage = nullptr;
 
 bool Actor::InitiateMountPackage(Actor* apMount) noexcept
 {
-    if (!RealInitiateMountPackage) // VR: hook target 37905 unresolved, pointer stays null
+    if (!RealInitiateMountPackage) // Null on VR (no address)
         return false;
     return TiltedPhoques::ThisCall(RealInitiateMountPackage, this, apMount);
 }
@@ -854,11 +849,9 @@ bool Actor::IsDragon() const noexcept
     if (BehaviorVar::IsDragon(pExtension->GraphDescriptorHash))
         return true;
 
-    // The graph hash is only known once the behavior has been matched, and a modded dragon
-    // behavior is only captured when BehaviorVar::Patch first sees it - usually after the
-    // AssignCharacterRequest went out, so the server kept the normal (too small) range for the
-    // dragon. The race keyword ActorTypeDragon (Skyrim.esm 0x35D59) is known right away.
-    // TESRace (SE and VR): BGSKeywordForm at +0x70, keywords +0x78, count +0x80.
+    // A modded dragon behavior is only recognized after the actor was already sent to the server,
+    // which then gave it the normal (too small) range. The race keyword ActorTypeDragon is known
+    // right away. TESRace: BGSKeywordForm at +0x70 (keywords +0x78, count +0x80).
     constexpr uint8_t cRaceFormType = 14;
     constexpr uint8_t cKeywordFormType = 4;
     constexpr uint32_t cActorTypeDragon = 0x35D59;
@@ -890,9 +883,7 @@ void Actor::Kill() noexcept
         return;
 
 #ifdef SKYRIMVR
-    // Call Actor::KillImpl (SE 36872, name DB Actor::KillImpl_140603B30, VR csv 0x60c340) directly:
-    // the virtual sits at SE slot 0x10E and the VR Actor vtable shift has only been verified up to
-    // SetPosition, so a guessed slot could silently call something else (kills not syncing).
+    // Call KillImpl (SE 36872) by address rather than through the virtual, whose VR slot is unverified.
     TP_THIS_FUNCTION(TKillImpl, void, Actor, Actor* apAttacker, float aDamage, bool aSendEvent, bool aRagdollInstant);
     POINTER_SKYRIMSE(TKillImpl, s_killImpl, 0, 36872);
     TiltedPhoques::ThisCall(s_killImpl, this, nullptr, 100.f, true, true);
@@ -926,8 +917,7 @@ bool Actor::PlayIdle(TESIdleForm* apIdle) noexcept
 void Actor::Respawn() noexcept
 {
 #ifdef SKYRIMVR
-    // Actor::Resurrect(bool resetInventory, bool attach3D) = SE 36331 (name DB Actor::Resurrect_1405D5290,
-    // VR csv 0x5dd850), called directly for the same reason as KillImpl above.
+    // Resurrect(resetInventory, attach3D) = SE 36331, by address like KillImpl above.
     TP_THIS_FUNCTION(TResurrect, void, Actor, bool aResetInventory, bool aAttach3D);
     POINTER_SKYRIMSE(TResurrect, s_resurrect, 0, 36331);
     TiltedPhoques::ThisCall(s_resurrect, this, false, true);
@@ -1178,7 +1168,7 @@ void* TP_MAKE_THISCALL(HookPickUpObject, Actor, TESObjectREFR* apObject, int32_t
 
 void Actor::PickUpObject(TESObjectREFR* apObject, int32_t aCount, bool aUnk1, float aUnk2) noexcept
 {
-    if (!RealPickUpObject) // VR: hook target 37521 unresolved, pointer stays null
+    if (!RealPickUpObject) // Null on VR (no address)
         return;
     TiltedPhoques::ThisCall(RealPickUpObject, this, apObject, aCount, aUnk1, aUnk2);
 }
@@ -1299,7 +1289,7 @@ bool TP_MAKE_THISCALL(HookSpeakSoundFunction, Actor, const char* apName, uint32_
 
 void Actor::SpeakSound(const char* pFile)
 {
-    if (!RealSpeakSoundFunction) // VR: hook target 37542 unresolved, pointer stays null
+    if (!RealSpeakSoundFunction) // Null on VR (no address)
         return;
     uint32_t handle[3]{};
     handle[0] = -1;
@@ -1355,7 +1345,7 @@ static TiltedPhoques::Initializer s_actorHooks(
         POINTER_SKYRIMSE(TDamageActor, s_damageActor, 37335, 36345);
         POINTER_SKYRIMSE(TApplyActorEffect, s_applyActorEffect, 35086, 35086);
         POINTER_SKYRIMSE(TRegenAttributes, s_regenAttributes, 37448, 36452);
-        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525, 0); // VR: unknown. 37525 exists in the VR CSV as an unrelated SE function (0x62a180) - hooking it crashed save loading in HookAddInventoryItem
+        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525, 0); // No VR address
         POINTER_SKYRIMSE(TPickUpObject, s_pickUpObject, 37521, 37521);
         POINTER_SKYRIMSE(TDropObject, s_dropObject, 40454, 40454);
         POINTER_SKYRIMSE(TUpdateDetectionState, s_updateDetectionState, 42704, 42704);
@@ -1409,4 +1399,3 @@ static TiltedPhoques::Initializer s_actorHooks(
         TP_HOOK(&RealAddDeathItems, HookAddDeathItems);
         TP_HOOK(&RealIsFleeing, HookIsFleeing);
     });
-

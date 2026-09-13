@@ -20,4 +20,3 @@ struct ImageSpaceModifierInstanceForm : public ImageSpaceModifierInstance
     uint64_t unk40;
     uint32_t unk48;
 };
-

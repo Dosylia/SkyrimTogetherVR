@@ -16,13 +16,12 @@ extern const VersionDbPtr<TDynamicCast> DynamicCast;
 
 template <class T, class U> T* Cast(U* apPtr)
 {
-    #ifdef SKYRIMVR
-        if (!internal::DynamicCast.Get()) // TODOVR : This is to avoid game crashes due to RTTI not being available yet. We should find a better solution for this later.
-            return nullptr;
-    #endif
-        return reinterpret_cast<T*>(internal::DynamicCast.Get()((void*)apPtr, 0, 
-            internal::RttiLocator<std::remove_cv_t<U>>::Get(), 
-            internal::RttiLocator<std::remove_cv_t<T>>::Get(), 0));
+#ifdef SKYRIMVR
+    // Can be called before the address library is loaded.
+    if (!internal::DynamicCast.Get())
+        return nullptr;
+#endif
+    return reinterpret_cast<T*>(internal::DynamicCast.Get()((void*)apPtr, 0, internal::RttiLocator<std::remove_cv_t<U>>::Get(), internal::RttiLocator<std::remove_cv_t<T>>::Get(), 0));
 }
 
 struct IFormFactory;

@@ -139,4 +139,3 @@ void FaceGenSystem::Setup(World& aWorld, const entt::entity aEntity, const Tints
     auto& component = aWorld.emplace_or_replace<FaceGenComponent>(aEntity);
     component.FaceTints = acTints;
 }
-

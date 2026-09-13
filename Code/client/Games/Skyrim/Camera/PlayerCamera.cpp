@@ -12,10 +12,7 @@ PlayerCamera* PlayerCamera::Get() noexcept
 bool PlayerCamera::IsFirstPerson() noexcept
 {
 #ifdef SKYRIMVR
-    // VR has no flat first-person camera state or first-person behavior graph: the player always
-    // runs the full-body graph that remote clients replay. AE 21600 was an unresolved crosswalk
-    // value that crashed in BehaviorVar::Patch (via SaveAnimationVariables); before that crash it
-    // effectively reported "not first person", which is the behaviour sync relies on.
+    // VR has no first-person graph: the player always runs the full-body graph that others replay.
     return false;
 #endif
     TP_THIS_FUNCTION(TIsFirstPerson, void, PlayerCamera, void*, void*, double*);
@@ -41,12 +38,7 @@ bool PlayerCamera::WorldPtToScreenPt3(const NiPoint3& in, NiPoint3& out, float z
 void PlayerCamera::ForceFirstPerson() noexcept
 {
 #ifdef SKYRIMVR
-    // CommonLibVR-NG's own PlayerCamera::ForceFirstPerson explicitly refuses
-    // to run on VR ("if (REL::Module::IsVR()) return false;") even though the
-    // id (49858) does resolve to a real VR address - forcing a first/third
-    // person switch doesn't map cleanly onto VR's own camera/view handling.
-    // Matching that judgment call rather than trusting "the address resolves"
-    // as proof it's safe to call.
+    // No camera switching on VR (CommonLibVR does the same).
     return;
 #else
     TP_THIS_FUNCTION(TForceFirstPerson, void, PlayerCamera);
@@ -58,8 +50,7 @@ void PlayerCamera::ForceFirstPerson() noexcept
 void PlayerCamera::ForceThirdPerson() noexcept
 {
 #ifdef SKYRIMVR
-    // See ForceFirstPerson above - CommonLibVR-NG deliberately no-ops this on
-    // VR despite the id (49863) resolving to a real address.
+    // No camera switching on VR (CommonLibVR does the same).
     return;
 #else
     TP_THIS_FUNCTION(TForceThirdPerson, void, PlayerCamera);
@@ -67,4 +58,3 @@ void PlayerCamera::ForceThirdPerson() noexcept
     TiltedPhoques::ThisCall(forceThirdPerson, this);
 #endif
 }
-

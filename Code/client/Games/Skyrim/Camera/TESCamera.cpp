@@ -15,4 +15,3 @@ NiCamera* TESCamera::GetNiCamera()
 
     return nullptr;
 }
-

@@ -1490,8 +1490,7 @@ ActorData CharacterService::BuildActorData(Actor* apActor) const noexcept
 
 void CharacterService::RunLocalUpdates() const noexcept
 {
-    // The local player is sent at ~30 Hz so remote clients can show VR head/hand movement and
-    // player movement smoothly; every other local actor keeps the original 100 ms cadence.
+    // The local player is sent at ~30 Hz for smooth VR head and hand movement, other actors at 10 Hz.
     static std::chrono::steady_clock::time_point lastSendTimePoint;
     static std::chrono::steady_clock::time_point lastFullSendTimePoint;
     constexpr auto cDelayBetweenPlayerSnapshots = 33ms;
@@ -1532,6 +1531,8 @@ void CharacterService::RunRemoteUpdates() noexcept
 {
     // Delay by 300ms to let the interpolation system accumulate interpolation points
     const auto tick = m_transport.GetClock().GetCurrentTick() - 300;
+    // VR poses use a shorter delay: hands lagging behind are much more noticeable than movement.
+    const auto poseTick = m_transport.GetClock().GetCurrentTick() - 100;
 
     // Interpolation has to keep running even if the actor is not in view, otherwise we will never know if we need to spawn it
     auto interpolatedEntities = m_world.view<RemoteComponent, InterpolationComponent>();
@@ -1548,7 +1549,7 @@ void CharacterService::RunRemoteUpdates() noexcept
             pActor = Cast<Actor>(pForm);
         }
 
-        InterpolationSystem::Update(pActor, interpolationComponent, tick, m_transport.GetClock().GetCurrentTick() - 100);
+        InterpolationSystem::Update(pActor, interpolationComponent, tick, poseTick);
     }
 
     auto animatedView = m_world.view<RemoteComponent, RemoteAnimationComponent, FormIdComponent>();

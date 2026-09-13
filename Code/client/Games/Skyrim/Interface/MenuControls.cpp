@@ -18,4 +18,3 @@ static TiltedPhoques::Initializer s_init(
     []() {
 
     });
-

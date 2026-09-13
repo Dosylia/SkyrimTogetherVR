@@ -65,9 +65,8 @@ private:
     */
     void RunNakedNPCBugChecks() noexcept;
     /**
-     * Sends the local player's worn equipment whenever it differs from what was last sent.
-     * Single equip events get lost or arrive in the wrong state on VR, this keeps the other
-     * clients converging on what the player really holds.
+     * Sends the local player's worn equipment when it changed. Single equip events get lost or arrive
+     * out of date on VR; the snapshot corrects the other clients within a second.
      */
     void RunEquipmentSnapshotUpdates() noexcept;
     /**

@@ -135,8 +135,7 @@ struct TESObjectREFR : TESForm
     virtual void sub_80();
     virtual void sub_81();
 #ifdef SKYRIMVR
-    // VR-only virtual at slot 0x82 (TESObjectREFR::AttachWeapon, non-virtual in SE/AE per
-    // CommonLibVR-NG). Every later slot is one higher on VR.
+    // VR-only virtual (AttachWeapon): every later virtual is one slot higher on VR.
     virtual void VR_AttachWeapon();
 #endif
     virtual void sub_82();
@@ -233,6 +232,6 @@ struct TESObjectREFR : TESForm
 #ifndef SKYRIMVR
 static_assert(sizeof(TESObjectREFR) == 0xA0);
 #else
-static_assert(sizeof(TESObjectREFR) == 0x98); // SE layout (no ExtraDataList vtable)
+static_assert(sizeof(TESObjectREFR) == 0x98); // VR uses the SE layout
 #endif
 static_assert(offsetof(TESObjectREFR, loadedState) == 0x68);

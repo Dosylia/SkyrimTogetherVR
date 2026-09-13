@@ -74,8 +74,7 @@ static_assert(offsetof(TESObjectCELL, worldspace) == 0x128);
 static_assert(offsetof(TESObjectCELL, loadedCellData) == 0x130);
 static_assert(sizeof(TESObjectCELL) == 0x148);
 #else
-// SE/VR layout (no ExtraDataList vtable); matches CommonLibVR-NG's SE/VR column:
-// references 080, worldSpace 120, loadedData 128, size 140.
+// VR uses the SE layout.
 static_assert(offsetof(TESObjectCELL, refData) == 0x80);
 static_assert(offsetof(TESObjectCELL, worldspace) == 0x120);
 static_assert(offsetof(TESObjectCELL, loadedCellData) == 0x128);

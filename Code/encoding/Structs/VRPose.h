@@ -8,12 +8,8 @@ using TiltedPhoques::Buffer;
 
 //! Upper-body pose of a VR player, synced alongside Movement.
 //!
-//! Each entry is the rotation of one skeleton bone relative to the actor's 3D root node
-//! (root.world.rotate^-1 * bone.world.rotate), captured from the local player's
-//! third-person skeleton - which VRIK drives from the headset and controllers. The
-//! receiving client applies the same root-relative rotations to the remote player's
-//! skeleton, so no IK or HMD/controller axis calibration is needed.
-//!
+//! Each bone rotation is relative to the actor's 3D root, read from the skeleton VRIK drives. The
+//! receiver applies the same rotations, so no headset or controller calibration is needed.
 //! HasData is false (and nothing else is written) for non-VR actors.
 struct VRPose
 {
