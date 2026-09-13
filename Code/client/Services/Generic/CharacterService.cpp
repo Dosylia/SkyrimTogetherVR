@@ -66,6 +66,9 @@
 
 #include <World.h>
 #include <Games/TES.h>
+#ifdef SKYRIMVR
+#include <Games/Skyrim/VRBodySync.h>
+#endif
 
 CharacterService::CharacterService(World& aWorld, entt::dispatcher& aDispatcher, TransportService& aTransport) noexcept
     : m_world(aWorld)
@@ -228,6 +231,10 @@ void CharacterService::OnActorRemoved(const ActorRemovedEvent& acEvent) noexcept
 
     if (m_world.orphan(cId))
         m_world.destroy(cId);
+
+#ifdef SKYRIMVR
+    VRBodySync::ClearRemotePose(acEvent.FormId);
+#endif
 
     spdlog::info("Actor removed, form id: {:X}", acEvent.FormId);
 }

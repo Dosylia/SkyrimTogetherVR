@@ -419,6 +419,7 @@ void CharacterService::OnReferencesMoveRequest(const PacketEvent<ClientReference
         movementComponent.Rotation = glm::vec3(movement.Rotation.x, 0.f, movement.Rotation.y);
         movementComponent.Variables = movement.Variables;
         movementComponent.Direction = movement.Direction;
+        movementComponent.VRPoseData = update.UpdatedVRPose;
 
         cellIdComponent.Cell = movement.CellId;
         cellIdComponent.WorldSpaceId = movement.WorldSpaceId;
@@ -845,6 +846,7 @@ void CharacterService::ProcessMovementChanges() const noexcept
             movement.Direction = movementComponent.Direction;
             movement.Variables = movementComponent.Variables;
 
+            update.UpdatedVRPose = movementComponent.VRPoseData;
             update.ActionEvents = animationComponent.Actions;
         }
     }

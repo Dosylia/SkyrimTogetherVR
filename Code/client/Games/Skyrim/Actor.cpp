@@ -861,6 +861,15 @@ void Actor::Kill() noexcept
     if (pExtension->IsPlayer())
         return;
 
+#ifdef SKYRIMVR
+    // Call Actor::KillImpl (SE 36872, name DB Actor::KillImpl_140603B30, VR csv 0x60c340) directly:
+    // the virtual sits at SE slot 0x10E and the VR Actor vtable shift has only been verified up to
+    // SetPosition, so a guessed slot could silently call something else (kills not syncing).
+    TP_THIS_FUNCTION(TKillImpl, void, Actor, Actor* apAttacker, float aDamage, bool aSendEvent, bool aRagdollInstant);
+    POINTER_SKYRIMSE(TKillImpl, s_killImpl, 0, 36872);
+    TiltedPhoques::ThisCall(s_killImpl, this, nullptr, 100.f, true, true);
+    return;
+#endif
     // TODO: these args are kind of bogus of course
     KillImpl(nullptr, 100.f, true, true);
 
@@ -888,6 +897,15 @@ bool Actor::PlayIdle(TESIdleForm* apIdle) noexcept
 
 void Actor::Respawn() noexcept
 {
+#ifdef SKYRIMVR
+    // Actor::Resurrect(bool resetInventory, bool attach3D) = SE 36331 (name DB Actor::Resurrect_1405D5290,
+    // VR csv 0x5dd850), called directly for the same reason as KillImpl above.
+    TP_THIS_FUNCTION(TResurrect, void, Actor, bool aResetInventory, bool aAttach3D);
+    POINTER_SKYRIMSE(TResurrect, s_resurrect, 0, 36331);
+    TiltedPhoques::ThisCall(s_resurrect, this, false, true);
+    Reset();
+    return;
+#endif
     Resurrect(false);
     Reset();
 }

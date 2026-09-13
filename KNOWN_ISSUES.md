@@ -212,12 +212,78 @@ fixed another way.
 - Equip hooks 38928-38935 differ by one between the two methods, because AE inserted a function.
   They need a dump check. Direct equip calls already use CommonLib SE ids.
 
-**Remote player shows up nearly naked** (seen 2026-09-13): the torch syncs, but most armour doesn't.
-Suspects:
-- `ExtraContainerChanges::GetArmor` returns nullptr on VR.
-- `Actor::IsWearingBodyPiece` returns true on VR.
-- ExtraDataList setters are unresolved (11612 worn data, 11616 health, 11619 charge, 11620 soul,
-  11822 poison, 12060 enchantment).
+**Remote player shows up nearly naked** (seen 2026-09-13): only underwear and a torch.
+
+Cause: on the receiver, `TESObjectREFR::AddOrRemoveItem` equips an item only if the `ExtraDataList`
+built by `GetExtraDataFromItem` contains `Worn`/`WornLeft`. On VR, `SetWorn` (11612) and the other
+setters called crosswalk garbage, so the flag was never set and nothing was equipped.
+
+Fixed and **verified against live game code** (2026-09-13, `scratchpad/verify_extra.py`): each
+setter references its `Extra*` vtable (`SetWorn` references both ExtraWorn and ExtraWornLeft;
+`SetSoul` does it through a helper call). All 20 git-mined addresses are real function starts.
+
+| AE | SE | VR | Setter | Source |
+|---|---|---|---|---|
+| 11612 | 11466 | `0x11e470` | SetWorn | constant −146 offset in this block |
+| 11616 | 11470 | `0x11ea00` | SetHealth | same |
+| 11619 | 11473 | `0x11ede0` | SetCharge | same |
+| 11620 | 11474 | `0x11ef40` | SetSoul | same; name DB `BSExtraDataList::SetSoul` |
+| 11822 | 11676 | `0x12a640` | SetPoison | same |
+| 12060 | 11921 | `0x1372b0` | SetEnchantment | CommonLib |
+
+The −146 offset is pinned by CommonLib AE 11598=SE 11452 and AE 11617=SE 11471 (`SetCount`).
+
+**Mounting: left as is on purpose.** Two players end up on one horse and only the rider steers;
+the user considers that minor. Candidate if needed: 37905 → SE 36881, VR `0x60e300`
+(`InitiateMountPackage`, anchors AE 37904/37907 = SE 36880/36883). Its hook stays skipped and the
+direct call stays null-guarded.
+
+**Face tints:** `NiGeometry::effect` is now at VR 0x168 (CommonLibVR GEOMETRY_RUNTIME_DATA 0x160).
+`FaceGenSystem::Update` is enabled on VR again; it hasn't run in-game yet.
+
+**NPC kills by the non-owner didn't sync** (2026-09-13 test). `Actor::Kill`/`Respawn` used the virtuals
+`KillImpl` (SE slot 0x10E) and `Resurrect` (SE 0xAB). The VR Actor vtable shift is only verified up
+to `SetPosition`, so on VR these now call the functions directly:
+- `Actor::KillImpl`: SE 36872, VR `0x60c340` (name DB).
+- `Actor::Resurrect(bool, bool)`: SE 36331, VR `0x5dd850` (name DB).
+
+The watcher now also dumps the VR Character vtable (`vtbl_character.bin`, 0x1416d6de0) so every
+Actor virtual past 0xAB can be checked against known function addresses.
+
+**Weather is not synced.** The client has Sky hooks but no weather service or messages. Low priority.
+
+**Lydia spawn/remove loop in the second player's log:** both saves have the same follower, so both
+clients claim her and ownership bounces. This is a save/gameplay conflict, not a VR port bug.
+Dismiss the follower in one save.
+
+**VR upper-body sync (head, spine, arms, hands) is implemented and untested in-game** (2026-09-13).
+Files: `Code/client/Games/Skyrim/VRBodySync.h/.cpp`, `encoding/Structs/VRPose`, and server
+`MovementComponent` / `CharacterService` relay. The protocol changed, so both clients and the
+server must run matching builds.
+
+Design:
+- **Capture:** the local player's third-person skeleton, which VRIK drives. Store 12 bones (Spine1,
+  Spine2, Neck, Head, both clavicles, upper arms, forearms and hands) as rotations relative to the
+  root node.
+- **Network:** send them in `VRPose` (32-bit smallest-three quaternions). The server must store
+  and relay them; it currently drops `UpdatedVRPose`.
+- **Apply:** slerp in `InterpolationSystem`. A vtable hook on `TESObjectREFR::UpdateAnimation`
+  (slot 0x7D) sets each bone's local rotation from its parent's world transform, then recomputes
+  world transforms under Spine1.
+- **VR offsets:** children at node+0x138, parent 0x30, world 0x7C.
+
+First two-player test (17:33): the sender captured (`capturing local VR pose`) and the receiver got
+data and installed a vtable swap on Character slot 0x7D, but never applied the pose. Slot 0x7D is
+`Actor::UpdateAnimation` (SE 36370, confirmed in live code), and the engine calls it directly, not
+through the vtable. It is now a TP_HOOK detour on VR `0x5e1f10` (override added).
+
+What to check in the log:
+- `VRBodySync: capturing local VR pose` means the sender found the bones.
+- `hooked UpdateAnimation` and `applying remote VR pose` mean the receiver applies them.
+
+If the log shows the pose is applied but nothing moves in-game, the engine writes bone transforms
+after `UpdateAnimation`; move the apply step to a later hook. This replaces the old capture
+(f377c225), which used the yaw-only `UprightHmdNode` plus world-axis wand poses and had no consumer.
 
 **Disabled on VR: `FaceGenSystem::Update` (remote-player face tints).** It needs 76207, 414675,
 70717, 27040 and 14953, all unverified. Remote players keep the base NPC skin and tint colours.

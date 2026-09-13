@@ -11,6 +11,13 @@ PlayerCamera* PlayerCamera::Get() noexcept
 
 bool PlayerCamera::IsFirstPerson() noexcept
 {
+#ifdef SKYRIMVR
+    // VR has no flat first-person camera state or first-person behavior graph: the player always
+    // runs the full-body graph that remote clients replay. AE 21600 was an unresolved crosswalk
+    // value that crashed in BehaviorVar::Patch (via SaveAnimationVariables); before that crash it
+    // effectively reported "not first person", which is the behaviour sync relies on.
+    return false;
+#endif
     TP_THIS_FUNCTION(TIsFirstPerson, void, PlayerCamera, void*, void*, double*);
     POINTER_SKYRIMSE(TIsFirstPerson, isFirstPerson, 21600, 21600);
 

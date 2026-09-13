@@ -58,15 +58,6 @@ using TCreateTints = void(__fastcall)(const GameArray<TintMask*>& acTints, NiRen
 
 void FaceGenSystem::Update(World& aWorld, Actor* apActor, FaceGenComponent& aFaceGenComponent) noexcept
 {
-#ifdef SKYRIMVR
-    // Remote-player face tints: GetObjectByName (76207), NiMaskedShader RTTI (414675), CreateTexture
-    // (70717), CreateTints (27040) and the TESTexture ctor (14953) are all unverified crosswalk values
-    // on VR. Skip until they are resolved; remote players keep their base-NPC skin tone.
-    (void)aWorld;
-    (void)apActor;
-    aFaceGenComponent.Generated = true;
-    return;
-#endif
     POINTER_SKYRIMSE(NiRTTI, NiMaskedShaderRTTI, 414675, 414675);
     POINTER_SKYRIMSE(TCreateTexture, CreateTexture, 70717, 70717);
     POINTER_SKYRIMSE(TCreateResourceView, CreateResourceView, 77299, 75507);

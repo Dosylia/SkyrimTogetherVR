@@ -25,9 +25,7 @@ struct InterpolationComponent
 
     List<TimePoint> TimePoints;
     glm::vec3 Position;
-    // Latest interpolated VR pose for this remote actor, in world space (VRPose's
-    // own Head/LeftHand/RightHand positions are actor-relative; this is that plus
-    // Position). Not yet consumed by anything - rendering remote VR avatars is a
-    // separate follow-up.
+    // Latest interpolated VR upper-body pose (root-relative bone rotations), handed to
+    // VRBodySync which applies it to the remote actor's skeleton after its animation update.
     VRPose InterpolatedVRPose;
 };

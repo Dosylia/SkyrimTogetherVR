@@ -1,31 +1,40 @@
 #pragma once
 
-#include <Structs/Vector3_NetQuantize.h>
+#include <array>
+
 #include <Structs/Quaternion_NetQuantize.h>
 
 using TiltedPhoques::Buffer;
 
-//! A single tracked VR point (head or hand), position relative to the actor's
-//! own root so it doesn't drift out of sync with Movement's own position field.
-struct VRTransform
-{
-    VRTransform() = default;
-    ~VRTransform() = default;
-
-    bool operator==(const VRTransform& acRhs) const noexcept;
-    bool operator!=(const VRTransform& acRhs) const noexcept;
-
-    void Serialize(Buffer::Writer& aWriter) const noexcept;
-    void Deserialize(Buffer::Reader& aReader) noexcept;
-
-    Vector3_NetQuantize Position{};
-    Quaternion_NetQuantize Rotation{};
-};
-
-//! Head + hand controller pose, synced alongside Movement for VR players.
+//! Upper-body pose of a VR player, synced alongside Movement.
+//!
+//! Each entry is the rotation of one skeleton bone relative to the actor's 3D root node
+//! (root.world.rotate^-1 * bone.world.rotate), captured from the local player's
+//! third-person skeleton - which VRIK drives from the headset and controllers. The
+//! receiving client applies the same root-relative rotations to the remote player's
+//! skeleton, so no IK or HMD/controller axis calibration is needed.
+//!
 //! HasData is false (and nothing else is written) for non-VR actors.
 struct VRPose
 {
+    //! Bone order is parent-before-child; see VRBodySync.cpp for the node names.
+    enum Bone : uint8_t
+    {
+        kSpine1,
+        kSpine2,
+        kNeck,
+        kHead,
+        kLeftClavicle,
+        kLeftUpperArm,
+        kLeftForearm,
+        kLeftHand,
+        kRightClavicle,
+        kRightUpperArm,
+        kRightForearm,
+        kRightHand,
+        kBoneCount
+    };
+
     VRPose() = default;
     ~VRPose() = default;
 
@@ -36,7 +45,5 @@ struct VRPose
     void Deserialize(Buffer::Reader& aReader) noexcept;
 
     bool HasData{false};
-    VRTransform Head{};
-    VRTransform LeftHand{};
-    VRTransform RightHand{};
+    std::array<Quaternion_NetQuantize, kBoneCount> Bones{};
 };

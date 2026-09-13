@@ -1,27 +1,5 @@
 #include <Structs/VRPose.h>
 
-bool VRTransform::operator==(const VRTransform& acRhs) const noexcept
-{
-    return Position == acRhs.Position && Rotation == acRhs.Rotation;
-}
-
-bool VRTransform::operator!=(const VRTransform& acRhs) const noexcept
-{
-    return !this->operator==(acRhs);
-}
-
-void VRTransform::Serialize(TiltedPhoques::Buffer::Writer& aWriter) const noexcept
-{
-    Position.Serialize(aWriter);
-    Rotation.Serialize(aWriter);
-}
-
-void VRTransform::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
-{
-    Position.Deserialize(aReader);
-    Rotation.Deserialize(aReader);
-}
-
 bool VRPose::operator==(const VRPose& acRhs) const noexcept
 {
     if (HasData != acRhs.HasData)
@@ -30,7 +8,7 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
     if (!HasData)
         return true;
 
-    return Head == acRhs.Head && LeftHand == acRhs.LeftHand && RightHand == acRhs.RightHand;
+    return Bones == acRhs.Bones;
 }
 
 bool VRPose::operator!=(const VRPose& acRhs) const noexcept
@@ -45,9 +23,8 @@ void VRPose::Serialize(TiltedPhoques::Buffer::Writer& aWriter) const noexcept
     if (!HasData)
         return;
 
-    Head.Serialize(aWriter);
-    LeftHand.Serialize(aWriter);
-    RightHand.Serialize(aWriter);
+    for (const auto& bone : Bones)
+        bone.Serialize(aWriter);
 }
 
 void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
@@ -59,7 +36,6 @@ void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
     if (!HasData)
         return;
 
-    Head.Deserialize(aReader);
-    LeftHand.Deserialize(aReader);
-    RightHand.Deserialize(aReader);
+    for (auto& bone : Bones)
+        bone.Deserialize(aReader);
 }

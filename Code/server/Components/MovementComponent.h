@@ -5,6 +5,7 @@
 #endif
 
 #include <Structs/AnimationVariables.h>
+#include <Structs/VRPose.h>
 
 struct MovementComponent
 {
@@ -13,6 +14,7 @@ struct MovementComponent
     glm::vec3 Rotation;
     AnimationVariables Variables;
     float Direction;
+    VRPose VRPoseData; // VR players' upper-body pose, relayed as-is to other players
 
     bool Sent;
 };

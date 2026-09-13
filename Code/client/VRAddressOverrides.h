@@ -32,14 +32,14 @@ struct VRAddressOverrideEntry
 
 static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 11437u, 0x0117c80u },
-    { 11612u, 0x0126270u },
-    { 11616u, 0x01266a0u },
-    { 11619u, 0x0126ab0u },
-    { 11620u, 0x0126c00u },
+    { 11612u, 0x011e470u }, // was crosswalk garbage; ExtraDataList SetWorn = SE 11466 (constant AE->SE offset -146 in this block (CommonLib anchors AE 11598=SE 11452, AE 11617=SE 11471 SetCount; SE 11474 named BSExtraDataList::SetSoul); unique 0x1f0/0x1e0 size match) -> VR via addrlib; not yet dump-checked
+    { 11616u, 0x011ea00u }, // was crosswalk garbage; ExtraDataList SetHealth = SE 11470 (constant AE->SE offset -146 in this block (CommonLib anchors AE 11598=SE 11452, AE 11617=SE 11471 SetCount; SE 11474 named BSExtraDataList::SetSoul)) -> VR via addrlib; not yet dump-checked
+    { 11619u, 0x011ede0u }, // was crosswalk garbage; ExtraDataList SetCharge = SE 11473 (constant AE->SE offset -146 in this block (CommonLib anchors AE 11598=SE 11452, AE 11617=SE 11471 SetCount; SE 11474 named BSExtraDataList::SetSoul)) -> VR via addrlib; not yet dump-checked
+    { 11620u, 0x011ef40u }, // was crosswalk garbage; ExtraDataList SetSoul = SE 11474 (constant AE->SE offset -146 in this block (CommonLib anchors AE 11598=SE 11452, AE 11617=SE 11471 SetCount; SE 11474 named BSExtraDataList::SetSoul)) -> VR csv; not yet dump-checked
     { 11806u, 0x0129a30u }, // was 0x01314d0: AE 11806 -> SE 11660 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
-    { 11822u, 0x0132240u },
+    { 11822u, 0x012a640u }, // was crosswalk garbage; ExtraDataList SetPoison = SE 11676 (offset -146, anchor AE 11812=SE 11666; AE 11821-11825 size pattern = SE 11675-11679) -> VR via addrlib; not yet dump-checked
     { 12052u, 0x01401b0u },
-    { 12060u, 0x0140360u },
+    { 12060u, 0x01372b0u }, // was crosswalk garbage; ExtraDataList SetEnchantment = SE 11921 (CommonLibVR-NG RELOCATION_ID(11921, 12060)) -> VR via addrlib
     { 12401u, 0x01454a0u }, // Lock::SetLock = SE 12274 (SE 1.5.97 address 0x140134AF0 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
     { 13631u, 0x017da20u },
     { 13718u, 0x017c4e0u }, // ModManager GetCellFromCoordinates = SE 13620 (SE 1.5.97 address 0x14016BAC0 from this repo's git history, an exact SE function/global start); size alignment agrees -> VR via addrlib/csv; not yet dump-checked
@@ -126,6 +126,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     // { 35503u, 0x05b2360u }, removed: crosswalk garbage (VR 0x5b2360 is an unrelated function; crashed syncing remote actors)
     { 35993u, 0x059ef30u }, // was 0x05ce330: AE 35993 -> SE 35100 (anchors AE 35991/35996 = SE 35099/35103; AE 35992 has no SE twin; sizes 0x30/0x50 match) -> VR via addrlib; checked in dump: BGSLoadGameBuffer ctor (stores vtable, zeroes +8..+0x20)
     { 36000u, 0x059f160u }, // was 0x05ce840: AE 36000 -> SE 35107 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
+    { 36370u, 0x05e1f10u }, // Actor::UpdateAnimation = SE 36370 (name DB Actor::UpdateAnimation_1405D9890) -> VR via addrlib; confirmed in live code as the Character vtable slot 0x7D target; hooked by VRBodySync
     { 36035u, 0x05a0b00u }, // was 0x05d25e0: AE 36035 -> SE 35145 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 36047u, 0x05a0ff0u }, // was 0x05d2fe0: AE 36047 -> SE 35157 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 36048u, 0x05a1070u }, // was 0x05d3010: AE 36048 -> SE 35158 by neighbour interpolation, size fingerprint 5/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
@@ -150,7 +151,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 37677u, 0x0600220u }, // was 0x0633400: AE 37677 -> SE 36669 by neighbour interpolation, size fingerprint 3/5 (method 99.5% on 1958 known ids) -> VR via addrlib, VR layout matches SE; not yet dump-checked
     { 37698u, 0x0634d90u },
     { 37717u, 0x0602f40u }, // was 0x0635220: AE 37717 -> SE 36707 (neighbours AE 37710-37714 = SE 36700-36704 by size) -> VR via addrlib; checked in dump: skips player, toggles boolBits 0x4000000 @0xE0 and 0x80 @0x1FC = SetPlayerTeammate(bool, bool)
-    // { 37905u, 0x063f330u }, removed: unverified hook target (crosswalk was 0/69 on checkable function ids), hook now skipped on VR
+    // { 37905u, 0x060e300u }, not applied (user: shared-horse behaviour is fine): candidate InitiateMountPackage = SE 36881 (anchors AE 37904/37907 = SE 36880/36883), VR 0x60e300; hook stays skipped, direct call null-guarded
     { 37975u, 0x0612420u }, // was 0x06430e0: AE 37975 -> SE 36950 (vr_address_tools se_ae.csv) -> VR via addrlib; function start checked in dump
     { 38533u, 0x0664750u },
     { 38717u, 0x0680550u },
