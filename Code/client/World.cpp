@@ -22,6 +22,7 @@
 #include <Services/CombatService.h>
 #include <Services/WeatherService.h>
 #include <Services/MapService.h>
+#include <Services/VRConnectService.h>
 
 #include <Events/PreUpdateEvent.h>
 #include <Events/UpdateEvent.h>
@@ -55,6 +56,9 @@ World::World()
     ctx().emplace<CombatService>(*this, m_transport, m_dispatcher);
     ctx().emplace<WeatherService>(*this, m_transport, m_dispatcher);
     ctx().emplace<MapService>(*this, m_dispatcher, m_transport);
+#ifdef SKYRIMVR
+    ctx().emplace<VRConnectService>(*this, m_dispatcher, m_transport);
+#endif
 
     BehaviorVar::Get()->Init();
 }
@@ -81,28 +85,75 @@ void World::Update() noexcept
     }
     m_dispatcher.trigger(UpdateEvent(cDeltaSeconds));
 
-    // Stutter report: a frame gap over 25 ms (VR runs at 11-14 ms) or more than 5 ms spent in the mod's
-    // own update. Frame gaps over 2 s are loading screens and ignored. At most one line per second.
     const double frameMs = cDeltaSeconds * 1000.0;
     const double updateMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - cUpdateStart).count();
-    if ((frameMs > 25.0 && frameMs < 2000.0) || updateMs > 5.0)
+
+    // A slow mod update is ours to fix, so it is reported as it happens (at most once a second). Slow frames in
+    // general are summed up in ReportPerformance instead of one line per spike.
+    if (updateMs > 5.0)
     {
         static std::chrono::steady_clock::time_point s_lastReport;
-        static uint32_t s_suppressed = 0;
         const auto now = std::chrono::steady_clock::now();
         if (now - s_lastReport >= std::chrono::seconds(1))
         {
             const auto& perf = PerfFrame::Get();
-            spdlog::warn("Perf spike: frame {:.1f} ms, mod update {:.1f} ms, slowest mod section {} {:.1f} ms ({} more spikes since last report)", frameMs, updateMs,
-                         perf.SlowestSection ? perf.SlowestSection : "none", perf.SlowestMs, s_suppressed);
+            spdlog::warn("Mod update took {:.1f} ms, slowest section {} {:.1f} ms", updateMs, perf.SlowestSection ? perf.SlowestSection : "none", perf.SlowestMs);
             s_lastReport = now;
-            s_suppressed = 0;
-        }
-        else
-        {
-            ++s_suppressed;
         }
     }
+
+    ReportPerformance(frameMs, updateMs);
+}
+
+void World::ReportPerformance(double aFrameMs, double aUpdateMs) noexcept
+{
+    constexpr auto kInterval = std::chrono::seconds(30);
+
+    // Frame gaps over 2 s are loading screens.
+    if (aFrameMs < 2000.0)
+    {
+        m_perfFrameTimes.push_back(static_cast<float>(aFrameMs));
+        m_perfUpdateTotalMs += aUpdateMs;
+        m_perfUpdateMaxMs = std::max(m_perfUpdateMaxMs, aUpdateMs);
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (m_perfIntervalStart == std::chrono::steady_clock::time_point{})
+        m_perfIntervalStart = now;
+    if (now - m_perfIntervalStart < kInterval || m_perfFrameTimes.empty())
+        return;
+
+    const size_t frames = m_perfFrameTimes.size();
+    double totalMs = 0.0;
+    size_t over50 = 0;
+    for (float ms : m_perfFrameTimes)
+    {
+        totalMs += ms;
+        over50 += ms > 50.f;
+    }
+    std::sort(m_perfFrameTimes.begin(), m_perfFrameTimes.end());
+    const auto percentile = [this, frames](double aFraction) { return m_perfFrameTimes[std::min(frames - 1, static_cast<size_t>(frames * aFraction))]; };
+    const double averageMs = totalMs / frames;
+
+    std::string hooks;
+    constexpr std::array<const char*, static_cast<size_t>(PerfCounter::kCount)> kNames{"VR pose", "inventory apply", "actor spawn"};
+    auto& slots = PerfCounters::Get();
+    for (size_t i = 0; i < slots.size(); ++i)
+    {
+        const uint64_t nanoseconds = slots[i].Nanoseconds.exchange(0);
+        const uint32_t calls = slots[i].Calls.exchange(0);
+        if (calls)
+            hooks += fmt::format(", {} {:.2f} ms/frame ({} calls)", kNames[i], nanoseconds / 1e6 / frames, calls);
+    }
+
+    spdlog::info("Perf last {} s: {} frames, avg {:.1f} ms ({:.0f} fps), p95 {:.1f} ms, p99 {:.1f} ms, {} frames over 50 ms; mod update avg {:.2f} ms, max {:.1f} ms{}",
+                 std::chrono::duration_cast<std::chrono::seconds>(now - m_perfIntervalStart).count(), frames, averageMs, 1000.0 / averageMs, percentile(0.95),
+                 percentile(0.99), over50, m_perfUpdateTotalMs / frames, m_perfUpdateMaxMs, hooks);
+
+    m_perfFrameTimes.clear();
+    m_perfUpdateTotalMs = 0.0;
+    m_perfUpdateMaxMs = 0.0;
+    m_perfIntervalStart = now;
 }
 
 RunnerService& World::GetRunner() noexcept

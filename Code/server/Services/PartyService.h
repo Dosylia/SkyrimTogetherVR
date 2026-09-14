@@ -69,4 +69,5 @@ private:
     entt::scoped_connection m_partyKickConnection;
 
     void SendPartyJoinedEvent(Party& aParty, Player* aPlayer) noexcept;
+    void CreateParty(Player* apLeader) noexcept;
 };

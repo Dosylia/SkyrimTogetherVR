@@ -2,6 +2,9 @@
 #include <PerfScope.h>
 
 #include <World.h>
+#ifdef SKYRIMVR
+#include <Games/Skyrim/VRBodySync.h>
+#endif
 
 #include <Events/UpdateEvent.h>
 #include <Events/SpellCastEvent.h>
@@ -215,6 +218,9 @@ void MagicService::OnNotifySpellCast(const NotifySpellCast& acMessage) const noe
     }
 
     pCaster->CastSpellImmediate(pSpell, false, pDesiredTarget, 1.0f, false, 0.0f);
+#ifdef SKYRIMVR
+    VRBodySync::LogCastOrigin(pActor, acMessage.CastingSource);
+#endif
 
     spdlog::debug("Successfully casted remote spell");
 }

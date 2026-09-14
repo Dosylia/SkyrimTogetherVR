@@ -37,6 +37,7 @@
 
 #include <Components.h>
 #include <World.h>
+#include <Services/VRConnectService.h>
 #include <Utils.h>
 
 #include <Forms/TESObjectCELL.h>
@@ -183,46 +184,16 @@ void DebugService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
         {
             s_f6Pressed = true;
 
+#ifdef SKYRIMVR
+            // VR has no connect UI: VRConnectService reads the server from connect.txt.
+            m_world.ctx().at<VRConnectService>().Toggle();
+#else
             static char s_address[256] = "127.0.0.1:10578";
-#ifdef SKYRIMVR
-            // VR has no connect UI: read "address:port" and an optional password line from
-            // %LOCALAPPDATA%\SkyrimTogetherVR\connect.txt.
-            char localAppData[MAX_PATH];
-            if (!m_transport.IsOnline() && GetEnvironmentVariableA("LOCALAPPDATA", localAppData, sizeof(localAppData)))
-            {
-                std::ifstream connectFile(std::string(localAppData) + "\\SkyrimTogetherVR\\connect.txt");
-                // Trim spaces and Notepad's UTF-8 BOM, which make the address unresolvable.
-                const auto trim = [](std::string& s)
-                {
-                    if (s.rfind("\xEF\xBB\xBF", 0) == 0)
-                        s.erase(0, 3);
-                    s.erase(s.find_last_not_of(" \t\r\n") + 1);
-                    s.erase(0, s.find_first_not_of(" \t\r\n") == std::string::npos ? s.size() : s.find_first_not_of(" \t\r\n"));
-                };
-                std::string line;
-                if (connectFile && std::getline(connectFile, line))
-                {
-                    trim(line);
-                    if (!line.empty())
-                        strncpy_s(s_address, line.c_str(), _TRUNCATE);
-                    std::string password;
-                    if (std::getline(connectFile, password))
-                    {
-                        trim(password);
-                        m_transport.SetServerPassword(password.c_str());
-                    }
-                }
-            }
-#endif
             if (!m_transport.IsOnline())
-            {
-#ifdef SKYRIMVR
-                Utils::ShowHudMessage(TiltedPhoques::String("Skyrim Together: connecting to ") + s_address);
-#endif
                 m_transport.Connect(s_address);
-            }
             else
                 m_transport.Close();
+#endif
         }
     }
     else

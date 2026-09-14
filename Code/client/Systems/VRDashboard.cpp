@@ -138,6 +138,7 @@ bool VRDashboard::InitializeOverlay() noexcept
     desc.SampleDesc.Count = 1;
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED; // the SteamVR compositor opens it from its own process
 
     if (FAILED(m_pDevice->CreateTexture2D(&desc, nullptr, &m_pTexture)))
     {
@@ -226,21 +227,46 @@ void VRDashboard::Update(OverlayService& aOverlay) noexcept
 
 void VRDashboard::UploadFrame() noexcept
 {
+    constexpr uint8_t kBackground[3]{24, 21, 18}; // BGR, dark panel behind the page
+
+    size_t visiblePixels = 0;
     {
         std::scoped_lock lock(m_frame.Lock);
         if (!m_frame.Dirty)
             return;
 
-        m_pContext->UpdateSubresource(m_pTexture, 0, nullptr, m_frame.Pixels.data(), kWidth * 4, 0);
+        // CEF paints premultiplied BGRA, and the UI is made to sit over the game, so most of the page is transparent.
+        // The dashboard would show that as an empty tab: blend it over an opaque panel instead.
+        m_opaquePixels.resize(m_frame.Pixels.size());
+        const uint8_t* pSource = m_frame.Pixels.data();
+        uint8_t* pTarget = m_opaquePixels.data();
+        for (size_t i = 0; i < m_frame.Pixels.size(); i += 4)
+        {
+            const uint32_t alpha = pSource[i + 3];
+            const uint32_t inverse = 255 - alpha;
+            for (int c = 0; c < 3; ++c)
+                pTarget[i + c] = static_cast<uint8_t>(std::min<uint32_t>(255, pSource[i + c] + (kBackground[c] * inverse + 127) / 255));
+            pTarget[i + 3] = 255;
+            visiblePixels += alpha != 0;
+        }
+
+        m_pContext->UpdateSubresource(m_pTexture, 0, nullptr, m_opaquePixels.data(), kWidth * 4, 0);
         m_frame.Dirty = false;
     }
+
+    // Nothing ever presents on this device, so D3D11 would keep the upload queued indefinitely and SteamVR would
+    // read a blank shared texture. Flush so the pixels are on the GPU before the compositor opens it.
+    m_pContext->Flush();
 
     vr::Texture_t texture{m_pTexture, vr::TextureType_DirectX, vr::ColorSpace_Auto};
     const auto error = m_pOverlay->SetOverlayTexture(m_handle, &texture);
 
-    static bool s_loggedResult = false;
-    if (!std::exchange(s_loggedResult, true))
-        spdlog::info("VRDashboard: first page frame sent to SteamVR (result {})", static_cast<int>(error));
+    if (m_logNextUpload)
+    {
+        m_logNextUpload = false;
+        spdlog::info("VRDashboard: page frame sent to SteamVR (result {}), {}% of the page has content", static_cast<int>(error),
+                     visiblePixels * 100 / (static_cast<size_t>(kWidth) * kHeight));
+    }
 }
 
 void VRDashboard::ProcessEvents(OverlayService& aOverlay) noexcept
@@ -283,10 +309,16 @@ void VRDashboard::ProcessEvents(OverlayService& aOverlay) noexcept
                 InjectText(*pApp, event.data.keyboard.cNewInput);
             break;
         case vr::VREvent_OverlayShown:
+        {
             spdlog::info("VRDashboard: tab opened (in game: {})", aOverlay.GetInGame());
             m_visible = true;
+            m_logNextUpload = true;
             aOverlay.SetActive(true);
+            // CEF may not repaint an unchanged page when it is shown again: resend the last frame.
+            std::scoped_lock lock(m_frame.Lock);
+            m_frame.Dirty = true;
             break;
+        }
         case vr::VREvent_OverlayHidden:
             m_visible = false;
             aOverlay.SetActive(false);

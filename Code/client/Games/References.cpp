@@ -73,9 +73,18 @@ float CalculateRealDamage(Actor* apHittee, float aDamage, bool aKillMove) noexce
 
 void FadeOutGame(bool aFadingOut, bool aBlackFade, float aFadeDuration, bool aRemainVisible, float aSecondsToFade) noexcept
 {
+#ifdef SKYRIMVR
+    // VR takes two more arguments: a flag and a ref-counted "fade done" callback (its own callers pass false and a
+    // pointer). Leaving them out made the game store stack garbage as the callback and call it when the fade
+    // finished, which crashed right after respawning.
+    using TFadeOutGame = void(bool, bool, float, bool, float, bool, void*);
+    POINTER_SKYRIMSE(TFadeOutGame, fadeOutGame, 52847, 51909);
+    fadeOutGame.Get()(aFadingOut, aBlackFade, aFadeDuration, aRemainVisible, aSecondsToFade, false, nullptr);
+#else
     using TFadeOutGame = void(bool, bool, float, bool, float);
     POINTER_SKYRIMSE(TFadeOutGame, fadeOutGame, 52847, 51909);
     fadeOutGame.Get()(aFadingOut, aBlackFade, aFadeDuration, aRemainVisible, aSecondsToFade);
+#endif
 }
 
 // Disable AI sync for now, experiment didn't work, code might be useful later on though.

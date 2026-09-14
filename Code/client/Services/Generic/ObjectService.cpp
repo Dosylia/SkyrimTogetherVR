@@ -206,7 +206,7 @@ entt::entity ObjectService::CreateObjectEntity(const uint32_t acFormId, const ui
         return *it;
 
     entt::entity entity = m_world.create();
-    spdlog::info("Created object entity, server id: {:X}, form id {:X}", acServerId, acFormId);
+    spdlog::debug("Created object entity, server id: {:X}, form id {:X}", acServerId, acFormId);
 
     m_world.emplace<FormIdComponent>(entity, acFormId);
     m_world.emplace<ObjectComponent>(entity, acServerId);

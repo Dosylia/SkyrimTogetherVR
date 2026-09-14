@@ -87,9 +87,22 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     VRBodySync::SetRemotePose(apActor, vrPose);
 #endif
 
-    // Don't try to move a null actor, or a corpse: its ragdoll decides where it lies.
-    if (!apActor || apActor->actorState.IsDeadOrDying())
+    if (!apActor)
         return;
+
+    // A dying body falls with its own ragdoll. Once dead it is moved to where the owner's corpse lies, but only
+    // when it is clearly elsewhere, so a settled ragdoll isn't pulled around every frame.
+    if (apActor->actorState.IsDying())
+        return;
+
+    if (apActor->actorState.IsDead())
+    {
+        constexpr float cCorpseSnapDistance = 64.f;
+        const glm::vec3 current{apActor->position.x, apActor->position.y, apActor->position.z};
+        if (glm::distance(current, position) > cCorpseSnapDistance)
+            apActor->ForcePosition(position);
+        return;
+    }
 
     apActor->ForcePosition(position);
     apActor->LoadAnimationVariables(second.Variables);

@@ -53,4 +53,11 @@ private:
     ServerSettings m_serverSettings{};
 
     std::chrono::high_resolution_clock::time_point m_lastFrameTime;
+
+    // ReportPerformance: frame times and mod update cost over the current 30 s interval.
+    void ReportPerformance(double aFrameMs, double aUpdateMs) noexcept;
+    TiltedPhoques::Vector<float> m_perfFrameTimes;
+    double m_perfUpdateTotalMs = 0.0;
+    double m_perfUpdateMaxMs = 0.0;
+    std::chrono::steady_clock::time_point m_perfIntervalStart{};
 };

@@ -9,6 +9,8 @@
 
 #include <glm/gtc/quaternion.hpp>
 
+#include <PerfScope.h>
+
 #include <mutex>
 #include <shared_mutex>
 
@@ -168,6 +170,8 @@ void ApplyRemotePose(Actor* apActor) noexcept
         pose = it->second;
     }
 
+    PerfCounterScope perfScope(PerfCounter::kVRPoseApply);
+
     void* pRoot = apActor->GetNiNode();
     if (!pRoot)
         return;
@@ -276,6 +280,39 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
 
     std::unique_lock lock(s_posesLock);
     s_poses[apActor->formID] = pose;
+}
+
+void LogCastOrigin(Actor* apActor, uint32_t aCastingSource) noexcept
+{
+    // Spells from a remote VR player were reported leaving slightly off the hand. The caster aims from the magic
+    // node, so log where it is relative to the posed hand for the first few casts.
+    static uint32_t s_logged = 0;
+    if (!apActor || aCastingSource > 1 || s_logged >= 6)
+        return;
+
+    void* pRoot = apActor->GetNiNode();
+    BoneNodes nodes;
+    if (!pRoot || !FindBones(pRoot, nodes))
+        return;
+
+    ++s_logged;
+    const bool left = aCastingSource == 0;
+    void* pHand = nodes[left ? VRPose::kLeftHand : VRPose::kRightHand];
+    void* pMagicNode = FindShallowest(pRoot, left ? "NPC L MagicNode [LMag]" : "NPC R MagicNode [RMag]");
+
+    const auto& hand = At<NiTransform>(pHand, kWorldOffset).translate;
+    if (!pMagicNode)
+    {
+        spdlog::info("CastDiag {:X}: {} hand at ({:.1f}, {:.1f}, {:.1f}), no magic node found", apActor->formID, left ? "left" : "right", hand.x, hand.y, hand.z);
+        return;
+    }
+
+    void* pParent = At<void*>(pMagicNode, kParentOffset);
+    const auto& magic = At<NiTransform>(pMagicNode, kWorldOffset).translate;
+    const float distance = glm::distance(glm::vec3{hand.x, hand.y, hand.z}, glm::vec3{magic.x, magic.y, magic.z});
+    spdlog::info("CastDiag {:X}: {} hand at ({:.1f}, {:.1f}, {:.1f}), magic node at ({:.1f}, {:.1f}, {:.1f}), {:.1f} units apart, magic node parent '{}', under the posed hand {}",
+                 apActor->formID, left ? "left" : "right", hand.x, hand.y, hand.z, magic.x, magic.y, magic.z, distance, pParent ? GetName(pParent) : "none",
+                 FindShallowest(pHand, left ? "NPC L MagicNode [LMag]" : "NPC R MagicNode [RMag]") == pMagicNode);
 }
 
 void ClearRemotePose(uint32_t aFormId) noexcept

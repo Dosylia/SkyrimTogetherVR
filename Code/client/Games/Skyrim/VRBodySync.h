@@ -17,4 +17,6 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept;
 //! A pose without data clears the actor's pose.
 void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept;
 void ClearRemotePose(uint32_t aFormId) noexcept;
+//! TEMPORARY: logs the magic node position against the posed hand for the first remote casts (spell offset report).
+void LogCastOrigin(Actor* apActor, uint32_t aCastingSource) noexcept;
 } // namespace VRBodySync

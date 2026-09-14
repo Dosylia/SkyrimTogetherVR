@@ -64,6 +64,7 @@ private:
     void InjectText(OverlayApp& aApp, const char* acpUtf8) noexcept;
 
     Frame m_frame;
+    std::vector<uint8_t> m_opaquePixels;
     std::atomic<int> m_keyboardRequest{0}; // 0 nothing, 1 show, 2 hide
 
     vr::IVRSystem* m_pSystem = nullptr;
@@ -79,6 +80,7 @@ private:
     bool m_failed = false;
     bool m_visible = false;
     bool m_browserHidden = false;
+    bool m_logNextUpload = false;
     uint16_t m_mouseX = 0;
     uint16_t m_mouseY = 0;
 };

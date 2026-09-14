@@ -98,12 +98,17 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 - **Dragon detection** also checks the race keyword `ActorTypeDragon`, so modded dragons get the wide
   range from their first spawn.
 - **Death sync:** the server sends a death to every player, not only players in range (a missed death left a
-  living body forever). A remote NPC is allowed to play its death animation, and a remote corpse runs its own
-  update and ragdoll instead of following network positions.
+  living body forever). A remote NPC is allowed to play its death animation. While dying, a remote body falls
+  with its own ragdoll; once dead it is moved to the owner's corpse position when more than 64 units away.
+- **Remote AI suppression** (`Actor::Process` hook) skips every remote actor except corpses. Letting remote
+  players run their update was tried against the interior head glitch and made both players flicker constantly.
 - **Addresses from TiltedEvolutionVR:** about 60 VR addresses (remote NPC AI suppression, item sync, dialogue,
   subtitles, waypoints, beast form, time skip and more) come from that fork's table, cross-checked against
   SE/AE function sizes and this repo's git history. Its Papyrus VM vtable layout (two extra VR virtuals) is
   also applied.
+- **`FadeOutGame` takes seven arguments on VR** (an extra flag and a ref-counted "fade done" callback, as the
+  game's own callers show). Passing five made the game store stack garbage as the callback and crash when
+  the fade-in after a respawn finished.
 - **Respawn** finishes once started. On VR the player left bleedout early, which left the screen black.
 - **Stutter report:** `Perf spike: ...` in the log when a frame is over 25 ms, naming the slowest mod
   section.
@@ -112,9 +117,18 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 
 - **Many sync hooks were enabled at once** (see section 5) and are untested in play. If a crash
   points at one of them, its address is the first suspect.
-- **VR menu shows an empty tab** (first test). The page loads in CEF; logging was added (`VRDashboard:` first
-  paint, first frame result, tab opened) to find where it stops.
-- **Crash while quitting the game**, in the game's memory manager during shutdown. Harmless for play.
+- **VR menu shows an empty tab.** The page paints at 1600x900, runs its scripts (CEF console log), and SteamVR
+  accepts the frame. Two causes are fixed, untested: the pixel upload was never flushed on our own D3D11
+  device (it never presents, so SteamVR could read a blank shared texture), and the UI is mostly transparent
+  (it's made to sit over the game), so it is now blended over an opaque panel. The upload log line gives the
+  share of the page that has content.
+- **Crash while quitting the game** (every quit wrote a ~100 MB dump): mimalloc freeing a pointer into a
+  plugin's image (po3's ENB light plugin) during exit. Frees are now skipped once exit has started
+  (`Memory.cpp`); untested.
+- **Remote player's bare face out of the helmet, and the body flickering**, seen only in one interior
+  (Gallows Rock, cell `15273`). Outside it looks right, and yesterday's build (`8670d4c4`) shows
+  the same thing there, so it isn't a regression. Ruled out by logs: the face, hair and helmet are all skinned
+  to the real skeleton head bone, and nothing fights the actor's position. Cause unknown.
 - **Players with different modlists** are missing each other's NPCs (`Failed to retrieve Actor X,
   possibly missing mod`), so those NPCs can't sync.
 - **Shared follower** in both saves (Lydia): both clients claim her and ownership bounces. Dismiss

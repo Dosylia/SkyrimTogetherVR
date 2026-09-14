@@ -54,6 +54,7 @@
 #include <Forms/TESObjectARMO.h>
 
 #include <ModCompat/BehaviorVar.h>
+#include <PerfScope.h>
 
 #ifdef SAVE_STUFF
 
@@ -689,7 +690,8 @@ int32_t Actor::GetGoldAmount() const noexcept
 
 void Actor::SetActorInventory(const Inventory& acInventory) noexcept
 {
-    spdlog::info("Setting inventory for actor {:X}", formID);
+    PerfCounterScope perfScope(PerfCounter::kInventoryApply);
+    spdlog::debug("Setting inventory for actor {:X}", formID);
 
     // The UnEquipAll() that used to be here is redundant,
     // as RemoveAllItems() unequips every item if needed.

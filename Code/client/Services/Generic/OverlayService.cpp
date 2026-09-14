@@ -353,7 +353,7 @@ void OverlayService::OnUpdate(const UpdateEvent&) noexcept
 void OverlayService::OnConnectedEvent(const ConnectedEvent& acEvent) noexcept
 {
 #ifdef SKYRIMVR
-    Utils::ShowHudMessage("Skyrim Together: connected to server");
+    Utils::ShowHudMessage("Skyrim Together: connected (build " BUILD_COMMIT ")");
 #endif
     if (!m_pOverlay)
         return;
@@ -367,9 +367,7 @@ void OverlayService::OnConnectedEvent(const ConnectedEvent& acEvent) noexcept
 
 void OverlayService::OnDisconnectedEvent(const DisconnectedEvent&) noexcept
 {
-#ifdef SKYRIMVR
-    Utils::ShowHudMessage("Skyrim Together: disconnected");
-#endif
+    // On VR the disconnection message comes from VRConnectService, which knows whether it will reconnect.
     if (!m_pOverlay)
         return;
 
@@ -442,10 +440,48 @@ void OverlayService::OnPlayerDialogue(const NotifyPlayerDialogue& acMessage) noe
     m_pOverlay->ExecuteAsync("message", pArguments);
 }
 
+#ifdef SKYRIMVR
+namespace
+{
+// The error detail is JSON meant for the UI's error popup; the HUD needs a sentence.
+TiltedPhoques::String DescribeConnectionError(const TiltedPhoques::String& acDetail)
+{
+    const std::string detail = acDetail.c_str();
+    const auto readField = [&detail](const char* acpName) -> std::string
+    {
+        const std::string key = std::string("\"") + acpName + "\": \"";
+        const auto start = detail.find(key);
+        if (start == std::string::npos)
+            return {};
+        const auto valueStart = start + key.size();
+        return detail.substr(valueStart, detail.find('"', valueStart) - valueStart);
+    };
+
+    std::string text;
+    if (detail.find("wrong_version") != std::string::npos)
+        text = fmt::format("wrong version, the server is {} and you have {}", readField("expectedVersion"), readField("version"));
+    else if (detail.find("mods_mismatch") != std::string::npos)
+        text = "your plugins don't match the server's (the list is in tp_client.log)";
+    else if (detail.find("client_mods_disallowed") != std::string::npos)
+        text = "this server doesn't allow SKSE or Mod Organizer";
+    else if (detail.find("wrong_password") != std::string::npos)
+        text = "wrong password (second line of connect.txt)";
+    else if (detail.find("server_full") != std::string::npos)
+        text = "the server is full";
+    else if (detail.find("bad_uGridsToLoad") != std::string::npos)
+        text = "uGridsToLoad must be 5 in SkyrimPrefs.ini";
+    else
+        text = "refused by the server";
+
+    return TiltedPhoques::String("Skyrim Together: connection failed, ") + text.c_str();
+}
+} // namespace
+#endif
+
 void OverlayService::OnConnectionError(const ConnectionErrorEvent& acConnectedEvent) const noexcept
 {
 #ifdef SKYRIMVR
-    Utils::ShowHudMessage(TiltedPhoques::String("Skyrim Together: connection failed - ") + acConnectedEvent.ErrorDetail);
+    Utils::ShowHudMessage(DescribeConnectionError(acConnectedEvent.ErrorDetail));
 #endif
     if (!m_pOverlay)
         return;
@@ -457,6 +493,10 @@ void OverlayService::OnConnectionError(const ConnectionErrorEvent& acConnectedEv
 
 void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcept
 {
+    String cellName = GetCellName(acMessage.WorldSpaceId, acMessage.CellId);
+#ifdef SKYRIMVR
+    Utils::ShowHudMessage(String("Skyrim Together: ") + acMessage.Username + " joined" + (cellName.empty() ? "" : String(" (") + cellName + ")"));
+#endif
     if (!m_pOverlay)
         return;
 
@@ -465,7 +505,6 @@ void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcep
     pArguments->SetString(1, acMessage.Username.c_str());
     pArguments->SetInt(2, acMessage.Level);
 
-    String cellName = GetCellName(acMessage.WorldSpaceId, acMessage.CellId);
     pArguments->SetString(3, cellName.c_str());
 
     m_pOverlay->ExecuteAsync("playerConnected", pArguments);
@@ -473,6 +512,9 @@ void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcep
 
 void OverlayService::OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept
 {
+#ifdef SKYRIMVR
+    Utils::ShowHudMessage(String("Skyrim Together: ") + acMessage.Username + " left");
+#endif
     if (!m_pOverlay)
         return;
 

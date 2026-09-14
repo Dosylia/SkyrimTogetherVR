@@ -36,10 +36,15 @@ TiltedOnlineApp::TiltedOnlineApp()
     auto rotatingLogger = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(logPath / "tp_client.log", 1048576 * 5, 3);
     // rotatingLogger->set_level(spdlog::level::debug);
     auto console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    // Writing to the console window blocks the game thread and nobody reads it in a headset: only warnings and
+    // errors go there. The file keeps everything.
+    console->set_level(spdlog::level::warn);
     auto logger = std::make_shared<spdlog::logger>("", spdlog::sinks_init_list{console, rotatingLogger});
     logger->set_pattern("%^[%Y-%m-%d %H:%M:%S.%e] [%l] [tid %t] %$ %v");
     spdlog::flush_every(std::chrono::seconds(1));
     set_default_logger(logger);
+
+    spdlog::info("Skyrim Together client, build " BUILD_BRANCH "@" BUILD_COMMIT);
 }
 
 TiltedOnlineApp::~TiltedOnlineApp() = default;

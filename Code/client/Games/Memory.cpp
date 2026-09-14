@@ -100,6 +100,11 @@ static void RehookFormAllocate(TFormAllocate* apEngineFixesAllocate) noexcept
     TP_HOOK_IMMEDIATE(&RealFormAllocate, HookFormAllocate);
 }
 
+// Set by an atexit handler once the game quits. Plugins free their static data after that (DLL detach), and
+// mimalloc crashed on those frees every time the game was closed, writing a 100 MB crash dump. Memory released
+// while the process is exiting doesn't need to go back to the heap.
+static std::atomic<bool> s_processExiting{false};
+
 size_t Hook_msize(void* apData)
 {
     return mi_malloc_size(apData);
@@ -107,6 +112,9 @@ size_t Hook_msize(void* apData)
 
 void Hookfree(void* apData)
 {
+    if (s_processExiting.load(std::memory_order_relaxed))
+        return;
+
     mi_free(apData);
 }
 
@@ -122,6 +130,9 @@ void* Hookmalloc(size_t aSize)
 
 void Hook_aligned_free(void* apData)
 {
+    if (s_processExiting.load(std::memory_order_relaxed))
+        return;
+
     mi_free(apData);
 }
 
@@ -163,6 +174,9 @@ static TiltedPhoques::Initializer s_memoryHooks(
         TP_HOOK_IAT(_aligned_free, cModuleName);
 
         TP_HOOK(&RealFormAllocate, HookFormAllocate);
+
+        // Registered after mimalloc's own exit handler, so it runs first (atexit handlers run in reverse order).
+        atexit([]() { s_processExiting = true; });
     });
 
 using T_initterm_e = decltype(&_initterm_e);

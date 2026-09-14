@@ -7,6 +7,7 @@
 #include <Services/CharacterService.h>
 #include <Services/QuestService.h>
 #include <Services/TransportService.h>
+#include <Services/InventoryService.h>
 
 #include <Games/References.h>
 #include <Games/Misc/SubtitleManager.h>
@@ -313,7 +314,7 @@ void CharacterService::OnDisconnected(const DisconnectedEvent& acDisconnectedEve
 
 void CharacterService::OnAssignCharacter(const AssignCharacterResponse& acMessage) noexcept
 {
-    spdlog::info("Received for cookie {:X}, server id {:X}", acMessage.Cookie, acMessage.ServerId);
+    spdlog::debug("Received for cookie {:X}, server id {:X}", acMessage.Cookie, acMessage.ServerId);
 
     auto view = m_world.view<WaitingForAssignmentComponent>();
     const auto itor = std::find_if(std::begin(view), std::end(view), [view, cookie = acMessage.Cookie](auto entity) { return view.get<WaitingForAssignmentComponent>(entity).Cookie == cookie; });
@@ -353,7 +354,7 @@ void CharacterService::OnAssignCharacter(const AssignCharacterResponse& acMessag
 
     if (acMessage.Owner)
     {
-        spdlog::info("Received local actor, form id: {:X}", pActor->formID);
+        spdlog::debug("Received local actor, form id: {:X}", pActor->formID);
 
         m_world.emplace_or_replace<LocalComponent>(cEntity, acMessage.ServerId);
         auto& localAnimationComponent = m_world.emplace_or_replace<LocalAnimationComponent>(cEntity);
@@ -388,6 +389,8 @@ void CharacterService::OnAssignCharacter(const AssignCharacterResponse& acMessag
 
         pActor->SetActorValues(acMessage.AllActorValues);
         pActor->SetActorInventory(acMessage.CurrentInventory);
+        if (pActor->GetExtension()->IsRemotePlayer())
+            InventoryService::ApplyHandEquipment(pActor, acMessage.CurrentInventory);
 
         if (pActor->IsDead() != acMessage.IsDead)
             acMessage.IsDead ? pActor->Kill() : pActor->Respawn();
@@ -1333,7 +1336,7 @@ void CharacterService::RequestServerAssignment(const entt::entity aEntity) const
     message.LatestAction = pExtension->LatestAnimation;
     pActor->SaveAnimationVariables(message.LatestAction.Variables);
 
-    spdlog::info("Request id: {:X}, cookie: {:X}, entity: {:X}", formIdComponent.Id, sCookieSeed, to_integral(aEntity));
+    spdlog::debug("Request id: {:X}, cookie: {:X}, entity: {:X}", formIdComponent.Id, sCookieSeed, to_integral(aEntity));
 
     if (m_transport.Send(message))
     {
@@ -1422,6 +1425,7 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
 
 Actor* CharacterService::CreateCharacterForEntity(entt::entity aEntity) const noexcept
 {
+    PerfCounterScope perfScope(PerfCounter::kActorSpawn);
     auto* pWaitingFor3D = m_world.try_get<WaitingFor3D>(aEntity);
     auto* pInterpolationComponent = m_world.try_get<InterpolationComponent>(aEntity);
 
@@ -1611,6 +1615,11 @@ void CharacterService::RunRemoteUpdates() noexcept
         // By now, the actor has materialized in the world and is ready for further setup
 
         pActor->SetActorInventory(waitingFor3D.SpawnRequest.InventoryContent);
+        // The inventory apply above doesn't put weapons and torches in the hands of a remote player's copy on VR, so
+        // they only showed up after the owner switched. Apply the hands the same way a later equipment change does.
+        // Players only: an NPC's server inventory can predate its AI drawing a weapon.
+        if (pActor->GetExtension()->IsRemotePlayer())
+            InventoryService::ApplyHandEquipment(pActor, waitingFor3D.SpawnRequest.InventoryContent);
         pActor->SetFactions(waitingFor3D.SpawnRequest.FactionsContent);
 
         if (!waitingFor3D.SpawnRequest.ActionsToReplay.Actions.empty())

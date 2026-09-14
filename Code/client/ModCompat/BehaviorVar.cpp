@@ -364,10 +364,11 @@ const AnimationGraphDescriptor* BehaviorVar::Patch(BSAnimationGraphManager* apMa
     // Get all animation variables for this actor, then create a acReverseMap to go from strings to animation enum.
     auto pDumpVar = apManager->DumpAnimationVariables(false);
     TiltedPhoques::Map<TiltedPhoques::String, uint32_t> reverseMap;
-    spdlog::info("Known behavior variables for formID {:x}:", hexFormID);
+    // Hundreds of lines per actor, written from the game thread: debug level only.
+    spdlog::debug("Known behavior variables for formID {:x}:", hexFormID);
     for (auto& item : pDumpVar)
     {
-        spdlog::info("    {}:{}", item.first, item.second);
+        spdlog::debug("    {}:{}", item.first, item.second);
         reverseMap.insert({item.second, item.first});
     }
 
@@ -715,16 +716,17 @@ void BehaviorVar::Init()
         case 1: break;
 
         default:
+            // Expected for the vanilla creature behaviors: one line, with the details at debug level (they used to add
+            // over a hundred warning lines to every launch).
             if (firsttime++ == 0)
-                spdlog::warn(__FUNCTION__ ": some creatures have ambiguous signatures. This is expected for now,\n"
-                                          "    but a modder must create a unique signature in their mod.");
+                spdlog::info(__FUNCTION__ ": some creatures have ambiguous behavior signatures (expected, details at debug level)");
 
-            spdlog::warn(__FUNCTION__ ": {} signature {} matches:", signature.creatureName, signature.signatureVar);
+            spdlog::debug(__FUNCTION__ ": {} signature {} matches:", signature.creatureName, signature.signatureVar);
             for (auto hash : matches)
             {
                 auto iter = std::find(behaviorPool.begin(), behaviorPool.end(), hash);
                 if (iter < behaviorPool.end())
-                    spdlog::warn("    {}", std::find(behaviorPool.begin(), behaviorPool.end(), hash)->creatureName);
+                    spdlog::debug("    {}", iter->creatureName);
                 else
                     spdlog::warn("    {}: unable to find creature name for this hash, likely typo in SkyrimTogetherReborn tree", hash);
             }

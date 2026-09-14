@@ -28,11 +28,12 @@ straight into the Explorer address bar.
 
 ## 2. Host: start the server
 
-1. Double-click `C:\dev\TiltedEvolution\build\windows\x64\release\SkyrimTogetherServer.exe`.
+1. Double-click `host-server.bat` in `C:\dev\TiltedEvolution\build\windows\x64\release\`. It refuses to
+   start a second server, starts this one, and prints the address to give friends.
 2. A console window opens with `Server ... started on port 10578`. **Leave it open** for the whole
    session; closing it ends the server.
 3. Run **only one** server. Windows 11 may open it as a tab in an existing Terminal window. If you
-   see two server tabs, close one.
+   see two server tabs, close both and start again with `host-server.bat`.
 4. When the server has been updated (a new `STServer.dll` in that folder), close it and start it
    again.
 
@@ -48,7 +49,8 @@ Edit these only while the server is closed.
 |---|---|---|
 | `uPort` | `10578` | UDP port players connect to |
 | `sPassword` | *(empty)* | Set one to keep strangers out. Players then put it on line 2 of `connect.txt` |
-| `bAutoPartyJoin` | `true` | Players join a party automatically (needed for weather and quest sharing) |
+| `bAutoPartyCreate` | `true` *(default, not in the file)* | The first player on the server gets a party, so nobody needs a party menu |
+| `bAutoPartyJoin` | `true` | Everyone else joins that party automatically (needed for weather and quest sharing) |
 | `bEnablePvp` | `false` | Players can't damage each other |
 | `bEnableDeathSystem` | `true` | Death respawns you at a temple instead of loading a save |
 | `bAllowMO2` / `bAllowSKSE` | `true` | Must stay on for this modlist |
@@ -77,7 +79,9 @@ Already done on the host's PC; repeat these steps if the router or PC changes.
 
 ## 4. Everyone: set up `connect.txt`
 
-Create the folder `%LOCALAPPDATA%\SkyrimTogetherVR\` if it doesn't exist, then a plain text file
+The easy way: double-click `setup-connect.bat` in the `Skyrim Together VR` tools folder and type the address.
+
+By hand: create the folder `%LOCALAPPDATA%\SkyrimTogetherVR\` if it doesn't exist, then a plain text file
 `connect.txt` inside it:
 
 | Who | Line 1 | Line 2 |
@@ -106,15 +110,14 @@ Just the address, nothing else: no `http://` and no quotes.
 1. **Host:** start the server (section 2).
 2. **Everyone:** in MO2, pick **SkyrimTogetherVR** in the executable dropdown and click **Run**.
    Launching can take a while with this modlist.
-3. Load your save and wait until you're fully in the world.
-4. Connect, either way:
-   - **In the headset:** press the controller's **system button** to open the SteamVR dashboard, and pick
-     the **Skyrim Together** tab at the bottom. Use the laser pointer for the menu; text fields open the
-     SteamVR keyboard.
-   - **On the keyboard:** press **F6**. It uses `connect.txt`.
-
-   A notification shows `Skyrim Together: connected to server`.
-5. Disconnect from the same menu, or with **F6**.
+3. Load your save. **About 5 seconds later the game connects on its own** to the server in `connect.txt`.
+   Notifications show `Skyrim Together: connecting to ...`, then `Skyrim Together: connected (build ...)`.
+   Everyone ends up in the same party without doing anything.
+4. If the connection drops, the game retries on its own (after 5 s, then 10, 20, 30 and 60 s) and says so
+   in a notification. A refused connection (wrong version, wrong password) isn't retried: the notification
+   says why.
+5. **F6** disconnects (and stops the retries) or connects again. The SteamVR dashboard's **Skyrim Together**
+   tab (system button) shows the menu; use the laser pointer, and text fields open the SteamVR keyboard.
 
 ---
 
@@ -125,8 +128,8 @@ When a new client build is ready:
 1. **Close the game first.**
 2. Replace `SkyrimTogetherVR.exe` (and `SkyrimTogetherVR.pdb`) in the `Skyrim Together VR` tools
    folder. When the build notes say the menu changed, also replace the `UI` folder and `TPProcess.exe`.
-3. **Everyone must run the same build.** The friend replaces their exe too. Compare the file's
-   *Date modified*.
+3. **Everyone must run the same build.** The friend replaces their exe too. The connect notification shows
+   the build (`connected (build v1.8.0-...)`), and a mismatch is refused with both versions named.
 4. If the build notes say the server changed, restart the server as well.
 
 ---
@@ -142,22 +145,17 @@ In `tp_client.log`, find the last line `Disconnected from server N`:
 | `0` | Timeout: nothing answered | Server not running, wrong public IP, router rule or firewall (section 3). Check whether the server console printed anything |
 | `3` | Address couldn't be read | Typo or extra characters in `connect.txt` |
 
-### The game crashes
+### The game crashes, or anything else goes wrong
 
-Send these to the developer (zip the `.dmp`; it shrinks from about 100 MB to about 13 MB):
-
-1. `tp_client.log` from the tools folder's `logs\`.
-2. The newest `crash_UTC_*.dmp` (MO2 `overwrite\Root\` or the Skyrim VR game folder). The name uses
-   UTC time: a crash at 17:52 in France is `..._15-52-..`.
-3. The matching Crash Logger file `crash-*.log` from `Documents\My Games\Skyrim VR\SKSE\`.
+Double-click `collect-logs.bat` in the `Skyrim Together VR` tools folder. It puts one zip on the Desktop with
+the client log, the CEF log, and the newest crash log and crash dump from the last day. Send that file.
 
 ### Stutter
 
-The client logs `Perf spike: frame X ms, mod update Y ms, slowest mod section Z` in `tp_client.log`.
-Send the log after a stuttery session:
-
-- A small *mod update* means the hitch comes from the game or another mod.
-- A large one names the part of Skyrim Together to optimise.
+Every 30 s the client logs a `Perf last 30 s:` line in `tp_client.log`: average frame time and fps, the
+slowest 5% and 1% of frames, frames over 50 ms, the cost of Skyrim Together's own update, and the time spent
+applying remote VR poses, inventories and spawns. `Mod update took X ms` lines appear when Skyrim Together
+itself hitched. Send the logs after a stuttery session (`collect-logs.bat`).
 
 ### Known behaviour (not bugs to report)
 

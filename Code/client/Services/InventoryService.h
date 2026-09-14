@@ -53,6 +53,11 @@ struct InventoryService
      */
     void OnNotifyEquipmentChanges(const NotifyEquipmentChanges& acMessage) noexcept;
 
+    /**
+     * Makes a remote actor's hand items (weapons, torches, spells) match an equipment snapshot.
+     */
+    static void ApplyHandEquipment(Actor* apActor, const Inventory& acEquipment) noexcept;
+
 private:
     /**
      * Checks whether local actors their weapon draw states have changed,
@@ -69,10 +74,6 @@ private:
      * out of date on VR; the snapshot corrects the other clients within a second.
      */
     void RunEquipmentSnapshotUpdates() noexcept;
-    /**
-     * Makes a remote actor's hand items (weapons, torches, spells) match an equipment snapshot.
-     */
-    void ApplyHandEquipment(Actor* apActor, const Inventory& acEquipment) noexcept;
 
     World& m_world;
     entt::dispatcher& m_dispatcher;

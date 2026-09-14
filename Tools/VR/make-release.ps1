@@ -1,0 +1,52 @@
+# Packages a Skyrim Together VR release zip: client tools folder, server, game files and the guide.
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\make-release.ps1
+param(
+    [string]$ClientFolder = 'E:\FUS\tools\Skyrim Together VR',
+    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
+    [string]$OutputFolder = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path 'build\release')
+)
+
+$ErrorActionPreference = 'Stop'
+
+$buildFolder = Join-Path $RepoRoot 'build\windows\x64\release'
+$buildInfo = Get-Content (Join-Path $RepoRoot 'build\BuildInfo.h') -Raw
+$version = if ($buildInfo -match 'BUILD_COMMIT "([^"]+)"') { $Matches[1] } else { 'unknown' }
+
+$name = "SkyrimTogetherVR-$version"
+$staging = Join-Path $OutputFolder $name
+if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+New-Item -ItemType Directory -Force $staging | Out-Null
+
+# Client: the tools folder as it runs, minus anything local to one PC. The exe comes from the build, so a
+# release never ships a stale client.
+$client = Join-Path $staging 'Skyrim Together VR'
+New-Item -ItemType Directory -Force $client | Out-Null
+$skip = @('logs', 'cache')
+Get-ChildItem $ClientFolder | Where-Object {
+    $skip -notcontains $_.Name -and
+    $_.Name -notmatch '\.old|\.running|^crash_.*\.dmp$|\.threaddiag\.'
+} | ForEach-Object { Copy-Item $_.FullName (Join-Path $client $_.Name) -Recurse }
+Copy-Item (Join-Path $buildFolder 'SkyrimTogetherVR.exe') $client -Force
+Copy-Item (Join-Path $buildFolder 'TPProcess.exe') $client -Force
+Copy-Item (Join-Path $PSScriptRoot 'collect-logs.*') $client
+Copy-Item (Join-Path $PSScriptRoot 'setup-connect.*') $client
+
+# Server, with default settings: never the host's password.
+$server = Join-Path $staging 'Server'
+New-Item -ItemType Directory -Force (Join-Path $server 'config') | Out-Null
+foreach ($file in 'SkyrimTogetherServer.exe', 'SkyrimTogetherServer.exe.manifest', 'STServer.dll') {
+    Copy-Item (Join-Path $buildFolder $file) $server
+}
+(Get-Content (Join-Path $buildFolder 'config\STServer.ini')) -replace '^(sPassword|sAdminPassword)=.*$', '$1=' |
+    Set-Content (Join-Path $server 'config\STServer.ini')
+Copy-Item (Join-Path $PSScriptRoot 'host-server.*') $server
+
+# Game files, installed as an MO2 mod.
+Copy-Item (Join-Path $RepoRoot 'GameFiles\Skyrim') (Join-Path $staging 'Skyrim Together mod') -Recurse
+
+Copy-Item (Join-Path $RepoRoot 'VR_MULTIPLAYER_GUIDE.md') $staging
+
+$zip = Join-Path $OutputFolder "$name.zip"
+if (Test-Path $zip) { Remove-Item $zip -Force }
+Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip
+Write-Host "Release: $zip"

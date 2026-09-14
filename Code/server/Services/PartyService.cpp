@@ -23,6 +23,7 @@
 namespace
 {
 Console::Setting bAutoPartyJoin{"Gameplay:bAutoPartyJoin", "Join parties automatically, as long as there is only one party in the server", true};
+Console::Setting bAutoPartyCreate{"Gameplay:bAutoPartyCreate", "Create a party for the first player to join, so players are grouped without a party menu (VR has none)", true};
 }
 
 PartyService::PartyService(World& aWorld, entt::dispatcher& aDispatcher) noexcept
@@ -106,10 +107,14 @@ void PartyService::OnUpdate(const UpdateEvent& acEvent) noexcept
 
 void PartyService::OnPartyCreate(const PacketEvent<PartyCreateRequest>& acPacket) noexcept
 {
-    Player* const player = acPacket.pPlayer;
-    auto& inviterPartyComponent = player->GetParty();
-
     spdlog::debug("[PartyService]: Received request to create party");
+
+    CreateParty(acPacket.pPlayer);
+}
+
+void PartyService::CreateParty(Player* const player) noexcept
+{
+    auto& inviterPartyComponent = player->GetParty();
 
     if (!inviterPartyComponent.JoinedPartyId) // Ensure not in party
     {
@@ -238,6 +243,12 @@ void PartyService::OnPlayerJoin(const PlayerJoinEvent& acEvent) noexcept
             }
         }
         
+    }
+
+    if (m_parties.empty() && bAutoPartyCreate && !IsPlayerInParty(acEvent.pPlayer))
+    {
+        spdlog::info("[PartyService]: No party on the server, creating one for {}", acEvent.pPlayer->GetId());
+        CreateParty(acEvent.pPlayer);
     }
 }
 

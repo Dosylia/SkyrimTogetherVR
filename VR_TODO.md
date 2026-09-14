@@ -11,12 +11,24 @@ before any change · **[big]** several sessions of work.
 
 ## 0. First thing next session: check what is already built
 
-These changes were built and never played. They need a new server as well as the new client, the `UI`
-folder and `TPProcess.exe` on both PCs.
+Built on 2026-09-14 and not played yet. Both PCs need the new `SkyrimTogetherVR.exe`; the host restarts the
+server (new `STServer.dll`, with `host-server.bat`). No protocol change.
 
-- [ ] **[untested] Weapon, spell and torch sync (snapshot).** Switch weapons, spells and torches in
-  both hands. The other player should see each change within about 1-2 s.
-  Logs: `Equipment snapshot sent` on the sender, `Equipment sync:` on the receiver.
+- [ ] **[untested] Auto-connect and auto-party.** Load a save with `connect.txt` in place: about 5 s later
+  `Skyrim Together: connecting to ...` then `connected (build ...)`, and both players in one party with no
+  key pressed. Log: `VRConnectService:`, and on the server `No party on the server, creating one`.
+- [ ] **[untested] Reconnect.** Close the server mid-session: `connection lost, trying again in 5 s`, then it
+  reconnects once the server is back. F6 disconnects without retrying.
+- [ ] **[untested] Weapons at spawn.** Don't switch anything; the other player should see your weapon and
+  spells as soon as you appear. Log on the viewer: `Equipment sync: remote actor ... equips` right after
+  `Applied 3D for actor`.
+- [ ] **[untested] VR menu.** Open the Skyrim Together dashboard tab. It should show the UI on a dark panel.
+  Log: `VRDashboard: page frame sent to SteamVR (result 0), N% of the page has content`. If it's still empty,
+  that number says whether the page drew anything.
+- [ ] **[untested] No crash when quitting the game.** Quit normally: no `crash occurred` at the end of
+  `tp_client.log`, and no new `crash_UTC_*.dmp` in `overwrite\Root`.
+- [ ] **Spells leave the hand at an offset.** A temporary `CastDiag` log records the magic node position
+  against the posed hand for the first remote casts. Read it before changing anything.
 - [ ] **[untested] Dragon and NPC churn.** A dragon or mammoth near the edge of the loaded area
   should keep its health and die for both players.
   Log: `Actor removed, form id` should no longer repeat every few seconds for the same NPC.
@@ -27,8 +39,11 @@ folder and `TPProcess.exe` on both PCs.
 - [ ] **[untested] Sync hooks enabled from the TiltedEvolutionVR address table.** Remote NPCs should no
   longer act on both clients (no double attacks, no NPC walking off on one screen). Also check item
   pickups, dialogue voice and subtitles, map markers, summons, and waiting or sleeping.
-- [ ] **[untested] VR menu.** Press the system button, open the **Skyrim Together** dashboard tab, and
-  connect from it. Check the laser pointer clicks, the SteamVR keyboard in text fields, and the chat.
+- [ ] **Remote player's face out of the helmet + body flicker, in one interior only** (Gallows Rock, cell
+  `15273`). Fine outdoors, and present on the `8670d4c4` build too, so not a regression.
+  Next: check whether other interiors do it, then compare what that cell has before touching code.
+- [ ] **Read the new `Perf last 30 s:` lines** from a normal co-op session and write the numbers into
+  section 1.1.
 
 ---
 
@@ -42,12 +57,11 @@ What we know:
   inventory), of logging, or of spawning remote actors. That's where the remaining suspects are.
 
 ### 1.1 Measure first [measure]
-- [ ] Extend the perf logger in `World.cpp` to write a summary every 30 s:
-  - average, 95th and 99th percentile frame time;
-  - number of frames over 50 ms;
-  - the slowest sections.
-- [ ] Add PerfScopes around the engine-side hooks: the VRBodySync animation hook,
-  `BehaviorVar::Patch`, the equip hooks, `SetActorInventory` and `CreateCharacterForEntity`.
+- [x] **[untested]** `World::ReportPerformance` writes a summary every 30 s: average, 95th and 99th
+  percentile frame time, frames over 50 ms, mod update average and max.
+- [x] **[untested]** Thread-safe counters (`PerfCounterScope`) around the VRBodySync pose apply,
+  `SetActorInventory` and `CreateCharacterForEntity`, reported in the same line. Still to add if the
+  numbers point there: `BehaviorVar::Patch` and the equip hooks.
 - [ ] Benchmark 60 s at the same save and spot, standing still and then walking, in four setups:
   1. FUS without Skyrim Together;
   2. with Skyrim Together, not connected;
@@ -59,12 +73,10 @@ What we know:
   start and exit (DynDOLOD alone runs 600+ threads).
 
 ### 1.2 Likely wins (do after 1.1 confirms them)
-- [ ] **Logging is synchronous, and writes to a console window too.**
-  - The last session logged about 26k lines, including bursts of hundreds of lines at once
-    (behavior variable dumps, `Spawn Actor`, `Setting inventory`). Writing to a Windows console is
-    slow and blocks the game thread.
-  - Fix: switch to spdlog's async logger, stop writing to the console (or warnings only), and move
-    spammy info lines to debug.
+- [x] **Logging:** the console window only gets warnings and errors, and the per-actor behavior variable
+  dumps, the ambiguous-signature list (120+ lines per launch), the per-second `Perf spike` lines and the
+  spawn bookkeeping lines are at debug level or replaced by the 30 s summary. The file logger stays
+  synchronous on purpose: crash reports depend on it being flushed.
 - [ ] **VRBodySync searches for bones every frame.**
   - `FindBones` walks the whole skeleton, including armour nodes, on every animation update of every
     remote player.
@@ -160,24 +172,25 @@ The goal is that a new player installs one package, edits one line, and plays, a
 the headset off.
 
 ### 4.1 No keyboard needed in VR
-- [ ] **Auto-connect on game load** when `connect.txt` exists, so F6 is no longer needed. The F6/F7
-  keys are debug keys and don't exist in a release (master) build.
-- [ ] **Auto-party:** everyone on the server joins one party (server setting, on by default for small
-  servers). Quest sync and ownership depend on the party, and F7 is currently the only way in.
-- [ ] **HUD notifications** for connecting, connected, connection failed (with the reason), player
-  joined or left, party joined, and player down. Some exist already; make them consistent.
-- [ ] **Reconnect automatically** after a drop, with a HUD message.
+- [x] **[untested] Auto-connect on game load** when `connect.txt` exists (`VRConnectService`). F6 still
+  toggles; the F6/F7 keys are debug keys and don't exist in a release (master) build.
+- [x] **[untested] Auto-party:** the server creates a party for the first player (`bAutoPartyCreate`,
+  default on) and `bAutoPartyJoin` adds everyone else.
+- [x] **[untested] HUD notifications:** connecting, connected (with the build), connection lost and
+  retrying, refused (in plain words: wrong version with both builds, wrong password, plugins,
+  uGridsToLoad), player joined (with the location) or left, party joined or left.
+- [x] **[untested] Reconnect automatically** after a drop: 5, 10, 20, 30, then every 60 s.
 - [x] **[untested] In-headset menu:** the normal Skyrim Together UI as a SteamVR dashboard tab
   (`Systems/VRDashboard.cpp`).
   - [ ] Adapt the page layout for the dashboard (large text, no empty full-screen areas).
   - [ ] A small always-visible overlay for chat and notifications while playing.
 
 ### 4.2 Versions and compatibility
-- [ ] **Version check with a clear message.** `AuthenticationRequest` has a `Version` field; make
-  sure it changes with every protocol change. Mixed builds currently break silently: the equipment
-  change today changed the protocol.
-  - Reject the connection with "Server is build X, you have build Y".
-- [ ] **Show the build version** in the log header and in a HUD message on connect.
+- [ ] **Version check follows the git tag only.** The server already refuses a different `BUILD_COMMIT` and
+  the HUD now names both builds, but the string comes from `git describe` at configure time
+  (`build/BuildInfo.h`), so it goes stale until xmake reconfigures. Add a protocol number that changes with
+  every message change.
+- [x] **Build version** in the first log line and in the connected notification.
 - [ ] **Mod list comparison on connect.** The server already receives every client's plugin list.
   Send back the host's plugins that a player is missing, and show "N plugins differ, see log".
   This explains "Failed to retrieve Actor X, possibly missing mod".
@@ -189,8 +202,8 @@ the headset off.
   - `SkyrimTogether.esp` with the 1.70 header.
 
 ### 4.3 Packaging and install
-- [ ] **One release zip** with the client, its DLLs, `SkyrimTogether.esp`, the server, a default
-  `STServer.ini`, `VR_MULTIPLAYER_GUIDE.md`, and a `connect.txt` template.
+- [x] **Release zip:** `Tools\VR\make-release.ps1` packages the client folder (exe from the build), the
+  server with a password-free `STServer.ini`, the game files as an MO2 mod, the scripts and the guide.
 - [ ] **Install script** (PowerShell):
   - finds the MO2 instance and copies the tool into it;
   - adds the MO2 executable entry;
@@ -198,10 +211,10 @@ the headset off.
   - checks the requirements listed in 4.2.
 - [ ] **Update script:** replace the files with the rename-aside trick, so MO2 never needs closing.
   Optionally check for a newer GitHub release.
-- [ ] **Host script:** start the server with the right working directory, and print the public
-  IP:port to give to friends.
-- [ ] **Log collector:** a `collect-logs.bat` that zips `tp_client.log`, the server log, the newest
-  crash log and the build version. Players send one file.
+- [x] **Host script:** `host-server.bat` starts one server from its folder and prints the address to give.
+- [x] **Connect setup:** `setup-connect.bat` writes `connect.txt` (no byte order mark, port added if missing).
+- [x] **Log collector:** `collect-logs.bat` zips the client and CEF logs, the newest Crash Logger file and
+  crash dump from the last day, and the build, onto the Desktop.
 - [ ] **Guide for non-FUS modlists:** what's required, what's known to conflict, and the plugin
   limit.
 - [ ] **Licensing before sharing.** Tilted Online is GPL-3: publish the source for every shared
@@ -218,7 +231,7 @@ the headset off.
 - [ ] Death and bleedout: HUD message "X is down", and optionally revive by activating the downed
   player.
 - [ ] Sensible defaults for VR in `STServer.ini` (difficulty sync, PvP off, time scale).
-- [ ] Trim the log to what's useful for a bug report: no per-variable behavior dumps at info level.
+- [x] Trim the log to what's useful for a bug report (see 1.2).
 
 ---
 
