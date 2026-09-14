@@ -98,6 +98,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 36525u, 0x05ef640u }, // SE 36525 Actor::AddObjectToContainer, unchecked (from TiltedEvolutionVR)
     { 36527u, 0x05efa10u }, // SE 36527 Actor::GetGoldAmount, unchecked (from TiltedEvolutionVR)
     { 36544u, 0x05b4290u }, // SE 35545 WinMain, checked (from TiltedEvolutionVR)
+    { 36548u, 0x05b65e0u }, // SE 35549 Main::Init (intro movie branch at +0x96), checked (from TiltedEvolutionVR)
     { 36741u, 0x0604f30u }, // SE 36741 Actor::GetDetectionState, unchecked (from TiltedEvolutionVR)
     { 37147u, 0x05d5120u }, // SE 36174 animation helper, unchecked (from TiltedEvolutionVR)
     { 37175u, 0x05d63a0u }, // SE 36196 Character dtor, unchecked (from TiltedEvolutionVR)
@@ -139,6 +140,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 47196u, 0x07e1ac0u }, // SE 45923 combat target validity check, unchecked (from TiltedEvolutionVR)
     { 47303u, 0x07e7e90u }, // SE 46039 Actor::HasEquippedRangedWeapon, unchecked
     { 47307u, 0x07e8020u }, // SE 46043 Actor world location check, unchecked
+    { 51538u, 0x08a3ee0u }, // SE 50644 FavoritesHandler::CanProcess (menu mode jne at +0x15), checked
     { 51925u, 0x08c23e0u }, // SE 51046 LoadingScreen RequestLoadingText, checked
     { 52626u, 0x08f9c60u }, // SE 51753 SubtitleManager::ShowSubtitle, checked (from TiltedEvolutionVR)
     { 52627u, 0x08f9ea0u }, // SE 51754 SubtitleManager::HideSubtitle, unchecked (from TiltedEvolutionVR)
@@ -166,6 +168,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 70717u, 0x0caef60u }, // SE 69335 FaceGen CreateTexture, unchecked
     { 76207u, 0x0d8a900u }, // SE 74481 BSFaceGenNiNode::GetObjectByName, unchecked
     { 82074u, 0x0f1a3b0u }, // SE 79937 UI::IsMenuOpen, unchecked
+    { 82082u, 0x0f1a770u }, // SE 79945 UI::ProcessMessages (AddToActiveQueue call at +0x70C), checked (from TiltedEvolutionVR)
     { 82088u, 0x0f1bf10u }, // SE 79951 UI close all menus, unchecked (from TiltedEvolutionVR)
     { 104296u, 0x126f1c0u }, // SE 97508 BSScript::Variable::Reset, checked
     { 104483u, 0x129a6c0u }, // SE 97745 BSScript Stack::GetPageForFrame, checked

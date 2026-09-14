@@ -24,6 +24,10 @@ server (new `STServer.dll`, with `host-server.bat`). No protocol change.
   connection. It is off on VR. A wrong `uGridsToLoad` is reported on the HUD before connecting.
 - [ ] **[untested] Plugin differences** are listed in the server log when a player joins:
   `Plugins differ between 'A' and 'B'`.
+- [ ] **[untested] Menus don't pause the game while connected** (inventory, magic, skills,
+  containers, favorites, console), like on flat Skyrim Together. Open the inventory: the world keeps
+  moving and the other player doesn't see you frozen. Message boxes still pause. The intro movie is
+  skipped. Address found by the friend (favorites) and TiltedEvolutionVR, checked in the VR code.
 - [ ] **[untested] VRIK menu no longer opens for the other player.** Open VRIK's settings (its power): only
   you get the menu. Spells and effects from `vrik.esp`, `Arctals VRIK Tweaks.esp`, `higgs_vr.esp` and
   `SpellWheelVR.esp` aren't synced (idea from TiltedEvolutionVR). Probably the "popup shows for both players".

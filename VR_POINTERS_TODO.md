@@ -33,9 +33,6 @@ Most sync hooks got their VR address from the TiltedEvolutionVR fork's table (se
 | AE id | Used as | What is off on VR | AE 1.6.318 address | Candidate | Known neighbour below | Known neighbour above |
 | --- | --- | --- | --- | --- | --- | --- |
 | 34452 | `hookLoc` (Projectile.cpp) | Null check patch in projectile launch. | 0x14056B8F0 | SE 33672 → VR 0x554980 (fp 3/5) | AE 34451 = SE 33671 = VR 0x5547a0 | AE 34456 = SE 33676 = VR 0x555020 |
-| 82082 | `ProcessHook` (UI.cpp) | Menu queue patch while connected. | 0x140F04C90 | - | AE 82081 = SE 79944 = VR 0xf1a680 | AE 82167 = SE 80059 = VR 0xf1fbc0 |
-| 51538 | `FavoritesCanProcess` (UI.cpp) | Favorites menu numbering while connected. | 0x1408A6B40 | SE 50644 → VR 0x8a3ee0 (fp 3/5) | AE 51537 = SE 50643 = VR 0x8a3e60 | AE 51539 = SE 50645 = VR 0x8a3f30 |
-| 36548 | `MainInit` (UI.cpp) | Skipping the intro movie. | 0x1405D52E0 | - | AE 36459 = SE 35492 = VR 0x5b1710 | AE 36604 = SE 51246 = VR 0x8d0500 |
 | 52510 | `ProcessMessage` (SkillsMenu.cpp) | Skills menu fix (with 52518). | 0x1408EE960 | - | AE 52490 = SE 51618 = VR 0x8ead70 | AE 52628 = SE 51755 = VR 0x8fa0a0 |
 | 77226 | `initWindowLoc` / `renderInit` (BSGraphicsRenderer.cpp) | Renderer init hook (with 68781, 77246). Not needed: the VR menu is a SteamVR dashboard overlay. | 0x140DA3850 | - | AE 76844 = SE 75076 = VR 0xda4be0 | AE 77228 = SE 75447 = VR 0xdbabc0 |
 | 68617 | `pollInputDevices` (BSInputDeviceManager.cpp) | Input focus check. Not needed on VR. | 0x140C3B360 | - | AE 68553 = SE 67253 = VR 0xc4e900 | AE 68618 = SE 67316 = VR 0xc51ac0 |

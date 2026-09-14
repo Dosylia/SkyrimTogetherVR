@@ -68,7 +68,8 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 | Feature | State on VR | Why |
 | --- | --- | --- |
 | Skyrim Together UI (connect dialog, chat, party) | **SteamVR dashboard tab** "Skyrim Together" (`Systems/VRDashboard.cpp`). F6 and `connect.txt` still work, and status also shows as HUD messages. | No game window to draw into. CEF renders offscreen into a texture on our own D3D11 device; the laser pointer and SteamVR keyboard are forwarded to the page. |
-| Renderer, input, menu and projectile byte patches | **Off** | Addresses unverified; a wrong patch silently corrupts code. |
+| Menu patches (menus don't pause the game while connected, favorites numbering, intro movie skip) | **On** since 2026-09-14 | Addresses from TiltedEvolutionVR, patch points checked in the VR code. Message boxes still pause: unpaused, they are invisible in the headset. |
+| Renderer, input and projectile byte patches | **Off** | Addresses unverified; a wrong patch silently corrupts code. |
 | Naked-NPC re-equip workaround | **Off** | `GetArmorInSlot` doesn't exist on VR. |
 | Projectile metadata (spell, weapon, ammo, cell) | **Not sent** | `Projectile::LaunchData` layout is wrong on VR. A remote shooter's projectile is launched and then deleted, because VR's `LaunchSpell` doesn't null-check. |
 | First-person checks and camera switching | Always third person, no switching | VR has no first-person graph (same as CommonLibVR). |

@@ -74,7 +74,10 @@ static void UnfreezeMenu(IMenu* apEntry)
 }
 
 static constexpr const char* kAllowList[] = {
-    "TweenMenu",     "MagicMenu",     "StatsMenu",     "InventoryMenu", "MessageBoxMenu",
+    "TweenMenu",     "MagicMenu",     "StatsMenu",     "InventoryMenu",
+#ifndef SKYRIMVR
+    "MessageBoxMenu",
+#endif
     "ContainerMenu", "FavoritesMenu", "Tutorial Menu", "Console"
     //"MapMenu", // MapMenu is disabled till we find a proper fix for first person.
     //"Journal Menu", // Journal menu, aka pause menu, is disabled until we find a fix for manual save crashing while unpaused.
@@ -121,27 +124,29 @@ void UIMessageQueue__AddMessage(void* a1, const BSFixedString* a2, UIMessage::UI
 static TiltedPhoques::Initializer s_s(
     []()
     {
-        // pray that this doesnt fail!
-        // The byte patches below are off on VR: their addresses are unverified there, and a wrong
-        // patch silently corrupts unrelated code.
-        #ifndef SKYRIMVR
+        // Offsets inside the patched functions differ between builds. The VR ones were checked in the VR code: the
+        // call to UI::AddToActiveQueue, the intro movie branch, and the menu mode jne in FavoritesHandler::CanProcess.
+#ifdef SKYRIMVR
+        constexpr size_t cAddToActiveQueueCall = 0x70C;
+        constexpr size_t cStartupMovieBranch = 0x96;
+#else
+        constexpr size_t cAddToActiveQueueCall = 0x682;
+        constexpr size_t cStartupMovieBranch = 0xFE;
+#endif
+
+        // Menus that don't pause the game while connected (see kAllowList).
         VersionDbPtr<uint8_t> ProcessHook(82082);
-        TiltedPhoques::SwapCall(ProcessHook.Get() + 0x682, UI_AddToActiveQueue, &UI_AddToActiveQueue_Hook);
-        #endif
+        TiltedPhoques::SwapCall(ProcessHook.Get() + cAddToActiveQueueCall, UI_AddToActiveQueue, &UI_AddToActiveQueue_Hook);
 
         // Ignore startup movie
         // TODO: Move me later.
-        #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> MainInit(36548);
-        TiltedPhoques::Put<uint8_t>(MainInit.Get() + 0xFE, 0xEB);
-        #endif
+        TiltedPhoques::Put<uint8_t>(MainInit.Get() + cStartupMovieBranch, 0xEB);
 
         // Credits to Skyrim Souls RE for this fix.
         // Allows the favorites menu to be numbered during connect.
-        #ifndef SKYRIMVR
         VersionDbPtr<uint8_t> FavoritesCanProcess(51538);
         TiltedPhoques::Put<uint16_t>(FavoritesCanProcess.Get() + 0x15, 0x9090);
-        #endif
 
         // Some experiments:
         // POINTER_SKYRIMSE(TCallback, s_start, 13631, 13530);
