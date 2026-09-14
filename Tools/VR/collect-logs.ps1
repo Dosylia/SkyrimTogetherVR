@@ -23,6 +23,7 @@ Write-Host "Collecting Skyrim Together VR logs..."
 # Client logs (the rotated ones hold earlier sessions of the same day).
 Get-ChildItem (Join-Path $ClientFolder 'logs') -Filter 'tp_client*.log' -ErrorAction SilentlyContinue | ForEach-Object { Add-File $_.FullName }
 Add-File (Join-Path $ClientFolder 'logs\cef_debug.log')
+Add-File (Join-Path $ClientFolder 'logs\dashboard_frame.bmp')
 
 # Newest SKSE crash log (Crash Logger), if one was written in the last day.
 $skse = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'My Games\Skyrim VR\SKSE'

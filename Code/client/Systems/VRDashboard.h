@@ -60,6 +60,7 @@ struct VRDashboard final : OverlayApp::RenderProvider
 private:
     bool InitializeOverlay() noexcept;
     void UploadFrame() noexcept;
+    void SnapshotPage() noexcept;
     void ProcessEvents(OverlayService& aOverlay) noexcept;
     void InjectText(OverlayApp& aApp, const char* acpUtf8) noexcept;
 
@@ -81,6 +82,8 @@ private:
     bool m_visible = false;
     bool m_browserHidden = false;
     bool m_logNextUpload = false;
+    bool m_snapshotTaken = false;
+    std::chrono::steady_clock::time_point m_shownAt{};
     uint16_t m_mouseX = 0;
     uint16_t m_mouseY = 0;
 };

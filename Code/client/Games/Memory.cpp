@@ -100,9 +100,11 @@ static void RehookFormAllocate(TFormAllocate* apEngineFixesAllocate) noexcept
     TP_HOOK_IMMEDIATE(&RealFormAllocate, HookFormAllocate);
 }
 
-// Set by an atexit handler once the game quits. Plugins free their static data after that (DLL detach), and
-// mimalloc crashed on those frees every time the game was closed, writing a 100 MB crash dump. Memory released
-// while the process is exiting doesn't need to go back to the heap.
+// Set when the game calls exit (hooked in its import table below). The game's exit handlers and plugin DLL detach
+// then free static data, including a plugin string that isn't a heap block, and mimalloc crashed on it every time
+// the game was closed (a 100 MB crash dump each quit). Memory released while the process exits doesn't need to go
+// back to the heap. An atexit handler was not enough: the game registers its own exit handlers later, so they ran
+// first.
 static std::atomic<bool> s_processExiting{false};
 
 size_t Hook_msize(void* apData)
@@ -174,9 +176,6 @@ static TiltedPhoques::Initializer s_memoryHooks(
         TP_HOOK_IAT(_aligned_free, cModuleName);
 
         TP_HOOK(&RealFormAllocate, HookFormAllocate);
-
-        // Registered after mimalloc's own exit handler, so it runs first (atexit handlers run in reverse order).
-        atexit([]() { s_processExiting = true; });
     });
 
 using T_initterm_e = decltype(&_initterm_e);
@@ -197,8 +196,38 @@ int __cdecl Hook_initterm_e(_PIFV* apFirst, _PIFV* apLast)
     return retval;
 }
 
+using Texit = void(__cdecl*)(int);
+using T_exit = void(__cdecl*)(int);
+using T_cexit = void(__cdecl*)();
+Texit Realexit = nullptr;
+T_exit Real_exit = nullptr;
+T_cexit Real_cexit = nullptr;
+
+void __cdecl Hookexit(int aCode)
+{
+    s_processExiting = true;
+    Realexit(aCode);
+}
+
+void __cdecl Hook_exit(int aCode)
+{
+    s_processExiting = true;
+    Real_exit(aCode);
+}
+
+void __cdecl Hook_cexit()
+{
+    s_processExiting = true;
+    Real_cexit();
+}
+
 void HookFormAllocateSentinelInit()
 {
     TP_HOOK_IAT(_initterm_e, "api-ms-win-crt-runtime-l1-1-0.dll");
+
+    // The game quits through these (see s_processExiting).
+    TP_HOOK_IAT(exit, "api-ms-win-crt-runtime-l1-1-0.dll");
+    TP_HOOK_IAT(_exit, "api-ms-win-crt-runtime-l1-1-0.dll");
+    TP_HOOK_IAT(_cexit, "api-ms-win-crt-runtime-l1-1-0.dll");
 }
 #pragma optimize("", on)

@@ -74,9 +74,11 @@ static void UnfreezeMenu(IMenu* apEntry)
 }
 
 static constexpr const char* kAllowList[] = {
-    "TweenMenu",     "MagicMenu",     "StatsMenu",     "InventoryMenu",
+    "TweenMenu",     "MagicMenu",     "InventoryMenu",
 #ifndef SKYRIMVR
-    "MessageBoxMenu",
+    // Unpaused on VR, the skills and level up screen is black (2026-09-14), and a message box is invisible in
+    // the headset (found by TiltedEvolutionVR).
+    "StatsMenu",     "MessageBoxMenu",
 #endif
     "ContainerMenu", "FavoritesMenu", "Tutorial Menu", "Console"
     //"MapMenu", // MapMenu is disabled till we find a proper fix for first person.

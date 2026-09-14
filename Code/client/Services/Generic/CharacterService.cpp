@@ -496,7 +496,11 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
         return;
     }
 
-    spdlog::info("CharacterSpawnRequest, server id: {:X}, form id: {:X}", acMessage.ServerId, pActor->formID);
+    // The base name is here so two players' logs can be compared by form id: leveled creatures can resolve to a
+    // different animal on each client (a fox on one screen, a rabbit on the other).
+    const auto* pSpawnedBase = Cast<TESNPC>(pActor->baseForm);
+    spdlog::info("CharacterSpawnRequest, server id: {:X}, form id: {:X}, local base {:X} ({})", acMessage.ServerId, pActor->formID, pActor->baseForm ? pActor->baseForm->formID : 0,
+                 pSpawnedBase ? pSpawnedBase->fullName.value.AsAscii() : "?");
 
     if (pActor->IsDisabled())
     {

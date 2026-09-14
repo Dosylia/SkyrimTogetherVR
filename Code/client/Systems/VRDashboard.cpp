@@ -14,6 +14,8 @@
 #include <d3d11.h>
 #include <dxgi.h>
 
+#include <fstream>
+
 namespace
 {
 // CEF paints into the dashboard's shared frame buffer. Everything touching D3D11 or OpenVR happens in
@@ -216,7 +218,10 @@ void VRDashboard::Update(OverlayService& aOverlay) noexcept
     }
 
     if (m_visible)
+    {
         UploadFrame();
+        SnapshotPage();
+    }
 
     const int keyboardRequest = m_keyboardRequest.exchange(0);
     if (keyboardRequest == 1)
@@ -269,6 +274,63 @@ void VRDashboard::UploadFrame() noexcept
     }
 }
 
+// TEMPORARY menu diagnostic: the tab showed an empty panel. Two seconds after it opens, save what the page drew to
+// logs\dashboard_frame.bmp (once per session) and log how much of it has content. Remove once the menu works.
+void VRDashboard::SnapshotPage() noexcept
+{
+    if (m_snapshotTaken || std::chrono::steady_clock::now() - m_shownAt < std::chrono::seconds(2))
+        return;
+    m_snapshotTaken = true;
+
+    std::vector<uint8_t> pixels;
+    {
+        std::scoped_lock lock(m_frame.Lock);
+        pixels = m_frame.Pixels;
+    }
+
+    size_t visible = 0;
+    uint32_t minX = kWidth, minY = kHeight, maxX = 0, maxY = 0;
+    for (uint32_t y = 0; y < kHeight; ++y)
+    {
+        for (uint32_t x = 0; x < kWidth; ++x)
+        {
+            if (pixels[(static_cast<size_t>(y) * kWidth + x) * 4 + 3] == 0)
+                continue;
+            ++visible;
+            minX = std::min(minX, x);
+            minY = std::min(minY, y);
+            maxX = std::max(maxX, x);
+            maxY = std::max(maxY, y);
+        }
+    }
+
+    const auto path = TiltedPhoques::GetPath() / "logs" / "dashboard_frame.bmp";
+    std::ofstream file(path, std::ios::binary);
+    if (file)
+    {
+        BITMAPFILEHEADER fileHeader{};
+        BITMAPINFOHEADER infoHeader{};
+        infoHeader.biSize = sizeof(infoHeader);
+        infoHeader.biWidth = kWidth;
+        infoHeader.biHeight = -kHeight; // top-down
+        infoHeader.biPlanes = 1;
+        infoHeader.biBitCount = 32;
+        infoHeader.biCompression = BI_RGB;
+        fileHeader.bfType = 0x4D42;
+        fileHeader.bfOffBits = sizeof(fileHeader) + sizeof(infoHeader);
+        fileHeader.bfSize = fileHeader.bfOffBits + static_cast<DWORD>(pixels.size());
+        file.write(reinterpret_cast<const char*>(&fileHeader), sizeof(fileHeader));
+        file.write(reinterpret_cast<const char*>(&infoHeader), sizeof(infoHeader));
+        file.write(reinterpret_cast<const char*>(pixels.data()), static_cast<std::streamsize>(pixels.size()));
+    }
+
+    if (visible)
+        spdlog::info("VRDashboard: 2 s after opening, {}% of the page has content, between ({}, {}) and ({}, {}); saved to {}", visible * 100 / (static_cast<size_t>(kWidth) * kHeight),
+                     minX, minY, maxX, maxY, path.string());
+    else
+        spdlog::info("VRDashboard: 2 s after opening, the page is still completely transparent (nothing drawn); saved to {}", path.string());
+}
+
 void VRDashboard::ProcessEvents(OverlayService& aOverlay) noexcept
 {
     OverlayApp* pApp = aOverlay.GetOverlayApp();
@@ -313,6 +375,7 @@ void VRDashboard::ProcessEvents(OverlayService& aOverlay) noexcept
             spdlog::info("VRDashboard: tab opened (in game: {})", aOverlay.GetInGame());
             m_visible = true;
             m_logNextUpload = true;
+            m_shownAt = std::chrono::steady_clock::now();
             aOverlay.SetActive(true);
             // CEF may not repaint an unchanged page when it is shown again: resend the last frame.
             std::scoped_lock lock(m_frame.Lock);

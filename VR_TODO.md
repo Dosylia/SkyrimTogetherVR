@@ -9,60 +9,45 @@ before any change · **[big]** several sessions of work.
 
 ---
 
-## 0. First thing next session: check what is already built
+## 0. Session of 2026-09-14 evening: results, and what the next session must answer
 
-Built on 2026-09-14 and not played yet. Both PCs need the new `SkyrimTogetherVR.exe`; the host restarts the
-server (new `STServer.dll`, with `host-server.bat`). No protocol change.
+Stable, 45 fps on the host (`Perf last 30 s`: avg 22 ms, p99 23-32 ms, mod update 0.1 ms, VR pose 0.04 ms/frame).
 
-- [ ] **[untested] Auto-connect and auto-party.** Load a save with `connect.txt` in place: about 5 s later
-  `Skyrim Together: connecting to ...` then `connected (build ...)`, and both players in one party with no
-  key pressed. Log: `VRConnectService:`, and on the server `No party on the server, creating one`.
-- [ ] **[untested] Reconnect.** Close the server mid-session: `connection lost, trying again in 5 s`, then it
-  reconnects once the server is back. F6 disconnects without retrying.
-- [ ] **[untested] No false "connection failed" on load.** Every save load used to raise a
-  `non_default_install` connection error (the vanilla plugin list check), which showed as a failed
-  connection. It is off on VR. A wrong `uGridsToLoad` is reported on the HUD before connecting.
-- [ ] **[untested] Plugin differences** are listed in the server log when a player joins:
-  `Plugins differ between 'A' and 'B'`.
-- [ ] **[untested] Menus don't pause the game while connected** (inventory, magic, skills,
-  containers, favorites, console), like on flat Skyrim Together. Open the inventory: the world keeps
-  moving and the other player doesn't see you frozen. Message boxes still pause. The intro movie is
-  skipped. Address found by the friend (favorites) and TiltedEvolutionVR, checked in the VR code.
-- [ ] **[untested] VRIK menu no longer opens for the other player.** Open VRIK's settings (its power): only
-  you get the menu. Spells and effects from `vrik.esp`, `Arctals VRIK Tweaks.esp`, `higgs_vr.esp` and
-  `SpellWheelVR.esp` aren't synced (idea from TiltedEvolutionVR). Probably the "popup shows for both players".
-- [ ] **[untested] Killed NPCs stay dead.** Kill an NPC the other player owns: it must not stand back up or
-  stay red on the compass. Replayed animations no longer overwrite the life state of a dying or dead body
-  (measured bug in TiltedEvolutionVR), and corpses can rotate while they fall.
-- [ ] **[untested] Upstream fixes ported:** dragons spawning for party members (server range check), NPC
-  dialogue synced when the talking player doesn't own the NPC (reads `MenuTopicManager` at SE offsets,
-  unverified on VR), respawn timers on a steady clock (camera stuck after a stuttery respawn), the Slow
-  effect syncs again, and no auto-party on a public server.
-- [ ] **[untested] Weapons at spawn.** Don't switch anything; the other player should see your weapon and
-  spells as soon as you appear. Log on the viewer: `Equipment sync: remote actor ... equips` right after
-  `Applied 3D for actor`.
-- [ ] **[untested] VR menu.** Open the Skyrim Together dashboard tab. It should show the UI on a dark panel.
-  Log: `VRDashboard: page frame sent to SteamVR (result 0), N% of the page has content`. If it's still empty,
-  that number says whether the page drew anything.
-- [ ] **[untested] No crash when quitting the game.** Quit normally: no `crash occurred` at the end of
-  `tp_client.log`, and no new `crash_UTC_*.dmp` in `overwrite\Root`.
-- [ ] **Spells leave the hand at an offset.** A temporary `CastDiag` log records the magic node position
-  against the posed hand for the first remote casts. Read it before changing anything.
-- [ ] **[untested] Dragon and NPC churn.** A dragon or mammoth near the edge of the loaded area
-  should keep its health and die for both players.
-  Log: `Actor removed, form id` should no longer repeat every few seconds for the same NPC.
-- [ ] **[untested] Kill and respawn.**
-  - Kill an enemy that the other player "owns". Log: `Death sync:`.
-  - Die and respawn. There should be no black screen. Log: `PlayerService:`.
-  - A killed NPC should fall (ragdoll) on both screens, even when killed far from the other player.
-- [ ] **[untested] Sync hooks enabled from the TiltedEvolutionVR address table.** Remote NPCs should no
-  longer act on both clients (no double attacks, no NPC walking off on one screen). Also check item
-  pickups, dialogue voice and subtitles, map markers, summons, and waiting or sleeping.
-- [ ] **Remote player's face out of the helmet + body flicker, in one interior only** (Gallows Rock, cell
-  `15273`). Fine outdoors, and present on the `8670d4c4` build too, so not a regression.
-  Next: check whether other interiors do it, then compare what that cell has before touching code.
-- [ ] **Read the new `Perf last 30 s:` lines** from a normal co-op session and write the numbers into
-  section 1.1.
+**Confirmed working:** auto-connect.
+
+**Reported, with what the logs say:**
+- [ ] **Skills and level up screens black** while connected. Caused by the unpaused menu patch enabled that day:
+  StatsMenu no longer unpaused on VR. Verify it's fixed.
+- [ ] **VR menu tab is a grey panel.** The texture now reaches SteamVR (the grey is our panel), but the page is
+  transparent when uploaded (`0% of the page has content`). A snapshot is saved to `logs\dashboard_frame.bmp`
+  two seconds after opening: look at it and at the `VRDashboard: 2 s after opening` line.
+- [ ] **Sliding instead of walking** (the other player, guards, a giant, enemies). `AnimDiag` lines every 10 s
+  list replayed actions per event name and how many the game refused, for remote players and NPCs. If the
+  remote player sends no locomotion events at all, VR locomotion doesn't produce them (VRIK) and remote
+  players need another source for walking.
+- [ ] **Different animals on each screen** (fox/rabbit, bear/wolf), and the friend saw no bears or spiders.
+  `CharacterSpawnRequest ... local base X (name)` now names the local base: compare both players' logs by form
+  id. The owner only sends its base for temporary actors, so a placed leveled creature keeps whatever each
+  client rolled. The friend's log is needed for the "no bears or spiders" part (`Failed to retrieve Actor`).
+- [ ] **Spells off.** `CastDiag` shows the magic node 10 units in front of the posed hand, attached to it,
+  which is normal. So the origin is right; the likely problem is direction (a remote caster aims where its body
+  faces, not where the VR hand points) or projectiles launched from the owner's position while the body is
+  shown 300 ms late. Needs a description of what "off" looks like (wrong direction or wrong start point).
+- [ ] **White flicker, body jumping for a split second.** See the body sync item below (writes from worker
+  threads).
+- [ ] **Crash when quitting** still happened: the exit flag was set by an atexit handler that ran after the
+  game's own exit handlers. It is now set when the game calls `exit`/`_exit`/`_cexit`. Verify.
+- [ ] **Grabbing an NPC with HIGGS isn't visible** to the other player. Physics grabs aren't synced at all.
+- [ ] Many `Transferring ownership` (about 200) and `already spawned` (85) lines in 28 minutes: ownership
+  churn, see the upstream ownership rework below.
+
+**For every session from now on:** both players run `collect-logs.bat` and send the zip, and note the time of
+each problem (the logs are timestamped).
+
+**Still to check from the previous build:** VRIK menu only for the caster, killed NPCs stay dead, dragon and
+dialogue fixes, weapons at spawn, reconnect after a drop.
+
+---
 
 ### From TiltedEvolutionVR and upstream, not done yet (decisions)
 

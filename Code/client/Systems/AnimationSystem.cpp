@@ -75,6 +75,40 @@ void AnimationSystem::Update(World& aWorld, Actor* apActor, RemoteAnimationCompo
 
         const auto result = ActorMediator::Get()->ForceAction(&actionData);
 
+        // TEMPORARY sliding diagnostic: actors were reported sliding instead of walking. Counts replayed actions and
+        // the ones the game refused, per event name, and logs a summary every 10 s. Remove once understood.
+        {
+            struct EventStats
+            {
+                uint32_t Replayed = 0;
+                uint32_t Failed = 0;
+            };
+            static TiltedPhoques::Map<TiltedPhoques::String, EventStats> s_players;
+            static TiltedPhoques::Map<TiltedPhoques::String, EventStats> s_npcs;
+            static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
+
+            auto& stats = (apActor->GetExtension()->IsPlayer() ? s_players : s_npcs)[first.EventName.empty() ? "(no event)" : first.EventName.c_str()];
+            ++stats.Replayed;
+            if (!result)
+                ++stats.Failed;
+
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= s_nextLog)
+            {
+                s_nextLog = now + 10s;
+                for (auto* pStats : {&s_players, &s_npcs})
+                {
+                    if (pStats->empty())
+                        continue;
+                    std::string line;
+                    for (const auto& [name, eventStats] : *pStats)
+                        line += fmt::format("{} {}/{} failed, ", name.c_str(), eventStats.Failed, eventStats.Replayed);
+                    spdlog::info("AnimDiag {}: {}", pStats == &s_players ? "remote players" : "remote NPCs", line);
+                    pStats->clear();
+                }
+            }
+        }
+
         if (aAnimationComponent.ReplayCount > 0)
             aAnimationComponent.ReplayCount--;
 
