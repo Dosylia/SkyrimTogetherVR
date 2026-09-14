@@ -53,7 +53,14 @@ void AnimationSystem::Update(World& aWorld, Actor* apActor, RemoteAnimationCompo
         const auto pAction = Cast<BGSAction>(TESForm::GetById(actionId));
         const auto pTarget = Cast<TESObjectREFR>(TESForm::GetById(targetId));
 
-        apActor->actorState.flags1 = first.State1;
+        // The owner's state word also carries the life state (bits 21-24). Actions are replayed 300 ms late, so the
+        // ones arriving just after a body died here were recorded while it was still alive, and copying the whole
+        // word stood the corpse back up as a living enemy. Once dying or dead, keep that part (death messages own it).
+        constexpr uint32_t cLifeStateMask = 0x1E00000;
+        if (apActor->actorState.IsDeadOrDying())
+            apActor->actorState.flags1 = (first.State1 & ~cLifeStateMask) | (apActor->actorState.flags1 & cLifeStateMask);
+        else
+            apActor->actorState.flags1 = first.State1;
         apActor->actorState.flags2 = first.State2;
 
         apActor->LoadAnimationVariables(first.Variables);

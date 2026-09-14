@@ -51,12 +51,12 @@ PlayerService::PlayerService(World& aWorld, entt::dispatcher& aDispatcher, Trans
     m_partyLeftConnection = aDispatcher.sink<PartyLeftEvent>().connect<&PlayerService::OnPartyLeftEvent>(this);
 }
 
-void PlayerService::OnUpdate(const UpdateEvent& acEvent) noexcept
+void PlayerService::OnUpdate(const UpdateEvent&) noexcept
 {
     PerfScope perfScope("PlayerService::OnUpdate");
 
-    RunRespawnUpdates(acEvent.Delta);
-    RunPostDeathUpdates(acEvent.Delta);
+    RunRespawnUpdates();
+    RunPostDeathUpdates();
     RunDifficultyUpdates();
     RunLevelUpdates();
     RunBeastFormDetection();
@@ -196,7 +196,9 @@ void PlayerService::OnPartyLeftEvent(const PartyLeftEvent& acEvent) noexcept
     }
 }
 
-void PlayerService::RunRespawnUpdates(const double acDeltaTime) noexcept
+// The respawn steps are timed with a steady clock rather than frame deltas: a stutter during the respawn (common
+// while the world reloads around the player) could leave the camera stuck (upstream fix for issue #878).
+void PlayerService::RunRespawnUpdates() noexcept
 {
     if (!m_isDeathSystemEnabled)
         return;
@@ -220,7 +222,7 @@ void PlayerService::RunRespawnUpdates(const double acDeltaTime) noexcept
         spdlog::info("PlayerService: player is down, respawning in 5 seconds");
 
         s_startTimer = true;
-        m_respawnTimer = 5.0;
+        m_respawnDeadline = std::chrono::steady_clock::now() + 5s;
         FadeOutGame(true, true, 3.0f, true, 2.0f);
 
         // If a player dies not by its health reaching 0, getting it up from its bleedout state isn't possible
@@ -231,14 +233,12 @@ void PlayerService::RunRespawnUpdates(const double acDeltaTime) noexcept
         pPlayer->PayCrimeGoldToAllFactions();
     }
 
-    m_respawnTimer -= acDeltaTime;
-
-    if (m_respawnTimer <= 0.0)
+    if (std::chrono::steady_clock::now() >= m_respawnDeadline)
     {
         spdlog::info("PlayerService: respawning player");
         pPlayer->RespawnPlayer();
 
-        m_knockdownTimer = 1.5;
+        m_knockdownDeadline = std::chrono::steady_clock::now() + 1500ms;
         m_knockdownStart = true;
 
         m_transport.Send(PlayerRespawnRequest());
@@ -259,45 +259,37 @@ void PlayerService::RunRespawnUpdates(const double acDeltaTime) noexcept
 }
 
 // Doesn't seem to respawn quite yet
-void PlayerService::RunPostDeathUpdates(const double acDeltaTime) noexcept
+void PlayerService::RunPostDeathUpdates() noexcept
 {
     if (!m_isDeathSystemEnabled)
         return;
 
     // If a player dies in ragdoll, it gets stuck.
     // This code ragdolls the player again upon respawning.
-    // It also makes the player invincible for 5 seconds.
-    if (m_knockdownStart)
+    // It also makes the player invincible for 10 seconds.
+    const auto now = std::chrono::steady_clock::now();
+    if (m_knockdownStart && now >= m_knockdownDeadline)
     {
-        m_knockdownTimer -= acDeltaTime;
-        if (m_knockdownTimer <= 0.0)
-        {
-            spdlog::info("PlayerService: respawn done, fading back in");
+        spdlog::info("PlayerService: respawn done, fading back in");
 
-            // Fade in first, so the player can see again even if something below fails.
-            FadeOutGame(false, true, 0.5f, true, 2.f);
+        // Fade in first, so the player can see again even if something below fails.
+        FadeOutGame(false, true, 0.5f, true, 2.f);
 
-            PlayerCharacter::SetGodMode(true);
-            m_godmodeStart = true;
-            m_godmodeTimer = 10.0;
+        PlayerCharacter::SetGodMode(true);
+        m_godmodeStart = true;
+        m_godmodeDeadline = now + 10s;
 
-            PlayerCharacter* pPlayer = PlayerCharacter::Get();
-            if (pPlayer->currentProcess)
-                pPlayer->currentProcess->KnockExplosion(pPlayer, &pPlayer->position, 0.f);
+        PlayerCharacter* pPlayer = PlayerCharacter::Get();
+        if (pPlayer->currentProcess)
+            pPlayer->currentProcess->KnockExplosion(pPlayer, &pPlayer->position, 0.f);
 
-            m_knockdownStart = false;
-        }
+        m_knockdownStart = false;
     }
 
-    if (m_godmodeStart)
+    if (m_godmodeStart && now >= m_godmodeDeadline)
     {
-        m_godmodeTimer -= acDeltaTime;
-        if (m_godmodeTimer <= 0.0)
-        {
-            PlayerCharacter::SetGodMode(false);
-
-            m_godmodeStart = false;
-        }
+        PlayerCharacter::SetGodMode(false);
+        m_godmodeStart = false;
     }
 }
 

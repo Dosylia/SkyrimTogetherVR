@@ -22,7 +22,6 @@
 #include <Setting.h>
 namespace
 {
-Console::Setting bAutoPartyJoin{"Gameplay:bAutoPartyJoin", "Join parties automatically, as long as there is only one party in the server", true};
 Console::Setting bAutoPartyCreate{"Gameplay:bAutoPartyCreate", "Create a party for the first player to join, so players are grouped without a party menu (VR has none)", true};
 }
 
@@ -127,7 +126,7 @@ void PartyService::CreateParty(Player* const player) noexcept
         spdlog::debug("[PartyService]: Created party for {}", player->GetId());
         SendPartyJoinedEvent(party, player);
 
-        if (m_parties.size() == 1 && bAutoPartyJoin)
+        if (m_parties.size() == 1 && GameServer::Get()->AllowsAutoPartyJoin())
         {
             for (Player* otherPlayer : m_world.GetPlayerManager())
             {
@@ -223,7 +222,7 @@ void PartyService::OnPlayerJoin(const PlayerJoinEvent& acEvent) noexcept
 
     GameServer::Get()->SendToPlayers(notify, acEvent.pPlayer);
 
-    if (m_parties.size() == 1 && bAutoPartyJoin)
+    if (m_parties.size() == 1 && GameServer::Get()->AllowsAutoPartyJoin())
     {
         for (Player* player : m_world.GetPlayerManager())
         {
@@ -245,7 +244,7 @@ void PartyService::OnPlayerJoin(const PlayerJoinEvent& acEvent) noexcept
         
     }
 
-    if (m_parties.empty() && bAutoPartyCreate && !IsPlayerInParty(acEvent.pPlayer))
+    if (m_parties.empty() && bAutoPartyCreate && !GameServer::Get()->IsPublicServer() && !IsPlayerInParty(acEvent.pPlayer))
     {
         spdlog::info("[PartyService]: No party on the server, creating one for {}", acEvent.pPlayer->GetId());
         CreateParty(acEvent.pPlayer);

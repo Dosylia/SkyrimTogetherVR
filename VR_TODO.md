@@ -19,6 +19,21 @@ server (new `STServer.dll`, with `host-server.bat`). No protocol change.
   key pressed. Log: `VRConnectService:`, and on the server `No party on the server, creating one`.
 - [ ] **[untested] Reconnect.** Close the server mid-session: `connection lost, trying again in 5 s`, then it
   reconnects once the server is back. F6 disconnects without retrying.
+- [ ] **[untested] No false "connection failed" on load.** Every save load used to raise a
+  `non_default_install` connection error (the vanilla plugin list check), which showed as a failed
+  connection. It is off on VR. A wrong `uGridsToLoad` is reported on the HUD before connecting.
+- [ ] **[untested] Plugin differences** are listed in the server log when a player joins:
+  `Plugins differ between 'A' and 'B'`.
+- [ ] **[untested] VRIK menu no longer opens for the other player.** Open VRIK's settings (its power): only
+  you get the menu. Spells and effects from `vrik.esp`, `Arctals VRIK Tweaks.esp`, `higgs_vr.esp` and
+  `SpellWheelVR.esp` aren't synced (idea from TiltedEvolutionVR). Probably the "popup shows for both players".
+- [ ] **[untested] Killed NPCs stay dead.** Kill an NPC the other player owns: it must not stand back up or
+  stay red on the compass. Replayed animations no longer overwrite the life state of a dying or dead body
+  (measured bug in TiltedEvolutionVR), and corpses can rotate while they fall.
+- [ ] **[untested] Upstream fixes ported:** dragons spawning for party members (server range check), NPC
+  dialogue synced when the talking player doesn't own the NPC (reads `MenuTopicManager` at SE offsets,
+  unverified on VR), respawn timers on a steady clock (camera stuck after a stuttery respawn), the Slow
+  effect syncs again, and no auto-party on a public server.
 - [ ] **[untested] Weapons at spawn.** Don't switch anything; the other player should see your weapon and
   spells as soon as you appear. Log on the viewer: `Equipment sync: remote actor ... equips` right after
   `Applied 3D for actor`.
@@ -44,6 +59,27 @@ server (new `STServer.dll`, with `host-server.bat`). No protocol change.
   Next: check whether other interiors do it, then compare what that cell has before touching code.
 - [ ] **Read the new `Perf last 30 s:` lines** from a normal co-op session and write the numbers into
   section 1.1.
+
+### From TiltedEvolutionVR and upstream, not done yet (decisions)
+
+- [ ] **[big] Body sync on one thread, at frame end.** TiltedEvolutionVR measured that writing remote bones
+  from the animation job pool (what `VRBodySync` does) lets the renderer read half-written bones: flicker and
+  black bands. It poses from `BSGraphics` frame end (id 77246, call at +0x15 on VR, verified in `code.bin`
+  and already hooked by another plugin, so a SwapCall would chain), writes the skeleton's flattened bone
+  array too (skinning reads `BSFlattenedBoneTree` +0x158, 0x80 per bone, not the nodes; facial bones only
+  exist there, which is how a turned head "leaves the face behind"), and skips actors outside a 50 degree
+  view cone because posing a culled actor tears its skin. Interiors cull by room, which fits the Gallows
+  Rock-only glitch. Our own implementation, several sessions of work.
+- [ ] **Shouts and powers reach the other player.** Our spell sync drops everything but concentration spells,
+  so a shout is never replayed. TiltedEvolutionVR fixed it (merged): read `SpellItem` spell type (the
+  `unk6C[3]` block is costOverride, flags, spellType) and replay POWER/LESSER_POWER/VOICE_POWER, resolving
+  voice casts from the sent form id. Check first whether shouts are missing for the other player.
+- [ ] **[big] Upstream ownership rework** (versioned server grants, 8 commits, protocol change). Fixes
+  former owners overwriting an NPC and ownership blacklists that never expire, the likely cause of the
+  shared follower tug of war. A dry run conflicts in exactly our VR files (`Actor.cpp`, `CharacterService`,
+  `InventoryService`, `NotifyEquipmentChanges`). The pickpocket inventory fix depends on it.
+- [ ] Upstream per-dungeon respawn positions (needs cell editor IDs, which VR may not keep) and the
+  Companions "Brotherhood" quest patch plugin (needs the 1.70 header and an MO2 slot). Low value for now.
 
 ---
 
@@ -115,7 +151,8 @@ What we know:
   - Fix: reverse the VR struct from the `Projectile::Launch` callers, like the EquipData fix.
 - [ ] **Dragons on the remote side.** The client grid check still passes `IsDragon = false` for
   remote entities.
-  - Fix: add the dragon flag to the spawn data so remote copies get the wide range too.
+  - Fix: add the dragon flag to the spawn data so remote copies get the wide range too. (Reading the race
+    from `TESNPC` locally would avoid the protocol change, but its `raceForm` offset isn't verified on VR.)
 - [ ] **Actor ownership warnings.** Look into `Actor for ownership transfer not found` and
   `OnNotifyActorTeleport: failed to retrieve actor` once the churn fix is confirmed.
 - [ ] **Shared follower loops** (the Lydia case). A follower owned by one player gets pulled by the
@@ -140,7 +177,9 @@ What we know:
 
 ### 2.4 World, quests, dialogue
 - [ ] **Message boxes show up for both players** ("player 1 opens text, player 2 sees the popup").
-  Find which sync sends it, then limit it to the player it belongs to.
+  No code syncs message boxes. The likely path is activation sync: the other client replays the activation
+  with the remote player as activator, and the object's script shows its message. Note which object it was
+  next time before changing activation sync.
 - [x] **[untested] Dialogue voice and subtitles** (37542, 52626) are on again.
 - [ ] **Quest NPCs out of sync** (Bastianus Axius). Check quest sync with a party on the next test.
 - [x] **[untested] Waypoint sharing** (40535/40536) is on again.
@@ -191,12 +230,12 @@ the headset off.
   (`build/BuildInfo.h`), so it goes stale until xmake reconfigures. Add a protocol number that changes with
   every message change.
 - [x] **Build version** in the first log line and in the connected notification.
-- [ ] **Mod list comparison on connect.** The server already receives every client's plugin list.
-  Send back the host's plugins that a player is missing, and show "N plugins differ, see log".
-  This explains "Failed to retrieve Actor X, possibly missing mod".
+- [x] **[untested] Mod list comparison on connect:** the server logs the plugins that differ between the new
+  player and each player already there. Showing it on the joiner's HUD needs a new message.
 - [ ] **Startup checks with plain-language HUD errors:**
-  - uGridsToLoad = 5;
-  - SKSE VR loaded;
+  - [x] uGridsToLoad = 5 (stops the automatic connection);
+  - [x] SKSE VR loaded (warning only);
+  - [x] `connect.txt` missing;
   - VR Address Library present;
   - fewer than 255 plugins;
   - `SkyrimTogether.esp` with the 1.70 header.
@@ -229,7 +268,7 @@ the headset off.
 - [ ] Clean remote spawn: fade in instead of popping or falling. Place on the ground if the
   interpolated Z is invalid ("mammoth fell from the sky").
 - [ ] Death and bleedout: HUD message "X is down", and optionally revive by activating the downed
-  player.
+  player. Needs a new message: a downed player bleeds out and never reports a death state.
 - [ ] Sensible defaults for VR in `STServer.ini` (difficulty sync, PvP off, time scale).
 - [x] Trim the log to what's useful for a bug report (see 1.2).
 

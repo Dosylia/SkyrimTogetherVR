@@ -35,6 +35,60 @@
 
 #include <Games/TES.h>
 
+#ifdef SKYRIMVR
+namespace
+{
+// VR mods that use a spell or magic effect as a local control: VRIK's settings menu is a lesser power, and its
+// effect replayed on the other player opened the VRIK menu on their screen. Anything these plugins define stays
+// on the machine it was cast on. Real spells from other mods are unaffected.
+constexpr std::array<const char*, 4> kLocalControlPlugins{"vrik.esp", "Arctals VRIK Tweaks.esp", "higgs_vr.esp", "SpellWheelVR.esp"};
+
+bool IsLocalControlForm(uint32_t aFormId) noexcept
+{
+    struct Slots
+    {
+        TiltedPhoques::Vector<uint8_t> Standard;
+        TiltedPhoques::Vector<uint16_t> Lite;
+        bool Resolved = false;
+    };
+    static Slots s_slots;
+
+    // The plugin list is complete once the game data is loaded, which is before any spell can be cast.
+    if (!s_slots.Resolved)
+    {
+        ModManager* pManager = ModManager::Get();
+        if (!pManager || !pManager->GetByName("Skyrim.esm"))
+            return false;
+
+        for (const char* pName : kLocalControlPlugins)
+        {
+            const Mod* pMod = pManager->GetByName(pName);
+            if (!pMod || !pMod->IsLoaded())
+                continue;
+            if (pMod->IsLite())
+                s_slots.Lite.push_back(pMod->liteId);
+            else
+                s_slots.Standard.push_back(pMod->standardId);
+        }
+        s_slots.Resolved = true;
+    }
+
+    if (aFormId == 0)
+        return false;
+
+    const uint8_t index = static_cast<uint8_t>(aFormId >> 24);
+    if (index == 0xFF) // created at runtime, no plugin
+        return false;
+    if (index == 0xFE)
+    {
+        const uint16_t liteIndex = static_cast<uint16_t>((aFormId >> 12) & 0xFFF);
+        return std::find(s_slots.Lite.begin(), s_slots.Lite.end(), liteIndex) != s_slots.Lite.end();
+    }
+    return std::find(s_slots.Standard.begin(), s_slots.Standard.end(), index) != s_slots.Standard.end();
+}
+} // namespace
+#endif
+
 MagicService::MagicService(World& aWorld, entt::dispatcher& aDispatcher, TransportService& aTransport) noexcept
     : m_world(aWorld)
     , m_dispatcher(aDispatcher)
@@ -73,6 +127,11 @@ void MagicService::OnSpellCastEvent(const SpellCastEvent& acEvent) const noexcep
         spdlog::warn("Spell cast event has no actor or actor is not loaded");
         return;
     }
+
+#ifdef SKYRIMVR
+    if (IsLocalControlForm(acEvent.SpellId))
+        return;
+#endif
 
     // only sync concentration spells through spell cast sync, the rest through projectile sync for accuracy
     if (SpellItem* pSpell = Cast<SpellItem>(TESForm::GetById(acEvent.SpellId)))
@@ -182,6 +241,11 @@ void MagicService::OnNotifySpellCast(const NotifySpellCast& acMessage) const noe
         spdlog::error("Could not find spell.");
         return;
     }
+
+#ifdef SKYRIMVR
+    if (IsLocalControlForm(pSpell->formID))
+        return;
+#endif
 
     TESObjectREFR* pDesiredTarget = nullptr;
 
@@ -293,6 +357,11 @@ void MagicService::OnAddTargetEvent(const AddTargetEvent& acEvent) noexcept
     if (!m_transport.IsConnected())
         return;
 
+#ifdef SKYRIMVR
+    if (IsLocalControlForm(acEvent.SpellID) || IsLocalControlForm(acEvent.EffectID))
+        return;
+#endif
+
     // These effects are applied through spell cast sync
     if (SpellItem* pSpellItem = Cast<SpellItem>(TESForm::GetById(acEvent.SpellID)))
     {
@@ -393,6 +462,12 @@ void MagicService::OnNotifyAddTarget(const NotifyAddTarget& acMessage) noexcept
         spdlog::error("{}: failed to retrieve formID of server effect id, GameId base: {:X}, mod: {:X}, discarding", __FUNCTION__, acMessage.EffectId.BaseId, acMessage.EffectId.ModId);
         return;
     }
+
+#ifdef SKYRIMVR
+    // Also refused on arrival, for a sender running a build without the filter.
+    if (IsLocalControlForm(cSpellId) || IsLocalControlForm(cEffectId))
+        return;
+#endif
 
     EffectItem* pEffect = pSpell->GetEffect(cEffectId);
     if (!pEffect)

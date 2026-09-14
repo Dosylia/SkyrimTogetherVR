@@ -495,7 +495,8 @@ void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcep
 {
     String cellName = GetCellName(acMessage.WorldSpaceId, acMessage.CellId);
 #ifdef SKYRIMVR
-    Utils::ShowHudMessage(String("Skyrim Together: ") + acMessage.Username + " joined" + (cellName.empty() ? "" : String(" (") + cellName + ")"));
+    // Sent both when someone joins and, on connecting, for everyone already there.
+    Utils::ShowHudMessage(String("Skyrim Together: ") + acMessage.Username + " is online" + (cellName.empty() ? "" : String(" (") + cellName + ")"));
 #endif
     if (!m_pOverlay)
         return;

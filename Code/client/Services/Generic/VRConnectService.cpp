@@ -10,7 +10,9 @@
 #include <Events/DisconnectedEvent.h>
 #include <Events/ConnectionErrorEvent.h>
 
+#include <Games/TES.h>
 #include <PlayerCharacter.h>
+#include <ScriptExtender.h>
 #include <Utils.h>
 #include <World.h>
 
@@ -87,6 +89,29 @@ void VRConnectService::Toggle() noexcept
     StartAttempt();
 }
 
+bool VRConnectService::CheckInstall() noexcept
+{
+    // Problems that otherwise only show up as a refused connection or broken mods, reported in the headset once a
+    // save is loaded. Only a setting the server refuses stops the automatic connection.
+    bool ok = true;
+
+    if (!IsScriptExtenderLoaded())
+    {
+        spdlog::error("VRConnectService: SKSE VR is not loaded");
+        Utils::ShowHudMessage("Skyrim Together: SKSE VR is not loaded, check the SKSE VR install");
+    }
+
+    auto* pGrids = INISettingCollection::Get()->GetSetting("uGridsToLoad:General");
+    if (pGrids && pGrids->data != 5)
+    {
+        spdlog::error("VRConnectService: uGridsToLoad is {}, the server requires 5", pGrids->data);
+        Utils::ShowHudMessage("Skyrim Together: set uGridsToLoad=5 in SkyrimPrefs.ini, the server refuses other values");
+        ok = false;
+    }
+
+    return ok;
+}
+
 bool VRConnectService::IsInGame() noexcept
 {
     // Connecting reads the player's cell, which only exists once a save is loaded.
@@ -140,10 +165,15 @@ void VRConnectService::OnUpdate(const UpdateEvent&) noexcept
             return;
 
         m_autoConnectDone = true;
+        if (!CheckInstall())
+            return;
         {
             Config config;
             if (!LoadConfig(config))
-                return; // no connect.txt: this player connects by hand, or plays alone
+            {
+                Utils::ShowHudMessage("Skyrim Together: no server set, run setup-connect.bat in the Skyrim Together VR folder");
+                return;
+            }
         }
         StartAttempt();
         break;
@@ -194,10 +224,13 @@ void VRConnectService::OnDisconnected(const DisconnectedEvent&) noexcept
 
 void VRConnectService::OnConnectionError(const ConnectionErrorEvent&) noexcept
 {
-    // The server answered and refused (the reason is shown by OverlayService). The same request would be refused
-    // again, so stop until the player presses F6.
-    if (m_state != State::kIdle)
-        spdlog::info("VRConnectService: connection refused by the server, not retrying");
+    // A refusal arrives while connecting, before the connected event (the reason is shown by OverlayService). The
+    // same request would be refused again, so stop until the player presses F6. Errors raised once online (the
+    // uGridsToLoad check) don't end the session and must not turn the reconnection off.
+    if (m_state != State::kConnecting)
+        return;
+
+    spdlog::info("VRConnectService: connection refused by the server, not retrying");
     m_state = State::kIdle;
 }
 

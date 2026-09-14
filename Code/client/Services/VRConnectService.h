@@ -52,6 +52,8 @@ private:
     void OnConnectionError(const ConnectionErrorEvent& acEvent) noexcept;
 
     void StartAttempt() noexcept;
+    // Reports install problems on the HUD. False when the server would refuse the connection (uGridsToLoad).
+    static bool CheckInstall() noexcept;
     static bool IsInGame() noexcept;
 
     TransportService& m_transport;

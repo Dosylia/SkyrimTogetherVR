@@ -31,6 +31,7 @@ struct Player
     void SetEndpoint(String aEndpoint) noexcept;
     void SetUsername(String aUsername) noexcept;
     void SetMods(Vector<String> aMods) noexcept;
+    [[nodiscard]] const Vector<String>& GetMods() const noexcept { return m_mods; }
     void SetModIds(Vector<uint16_t> aModIds) noexcept;
     void SetCharacter(entt::entity aCharacter) noexcept;
     void SetStringCacheId(uint32_t aStringCacheId) noexcept;

@@ -320,6 +320,9 @@ BSTEventResult DiscoveryService::OnEvent(const TESLoadGameEvent*, const EventDis
         }
     }
 
+#ifndef SKYRIMVR
+    // A VR install always has more plugins (SKSE VR, the address library, ESL support), so this warning would fire
+    // on every load, and it arrived as a "connection failed" notification.
     if (!isModlistEqual)
     {
         ConnectionErrorEvent errorEvent{};
@@ -327,6 +330,9 @@ BSTEventResult DiscoveryService::OnEvent(const TESLoadGameEvent*, const EventDis
 
         m_world.GetRunner().Trigger(errorEvent);
     }
+#else
+    (void)isModlistEqual;
+#endif
 
     VisitCell(true);
 

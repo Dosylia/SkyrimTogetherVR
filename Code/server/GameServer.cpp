@@ -32,6 +32,7 @@ Console::Setting bPremiumTickrate{"GameServer:bPremiumMode", "Use premium tick r
 Console::StringSetting sServerName{"GameServer:sServerName", "Name that shows up in the server list", "Dedicated Together Server"};
 Console::StringSetting sAdminPassword{"GameServer:sAdminPassword", "Admin authentication password", ""};
 Console::StringSetting sPassword{"GameServer:sPassword", "Server password", ""};
+Console::Setting bAnnounceServer{"LiveServices:bAnnounceServer", "Whether to list the server on the public server list", false};
 
 // Gameplay
 // TODO: to make this easier for users, use game names for difficulty instead of int
@@ -201,6 +202,17 @@ GameServer::~GameServer()
 GameServer* GameServer::Get() noexcept
 {
     return s_pInstance;
+}
+
+bool GameServer::IsPublicServer() const noexcept
+{
+    return bAnnounceServer;
+}
+
+bool GameServer::AllowsAutoPartyJoin() const noexcept
+{
+    // On a public server anyone could join a stranger's party.
+    return bAutoPartyJoin && !IsPublicServer();
 }
 
 void GameServer::Initialize()
@@ -979,6 +991,32 @@ void GameServer::HandleAuthenticationRequest(const ConnectionId_t aConnectionId,
         {
             if (pOtherPlayer == pPlayer)
                 continue;
+
+            // Forms from a plugin one player lacks can't sync ("Failed to retrieve Actor X, possibly missing mod" on
+            // the clients). List the difference once, here, where both lists are known.
+            const auto listMissing = [](const Vector<String>& acFrom, const Vector<String>& acIn)
+            {
+                String missing;
+                size_t count = 0;
+                for (const auto& mod : acFrom)
+                {
+                    if (std::find(acIn.begin(), acIn.end(), mod) != acIn.end())
+                        continue;
+                    if (count++ < 40)
+                        missing += (missing.empty() ? "" : ", ") + mod;
+                }
+                if (count > 40)
+                    missing += fmt::format(" and {} more", count - 40).c_str();
+                return std::make_pair(count, missing);
+            };
+            const auto [missingOnNew, missingOnNewList] = listMissing(pOtherPlayer->GetMods(), pPlayer->GetMods());
+            const auto [missingOnOther, missingOnOtherList] = listMissing(pPlayer->GetMods(), pOtherPlayer->GetMods());
+            if (missingOnNew || missingOnOther)
+            {
+                spdlog::warn("Plugins differ between '{}' and '{}': {} missing for '{}' ({}); {} missing for '{}' ({})", pPlayer->GetUsername().c_str(),
+                             pOtherPlayer->GetUsername().c_str(), missingOnNew, pPlayer->GetUsername().c_str(), missingOnNewList.c_str(), missingOnOther,
+                             pOtherPlayer->GetUsername().c_str(), missingOnOtherList.c_str());
+            }
 
             NotifyPlayerJoined notify{};
             notify.PlayerId = pOtherPlayer->GetId();
