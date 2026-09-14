@@ -33,11 +33,25 @@ Stable, 45 fps on the host (`Perf last 30 s`: avg 22 ms, p99 23-32 ms, mod updat
   which is normal. So the origin is right; the likely problem is direction (a remote caster aims where its body
   faces, not where the VR hand points) or projectiles launched from the owner's position while the body is
   shown 300 ms late. Needs a description of what "off" looks like (wrong direction or wrong start point).
-- [ ] **White flicker, body jumping for a split second.** See the body sync item below (writes from worker
-  threads).
+- [ ] **[untested] White flicker, body jumping for a split second, spell beams starting below the hands.**
+  Body sync rewritten to write once per frame at the renderer's frame end (see `KNOWN_ISSUES.md`). The screenshots
+  showed the lightning on the posed hands but the beam starting where the animation's hands are, which is the same
+  timing problem. Check: no flicker, the face stays in the helmet in Gallows Rock, beams leave the hands, and the
+  arms still follow the VR pose. Log: `VRBodySync: resolved skeleton under root ...` once per spawn, and the
+  `VR pose` cost in `Perf last 30 s`.
+- [ ] **If the arms stop following the VR pose** after this build, the frame end is too late in the frame on this
+  setup; that is the first thing to look at.
 - [ ] **Crash when quitting** still happened: the exit flag was set by an atexit handler that ran after the
   game's own exit handlers. It is now set when the game calls `exit`/`_exit`/`_cexit`. Verify.
-- [ ] **Grabbing an NPC with HIGGS isn't visible** to the other player. Physics grabs aren't synced at all.
+- [ ] **Grabbing an NPC with HIGGS isn't visible** to the other player. Analysis:
+  - A grabbed NPC is a ragdoll on the grabber's game only. The owner of that NPC keeps simulating it standing, and
+    the grabber's copy is overwritten by the owner's position.
+  - Moving the reference can't drive a ragdoll: TiltedEvolutionVR measured four different writes doing nothing to a
+    ragdolled body, which positions itself from its physics every frame. They exclude actors from their HIGGS sync.
+  - What it needs: HIGGS's grab/pull/drop callbacks (its `IHiggsInterface001`, found through RTTI in
+    `higgs_vr.dll`), an ownership transfer of the NPC to the grabbing player for the duration, and the ragdoll
+    pose streamed like the VR pose (root plus the main bones) and applied at frame end on the other client.
+    The body sync rewrite is the base for that last part.
 - [ ] Many `Transferring ownership` (about 200) and `already spawned` (85) lines in 28 minutes: ownership
   churn, see the upstream ownership rework below.
 
@@ -51,14 +65,8 @@ dialogue fixes, weapons at spawn, reconnect after a drop.
 
 ### From TiltedEvolutionVR and upstream, not done yet (decisions)
 
-- [ ] **[big] Body sync on one thread, at frame end.** TiltedEvolutionVR measured that writing remote bones
-  from the animation job pool (what `VRBodySync` does) lets the renderer read half-written bones: flicker and
-  black bands. It poses from `BSGraphics` frame end (id 77246, call at +0x15 on VR, verified in `code.bin`
-  and already hooked by another plugin, so a SwapCall would chain), writes the skeleton's flattened bone
-  array too (skinning reads `BSFlattenedBoneTree` +0x158, 0x80 per bone, not the nodes; facial bones only
-  exist there, which is how a turned head "leaves the face behind"), and skips actors outside a 50 degree
-  view cone because posing a culled actor tears its skin. Interiors cull by room, which fits the Gallows
-  Rock-only glitch. Our own implementation, several sessions of work.
+- [x] **[untested] Body sync on one thread, at frame end** (done 2026-09-14, see section 0 and
+  `KNOWN_ISSUES.md`).
 - [ ] **Shouts and powers reach the other player.** Our spell sync drops everything but concentration spells,
   so a shout is never replayed. TiltedEvolutionVR fixed it (merged): read `SpellItem` spell type (the
   `unk6C[3]` block is costOverride, flags, spellType) and replay POWER/LESSER_POWER/VOICE_POWER, resolving

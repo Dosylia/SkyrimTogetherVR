@@ -13,9 +13,11 @@
 
 #include <mutex>
 #include <shared_mutex>
+#include <unordered_map>
+#include <vector>
 
-// NetImmerse objects are read through raw offsets: the VR NiAVObject is 0x138 bytes, while the
-// client's structs only model the SE size (0x110).
+// NetImmerse objects are read through raw offsets: the VR NiAVObject is 0x138 bytes, while the client's structs only
+// model the SE size (0x110).
 namespace
 {
 constexpr uint32_t kNameOffset = 0x10;   // NiObjectNET::name
@@ -24,10 +26,26 @@ constexpr uint32_t kLocalOffset = 0x48;  // NiAVObject::local
 constexpr uint32_t kWorldOffset = 0x7C;  // NiAVObject::world
 #ifdef SKYRIMVR
 constexpr uint32_t kChildrenOffset = 0x138; // NiNode::children
+constexpr uint32_t kNiAVObjectSize = 0x138;
 #else
 constexpr uint32_t kChildrenOffset = 0x110;
+constexpr uint32_t kNiAVObjectSize = 0x110;
 #endif
-constexpr uint32_t kVTableAsNodeSlot = 3; // NiObject::AsNode
+constexpr uint32_t kVTableGetRttiSlot = 2; // NiObject::GetRTTI
+constexpr uint32_t kVTableAsNodeSlot = 3;  // NiObject::AsNode
+
+// BSFlattenedBoneTree, measured on SkyrimVR 1.4.15 by TiltedEvolutionVR. The skeleton keeps a flat array of every bone,
+// and bones that were flattened away (fingers, facial bones) only exist there.
+constexpr uint32_t kTreeBoneArray = 0x158;
+constexpr uint32_t kBoneEntrySize = 0x80;
+constexpr uint32_t kBoneEntryLocal = 0x00;
+constexpr uint32_t kBoneEntryWorld = 0x34;
+constexpr uint32_t kBoneEntryIndices = 0x68; // four int16, one of them the parent index
+constexpr uint32_t kBoneEntryNode = 0x70;    // the bone's node, null when it was flattened away
+constexpr uint32_t kMaxBones = 1024;
+
+// PlayerCharacter's headset node (same measurement), checked by name before use.
+constexpr uint32_t kHmdNodeOffset = 0x570;
 
 constexpr std::array<const char*, VRPose::kBoneCount> kBoneNames{
     "NPC Spine1 [Spn1]",   "NPC Spine2 [Spn2]",   "NPC Neck [Neck]",       "NPC Head [Head]",
@@ -57,8 +75,25 @@ void* AsNode(void* apObject) noexcept
     return static_cast<TAsNode>(ppVTable[kVTableAsNodeSlot])(apObject);
 }
 
-// Breadth-first search for the shallowest node with this name. Physics armour (SMP/3BA) carries its
-// own copies of skeleton nodes like "NPC L Hand"; picking one of those stretched the remote arms.
+// Only used while resolving a skeleton, never per frame: VirtualQuery is a system call.
+bool IsReadable(const void* apPointer, size_t aSize) noexcept
+{
+    if (!apPointer)
+        return false;
+
+    MEMORY_BASIC_INFORMATION info{};
+    if (!VirtualQuery(apPointer, &info, sizeof(info)) || info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD))
+        return false;
+
+    constexpr DWORD cReadable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    if (!(info.Protect & cReadable))
+        return false;
+
+    return reinterpret_cast<uintptr_t>(apPointer) + aSize <= reinterpret_cast<uintptr_t>(info.BaseAddress) + info.RegionSize;
+}
+
+// Breadth-first search for the shallowest node with this name. Physics armour (SMP/3BA) carries its own copies of
+// skeleton nodes like "NPC L Hand"; picking one of those stretched the remote arms.
 void* FindShallowest(void* apStart, const char* acpName) noexcept
 {
     if (!apStart)
@@ -88,6 +123,30 @@ void* FindShallowest(void* apStart, const char* acpName) noexcept
             if (pChildren[i])
                 queue.push_back(pChildren[i]);
     }
+    return nullptr;
+}
+
+void* FindByRtti(void* apStart, const char* acpRttiName, uint32_t aDepth = 0) noexcept
+{
+    if (!apStart || aDepth > 8)
+        return nullptr;
+
+    using TGetRtti = const char**(__fastcall*)(void*);
+    auto** ppVTable = *static_cast<void***>(apStart);
+    const char** ppRtti = static_cast<TGetRtti>(ppVTable[kVTableGetRttiSlot])(apStart);
+    if (ppRtti && ppRtti[0] && std::strcmp(ppRtti[0], acpRttiName) == 0)
+        return apStart;
+
+    void* pNode = AsNode(apStart);
+    if (!pNode)
+        return nullptr;
+
+    void** pChildren = At<void**>(pNode, kChildrenOffset + 0x8);
+    const uint16_t capacity = At<uint16_t>(pNode, kChildrenOffset + 0x10);
+    for (uint16_t i = 0; pChildren && i < capacity; ++i)
+        if (void* pFound = pChildren[i] ? FindByRtti(pChildren[i], acpRttiName, aDepth + 1) : nullptr)
+            return pFound;
+
     return nullptr;
 }
 
@@ -129,26 +188,18 @@ NiMatrix3 FromGlm(const glm::mat3& acMatrix) noexcept
     return result;
 }
 
-// world = parent.world * local (R = Rp * Rl, T = Tp + Rp * (Tl * Sp), S = Sp * Sl)
-void UpdateWorldFromParent(void* apObject) noexcept
+glm::vec3 ToGlm(const NiPoint3& acPoint) noexcept
 {
-    void* pParent = At<void*>(apObject, kParentOffset);
-    if (!pParent)
-        return;
+    return {acPoint.x, acPoint.y, acPoint.z};
+}
 
-    const auto& parentWorld = At<NiTransform>(pParent, kWorldOffset);
-    const auto& local = At<NiTransform>(apObject, kLocalOffset);
-    auto& world = At<NiTransform>(apObject, kWorldOffset);
-
-    const glm::mat3 parentRotation = ToGlm(parentWorld.rotate);
-    const glm::vec3 localTranslate{local.translate.x, local.translate.y, local.translate.z};
-    const glm::vec3 translate = glm::vec3{parentWorld.translate.x, parentWorld.translate.y, parentWorld.translate.z} + parentRotation * (localTranslate * parentWorld.scale);
-
-    world.rotate = FromGlm(parentRotation * ToGlm(local.rotate));
-    world.translate.x = translate.x;
-    world.translate.y = translate.y;
-    world.translate.z = translate.z;
-    world.scale = parentWorld.scale * local.scale;
+NiPoint3 FromGlm(const glm::vec3& acPoint) noexcept
+{
+    NiPoint3 result{};
+    result.x = acPoint.x;
+    result.y = acPoint.y;
+    result.z = acPoint.z;
+    return result;
 }
 
 struct RemotePose
@@ -159,83 +210,372 @@ struct RemotePose
 std::shared_mutex s_posesLock;
 TiltedPhoques::Map<uint32_t, RemotePose> s_poses;
 
-void ApplyRemotePose(Actor* apActor) noexcept
+/**
+ * A bone as the renderer sees it: its node, its slot in the flattened bone array, or both.
+ *
+ * The witnesses record what the pointers pointed at when the skeleton was resolved. Skyrim hands freed nodes straight
+ * back to new objects, so a rebuilt 3D can reuse the same addresses; a changed witness means the skeleton is gone and
+ * nothing may be written through these pointers (TiltedEvolutionVR crashed writing a transform into a shader property
+ * that had taken over a freed bone's memory).
+ */
+struct RigBone
 {
-    RemotePose pose;
+    void* pNode = nullptr;
+    uint8_t* pEntry = nullptr;
+    void* NodeVTable = nullptr;
+    void* EntryNode = nullptr;
+
+    [[nodiscard]] bool IsIntact() const noexcept
     {
-        std::shared_lock lock(s_posesLock);
-        const auto it = s_poses.find(apActor->formID);
-        if (it == s_poses.end())
-            return;
-        pose = it->second;
+        if (pNode && *static_cast<void**>(pNode) != NodeVTable)
+            return false;
+        return !pEntry || *reinterpret_cast<void**>(pEntry + kBoneEntryNode) == EntryNode;
     }
 
-    PerfCounterScope perfScope(PerfCounter::kVRPoseApply);
-
-    void* pRoot = apActor->GetNiNode();
-    if (!pRoot)
-        return;
-
-    BoneNodes nodes;
-    if (!FindBones(pRoot, nodes))
-        return;
-
-    const glm::mat3 rootRotation = ToGlm(At<NiTransform>(pRoot, kWorldOffset).rotate);
-
-    // Parents come first, so each parent's world transform is final before its child is solved.
-    for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
+    [[nodiscard]] const NiTransform& World() const noexcept
     {
-        void* pBone = nodes[i];
-        void* pParent = At<void*>(pBone, kParentOffset);
-        if (!pParent)
+        return pNode ? At<NiTransform>(pNode, kWorldOffset) : *reinterpret_cast<NiTransform*>(pEntry + kBoneEntryWorld);
+    }
+
+    void WriteWorld(const NiTransform& acWorld) const noexcept
+    {
+        if (pNode)
+            At<NiTransform>(pNode, kWorldOffset) = acWorld;
+        if (pEntry)
+            *reinterpret_cast<NiTransform*>(pEntry + kBoneEntryWorld) = acWorld;
+    }
+
+    void WriteLocal(const NiTransform& acLocal) const noexcept
+    {
+        if (pNode)
+            At<NiTransform>(pNode, kLocalOffset) = acLocal;
+        if (pEntry)
+            *reinterpret_cast<NiTransform*>(pEntry + kBoneEntryLocal) = acLocal;
+    }
+};
+
+RigBone MakeRigBone(void* apNode, uint8_t* apEntry) noexcept
+{
+    RigBone bone{apNode, apEntry};
+    if (apNode)
+        bone.NodeVTable = *static_cast<void**>(apNode);
+    if (apEntry)
+        bone.EntryNode = *reinterpret_cast<void**>(apEntry + kBoneEntryNode);
+    return bone;
+}
+
+// The skeleton of one remote player, resolved once per 3D.
+struct Rig
+{
+    void* pRoot = nullptr;
+    std::array<RigBone, VRPose::kBoneCount> Bones{};
+    // Everything below each posed bone (nodes and flattened bones), the posed bones further down the chain included.
+    std::array<std::vector<RigBone>, VRPose::kBoneCount> Descendants{};
+    std::chrono::steady_clock::time_point RetryAt{};
+    bool Valid = false;
+};
+
+std::unordered_map<uint32_t, Rig> s_rigs; // frame end only
+
+uint8_t* GetBoneArray(void* apTree, uint32_t& aOutCount) noexcept
+{
+    aOutCount = 0;
+    if (!apTree || !IsReadable(static_cast<uint8_t*>(apTree) + kTreeBoneArray, sizeof(void*)))
+        return nullptr;
+
+    auto* pArray = At<uint8_t*>(apTree, kTreeBoneArray);
+    if (!IsReadable(pArray, kBoneEntrySize))
+        return nullptr;
+
+    // The count sits near the array pointer at an offset that isn't measured, so a candidate is only accepted when every
+    // entry below it is readable and points at a readable node or none.
+    for (uint32_t offset = kChildrenOffset + 0x18; offset <= kTreeBoneArray + 0x20; offset += sizeof(uint32_t))
+    {
+        const uint32_t candidate = At<uint32_t>(apTree, offset);
+        if (candidate == 0 || candidate > kMaxBones || !IsReadable(pArray, static_cast<size_t>(candidate) * kBoneEntrySize))
             continue;
 
-        const glm::mat3 desiredWorld = rootRotation * glm::mat3_cast(pose.Bones[i]);
-        const glm::mat3 parentWorld = ToGlm(At<NiTransform>(pParent, kWorldOffset).rotate);
+        bool plausible = true;
+        for (uint32_t i = 0; i < candidate && plausible; ++i)
+        {
+            void* pNode = *reinterpret_cast<void**>(pArray + i * kBoneEntrySize + kBoneEntryNode);
+            plausible = !pNode || IsReadable(pNode, kNiAVObjectSize);
+        }
 
-        At<NiTransform>(pBone, kLocalOffset).rotate = FromGlm(glm::transpose(parentWorld) * desiredWorld);
-        UpdateWorldFromParent(pBone);
+        if (plausible)
+        {
+            aOutCount = candidate;
+            return pArray;
+        }
     }
 
-    // Let the engine refresh the whole actor (NiAVObject::Update, SE 68900). Updating only the bones
-    // moved attached items but left skinned body and armour meshes on the animation pose.
-    struct NiUpdateData
+    return nullptr;
+}
+
+uint8_t* FindEntry(uint8_t* apArray, uint32_t aCount, void* apNode) noexcept
+{
+    for (uint32_t i = 0; apArray && i < aCount; ++i)
+        if (*reinterpret_cast<void**>(apArray + i * kBoneEntrySize + kBoneEntryNode) == apNode)
+            return apArray + i * kBoneEntrySize;
+    return nullptr;
+}
+
+void CollectNodeDescendants(void* apNode, std::vector<void*>& aOut, uint32_t aDepth = 0) noexcept
+{
+    void* pNode = aDepth < 64 ? AsNode(apNode) : nullptr;
+    if (!pNode)
+        return;
+
+    void** pChildren = At<void**>(pNode, kChildrenOffset + 0x8);
+    const uint16_t capacity = At<uint16_t>(pNode, kChildrenOffset + 0x10);
+    for (uint16_t i = 0; pChildren && i < capacity; ++i)
     {
-        float time = 0.f;
-        uint32_t flags = 0;
-    } updateData;
-    TP_THIS_FUNCTION(TNiAVObjectUpdate, void, void, NiUpdateData&);
-    POINTER_SKYRIMSE(TNiAVObjectUpdate, s_niAVObjectUpdate, 0, 68900);
-    TiltedPhoques::ThisCall(s_niAVObjectUpdate, pRoot, updateData);
+        if (!pChildren[i])
+            continue;
+        aOut.push_back(pChildren[i]);
+        CollectNodeDescendants(pChildren[i], aOut, aDepth + 1);
+    }
+}
+
+bool ResolveRig(void* apRoot, Rig& aRig) noexcept
+{
+    aRig = Rig{};
+    aRig.pRoot = apRoot;
+
+    BoneNodes nodes;
+    if (!FindBones(apRoot, nodes))
+        return false;
+
+    uint32_t count = 0;
+    uint8_t* pArray = GetBoneArray(FindByRtti(apRoot, "BSFlattenedBoneTree"), count);
+
+    const auto readIndex = [](const uint8_t* apEntry, int aField) { return *reinterpret_cast<const int16_t*>(apEntry + kBoneEntryIndices + aField * sizeof(int16_t)); };
+
+    // Which of the four indices is the parent: the one that maps the left forearm to the upper arm, and the hand to the
+    // forearm.
+    int parentField = -1;
+    const uint8_t* pUpper = FindEntry(pArray, count, nodes[VRPose::kLeftUpperArm]);
+    const uint8_t* pFore = FindEntry(pArray, count, nodes[VRPose::kLeftForearm]);
+    const uint8_t* pHand = FindEntry(pArray, count, nodes[VRPose::kLeftHand]);
+    if (pUpper && pFore && pHand)
+    {
+        const auto indexOf = [pArray](const uint8_t* apEntry) { return static_cast<int16_t>((apEntry - pArray) / kBoneEntrySize); };
+        for (int field = 0; field < 4 && parentField < 0; ++field)
+            if (readIndex(pFore, field) == indexOf(pUpper) && readIndex(pHand, field) == indexOf(pFore))
+                parentField = field;
+    }
+
+    if (!pArray || parentField < 0)
+    {
+        // Nodes alone still pose the body and anything attached; flattened bones (fingers, face) then lag behind.
+        spdlog::warn("VRBodySync: no usable flattened bone array under root {} (count {}, parent field {})", apRoot, count, parentField);
+        pArray = nullptr;
+        count = 0;
+    }
+
+    std::unordered_map<void*, uint8_t*> entryByNode;
+    for (uint32_t i = 0; i < count; ++i)
+        if (void* pNode = *reinterpret_cast<void**>(pArray + i * kBoneEntrySize + kBoneEntryNode))
+            entryByNode.emplace(pNode, pArray + i * kBoneEntrySize);
+
+    const auto entryFor = [&entryByNode](void* apNode) -> uint8_t*
+    {
+        const auto it = entryByNode.find(apNode);
+        return it == entryByNode.end() ? nullptr : it->second;
+    };
+
+    for (uint32_t bone = 0; bone < VRPose::kBoneCount; ++bone)
+    {
+        aRig.Bones[bone] = MakeRigBone(nodes[bone], entryFor(nodes[bone]));
+
+        // Nodes hung below the bone (weapon, shield, magic node, the next bones)...
+        std::vector<RigBone>& descendants = aRig.Descendants[bone];
+        std::unordered_map<const uint8_t*, bool> entriesSeen;
+        std::vector<void*> childNodes;
+        CollectNodeDescendants(nodes[bone], childNodes);
+        for (void* pChild : childNodes)
+        {
+            uint8_t* pEntry = entryFor(pChild);
+            descendants.push_back(MakeRigBone(pChild, pEntry));
+            if (pEntry)
+                entriesSeen[pEntry] = true;
+        }
+
+        // ...and the flattened bones below it (fingers, facial bones), found through each entry's parent chain.
+        const uint8_t* pBoneEntry = aRig.Bones[bone].pEntry;
+        for (uint32_t i = 0; pBoneEntry && i < count; ++i)
+        {
+            uint8_t* pEntry = pArray + i * kBoneEntrySize;
+            if (pEntry == pBoneEntry || entriesSeen.count(pEntry))
+                continue;
+
+            int16_t walk = static_cast<int16_t>(i);
+            for (uint32_t step = 0; step < 128; ++step)
+            {
+                walk = readIndex(pArray + static_cast<uint32_t>(walk) * kBoneEntrySize, parentField);
+                if (walk < 0 || static_cast<uint32_t>(walk) >= count)
+                    break;
+                if (pArray + static_cast<uint32_t>(walk) * kBoneEntrySize == pBoneEntry)
+                {
+                    descendants.push_back(MakeRigBone(*reinterpret_cast<void**>(pEntry + kBoneEntryNode), pEntry));
+                    break;
+                }
+            }
+        }
+    }
+
+    aRig.Valid = true;
+    spdlog::info("VRBodySync: resolved skeleton under root {}: {} flattened bones, {} carried by the spine, {} by the head, {} by the right hand", apRoot, count,
+                 aRig.Descendants[VRPose::kSpine1].size(), aRig.Descendants[VRPose::kHead].size(), aRig.Descendants[VRPose::kRightHand].size());
+    return true;
+}
+
+[[nodiscard]] bool RigIntact(const Rig& acRig) noexcept
+{
+    for (const auto& bone : acRig.Bones)
+        if (!bone.IsIntact())
+            return false;
+    for (const auto& descendants : acRig.Descendants)
+        for (const auto& bone : descendants)
+            if (!bone.IsIntact())
+                return false;
+    return true;
+}
+
+// Posing an actor the renderer has culled tore its skin into black strips in TiltedEvolutionVR, so only actors in
+// front of the headset are posed. A sphere around the chest is tested against a 50 degree cone, widened by the angle
+// the sphere covers, so an actor close by counts as visible whatever the angle.
+bool IsInView(const glm::vec3& acChest) noexcept
+{
+    constexpr float cHalfAngle = 50.f * glm::pi<float>() / 180.f;
+    constexpr float cBodyRadius = 100.f;
+
+    static int s_hmdState = 0; // 0 unchecked, 1 valid, -1 not the headset node on this build
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer || s_hmdState < 0)
+        return true;
+
+    void* pHmd = At<void*>(pPlayer, kHmdNodeOffset);
+    if (s_hmdState == 0)
+    {
+        const char* pName = IsReadable(pHmd, kNiAVObjectSize) ? GetName(pHmd) : nullptr;
+        s_hmdState = pName && IsReadable(pName, 8) && std::strcmp(pName, "HmdNode") == 0 ? 1 : -1;
+        if (s_hmdState < 0)
+        {
+            spdlog::warn("VRBodySync: PlayerCharacter+0x{:X} isn't the headset node, remote players are posed even out of view", kHmdNodeOffset);
+            return true;
+        }
+    }
+    if (!pHmd)
+        return true;
+
+    const auto& hmd = At<NiTransform>(pHmd, kWorldOffset);
+    const glm::vec3 toChest = acChest - ToGlm(hmd.translate);
+    const float distance = glm::length(toChest);
+    if (distance <= cBodyRadius)
+        return true;
+
+    const glm::vec3 forward = ToGlm(hmd.rotate)[1]; // Skyrim: X right, Y forward, Z up
+    const float offAxis = std::acos(glm::clamp(glm::dot(forward, toChest / distance), -1.f, 1.f));
+    return offAxis < cHalfAngle + std::asin(cBodyRadius / distance);
+}
+
+void PoseActor(const Rig& acRig, const RemotePose& acPose) noexcept
+{
+    const glm::mat3 rootRotation = ToGlm(At<NiTransform>(acRig.pRoot, kWorldOffset).rotate);
+
+    // Parents first. Each bone is turned about its own position, and that rigid motion is carried to everything below
+    // it, posed children included, so a child's transform already holds its parents' motion when its own rotation is
+    // solved. World transforms are written directly because nothing recomputes them from locals between the end of the
+    // frame and the draw that uses them.
+    for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
+    {
+        const RigBone& bone = acRig.Bones[i];
+        const NiTransform current = bone.World();
+        const glm::mat3 currentRotation = ToGlm(current.rotate);
+        const glm::mat3 wantedRotation = rootRotation * glm::mat3_cast(acPose.Bones[i]);
+        const glm::mat3 delta = wantedRotation * glm::transpose(currentRotation);
+        const glm::vec3 pivot = ToGlm(current.translate);
+
+        NiTransform wanted = current;
+        wanted.rotate = FromGlm(wantedRotation);
+        bone.WriteWorld(wanted);
+
+        // local' = local * (world^-1 * world'). The position doesn't change, so only the rotation does.
+        if (bone.pNode)
+        {
+            NiTransform local = At<NiTransform>(bone.pNode, kLocalOffset);
+            local.rotate = FromGlm(ToGlm(local.rotate) * glm::transpose(currentRotation) * wantedRotation);
+            bone.WriteLocal(local);
+        }
+
+        for (const RigBone& child : acRig.Descendants[i])
+        {
+            NiTransform world = child.World();
+            world.rotate = FromGlm(delta * ToGlm(world.rotate));
+            world.translate = FromGlm(pivot + delta * (ToGlm(world.translate) - pivot));
+            child.WriteWorld(world);
+        }
+    }
 }
 
 } // namespace
 
-// Per-actor animation graph update (SE 36372). NPCs, remote players included, never go through
-// Actor::UpdateAnimation: the process update calls this directly. The pose is applied right after.
-TP_THIS_FUNCTION(TUpdateAnimation, void, Actor, float aDelta);
-static TUpdateAnimation* RealUpdateAnimation = nullptr;
-
-void TP_MAKE_THISCALL(HookUpdateAnimation, Actor, float aDelta)
-{
-    TiltedPhoques::ThisCall(RealUpdateAnimation, apThis, aDelta);
-
-    if (apThis)
-        ApplyRemotePose(apThis);
-}
-
-static TiltedPhoques::Initializer s_vrBodySyncHooks(
-    []()
-    {
-        POINTER_SKYRIMSE(TUpdateAnimation, s_updateAnimation, 0, 36372);
-
-        RealUpdateAnimation = s_updateAnimation.Get();
-
-        TP_HOOK(&RealUpdateAnimation, HookUpdateAnimation);
-    });
-
 namespace VRBodySync
 {
+void OnFrameEnd() noexcept
+{
+    TiltedPhoques::Vector<std::pair<uint32_t, RemotePose>> poses;
+    {
+        std::shared_lock lock(s_posesLock);
+        for (const auto& [formId, pose] : s_poses)
+            poses.emplace_back(formId, pose);
+    }
+
+    // Skeletons of players who left.
+    for (auto it = s_rigs.begin(); it != s_rigs.end();)
+    {
+        const uint32_t formId = it->first;
+        const bool stillPosed = std::any_of(poses.begin(), poses.end(), [formId](const auto& acEntry) { return acEntry.first == formId; });
+        it = stillPosed ? std::next(it) : s_rigs.erase(it);
+    }
+
+    if (poses.empty())
+        return;
+
+    PerfCounterScope perfScope(PerfCounter::kVRPoseApply);
+    const auto now = std::chrono::steady_clock::now();
+
+    for (const auto& [formId, pose] : poses)
+    {
+        Actor* pActor = Cast<Actor>(TESForm::GetById(formId));
+        void* pRoot = pActor ? pActor->GetNiNode() : nullptr;
+        if (!pRoot)
+            continue;
+
+        // A dead or downed body belongs to its ragdoll.
+        if (pActor->actorState.IsDeadOrDying() || pActor->actorState.IsBleedingOut())
+            continue;
+
+        Rig& rig = s_rigs[formId];
+        if (rig.pRoot != pRoot || !rig.Valid || !RigIntact(rig))
+        {
+            if (rig.pRoot == pRoot && now < rig.RetryAt)
+                continue;
+            if (!ResolveRig(pRoot, rig))
+            {
+                rig.RetryAt = now + std::chrono::seconds(1);
+                continue;
+            }
+        }
+
+        if (!IsInView(ToGlm(rig.Bones[VRPose::kSpine2].World().translate)))
+            continue;
+
+        PoseActor(rig, pose);
+    }
+}
+
 bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
 {
     aOutPose.HasData = false;
@@ -284,8 +624,8 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
 
 void LogCastOrigin(Actor* apActor, uint32_t aCastingSource) noexcept
 {
-    // Spells from a remote VR player were reported leaving slightly off the hand. The caster aims from the magic
-    // node, so log where it is relative to the posed hand for the first few casts.
+    // Spells from a remote VR player were reported leaving off the hand. The caster aims from the magic node, so log
+    // where it is relative to the posed hand for the first few casts.
     static uint32_t s_logged = 0;
     if (!apActor || aCastingSource > 1 || s_logged >= 6)
         return;

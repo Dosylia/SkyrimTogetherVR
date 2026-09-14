@@ -8,10 +8,15 @@ struct PlayerCharacter;
 //! Syncs the upper-body pose of VR players (spine, head, arms, hands).
 //!
 //! Local side: reads the root-relative bone rotations of the player's skeleton (driven by VRIK from
-//! the headset and controllers). Remote side: after the game animates a remote actor, those bones
-//! are overwritten with the latest interpolated pose.
+//! the headset and controllers). Remote side: once per frame, at the renderer's frame end, the remote
+//! skeleton is posed from the latest interpolated pose. Writing from the animation job threads instead
+//! let the renderer read half-written bones: the remote body flickered, and spells and the face were
+//! left on the animation pose.
 namespace VRBodySync
 {
+//! Renderer frame end (BSGraphics StopTimer). One thread, once per frame.
+void OnFrameEnd() noexcept;
+
 bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept;
 
 //! A pose without data clears the actor's pose.

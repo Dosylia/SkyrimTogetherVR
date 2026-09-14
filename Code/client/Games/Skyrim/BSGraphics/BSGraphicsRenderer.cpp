@@ -7,6 +7,10 @@
 #include "BSGraphics/BSGraphicsRenderer.h"
 #include "BSRandom/BSRandom.h"
 
+#ifdef SKYRIMVR
+#include <Games/Skyrim/VRBodySync.h>
+#endif
+
 // shared resource by launcher
 extern HICON g_SharedWindowIcon;
 
@@ -73,6 +77,10 @@ void Hook_StopTimer(int type)
     if (g_sRs)
         g_sRs->OnRender();
 
+#ifdef SKYRIMVR
+    VRBodySync::OnFrameEnd();
+#endif
+
     StopTimer(type);
 }
 
@@ -103,6 +111,11 @@ static TiltedPhoques::Initializer s_viewportHooks(
         // Once we find a proper way to locate it for different versions, go back to swapcall
         // TiltedPhoques::SwapCall(mem::pointer(initLoc.GetPtr()) + 0xD1A, Renderer_Init, &Hook_Renderer_Init);
         TP_HOOK_IMMEDIATE(&Renderer_Init, &Hook_Renderer_Init);
+#else
+        // Only the frame end call on VR, for VRBodySync: SE 75461 is the renderer's frame end, and +0x15 is its
+        // StopTimer(1) call (checked in the VR code; another plugin already swaps this call, so ours chains to it).
+        const VersionDbPtr<void> timerLoc(75461);
+        TiltedPhoques::SwapCall(mem::pointer(timerLoc.GetPtr()) + 0x15, StopTimer, &Hook_StopTimer);
 #endif
     });
 } // namespace BSGraphics

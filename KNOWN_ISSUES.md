@@ -81,8 +81,18 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 - **VR body sync** (`VRBodySync.cpp`, `VRPose`):
   - 12 upper-body bone rotations relative to the root, read from the skeleton VRIK drives.
   - Sent with movement (32-bit quaternions) and relayed by the server.
-  - Applied after the remote actor's graph update (hook on SE 36372), followed by the engine's
-    `NiAVObject::Update`.
+  - Applied once per frame at the renderer's frame end (`StopTimer` call in SE 75461, +0x15), on one
+    thread. It used to be applied from the animation job threads (hook on SE 36372), and the renderer read
+    half-written bones: the body flickered, and the face and spell beams stayed on the animation pose.
+    Approach and offsets from TiltedEvolutionVR's measurements, implemented here separately.
+  - Each posed bone is turned about its own position and everything below it is carried: child nodes
+    (weapon, shield, magic node) and the skeleton's flattened bone array (`BSFlattenedBoneTree` +0x158,
+    0x80 per bone), where fingers and facial bones exist without a node.
+  - Cached bone pointers are checked every frame against what they pointed at when resolved (a freed
+    node's first bytes change), and the skeleton is resolved again when they differ.
+  - Not posed: dead, dying or bleeding out actors (the ragdoll owns them), and actors outside a 50 degree
+    view cone from the headset (`PlayerCharacter` +0x570, checked by name), because posing a culled actor
+    tears its skin.
   - Bones are found along the skeleton chain, because physics armour carries duplicate hand nodes.
 - **Send rate:** the local player 30 Hz, other actors 10 Hz. The VR pose plays back 100 ms late,
   movement 300 ms.
