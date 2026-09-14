@@ -73,10 +73,13 @@ target(name)
 
     if isVR then
         add_defines("SKYRIMVR")
+        -- Only the header is used: the game's own openvr_api.dll is called at runtime (VRDashboard.cpp).
+        add_packages("openvr")
     end
 end
 
 add_requires("tiltedcore")
+add_requires("openvr v2.5.1")
 
 build_client("SkyrimTogetherClient", false)
 build_client("SkyrimTogetherClientVR", true)

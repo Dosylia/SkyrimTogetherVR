@@ -4,6 +4,7 @@ What is different, missing or fragile in the Skyrim VR (1.4.15) port, and why. R
 - `VR_TODO.md`: the roadmap.
 - `VR_POINTERS_TODO.md`: game addresses still missing or unconfirmed on VR.
 - `VR_MULTIPLAYER_GUIDE.md`: how to install and play.
+- `github.com/cmpayc/TiltedEvolutionVR`: an independent VR port; its address table and fixes were used here.
 
 Git history has the full investigation notes behind each item.
 
@@ -66,13 +67,11 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 
 | Feature | State on VR | Why |
 | --- | --- | --- |
-| Skyrim Together UI (connect dialog, chat, party, debug HUD) | **Absent.** Connect with F6 and `%LOCALAPPDATA%\SkyrimTogetherVR\connect.txt`; status via HUD messages. | The CEF overlay is never created, and any CEF call kills the process. All overlay calls are guarded (`OverlayService.cpp`). |
-| Remote NPC AI suppression, item pickup/add sync, dialogue voice and subtitles, waypoints, summons, beast form, leveled NPC choice, time skip | **Off** | No VR address; see `VR_POINTERS_TODO.md` section 1. |
+| Skyrim Together UI (connect dialog, chat, party) | **SteamVR dashboard tab** "Skyrim Together" (`Systems/VRDashboard.cpp`). F6 and `connect.txt` still work, and status also shows as HUD messages. | No game window to draw into. CEF renders offscreen into a texture on our own D3D11 device; the laser pointer and SteamVR keyboard are forwarded to the page. |
 | Renderer, input, menu and projectile byte patches | **Off** | Addresses unverified; a wrong patch silently corrupts code. |
 | Naked-NPC re-equip workaround | **Off** | `GetArmorInSlot` doesn't exist on VR. |
 | Projectile metadata (spell, weapon, ammo, cell) | **Not sent** | `Projectile::LaunchData` layout is wrong on VR. A remote shooter's projectile is launched and then deleted, because VR's `LaunchSpell` doesn't null-check. |
 | First-person checks and camera switching | Always third person, no switching | VR has no first-person graph (same as CommonLibVR). |
-| `SetNoBleedoutRecovery`, `SetFactionRank` | Papyrus natives | No verified VR address. |
 | `Actor::Kill`, `Respawn` | Called by address | Chosen before the vtable was fully checked; works. |
 | Two players on one horse | Left as is | The user considers it minor. |
 
@@ -91,21 +90,33 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   - The receiver makes the remote hands match.
   - Single equip events were lost or out of date on VR.
   - **Protocol change:** the server and all clients must match.
-- **Actor removal grace period:** an actor that loses its 3D stays known for 5 s. Before this, a
-  circling dragon was destroyed and recreated by the server 73 times in one session.
+- **Actor removal grace period:** an NPC this client owns that loses its 3D stays known for 5 s. Before this, a
+  circling dragon was destroyed and recreated by the server 73 times in one session. Copies of actors owned by
+  another player are still removed at once: with the grace period they ignored the server's respawn after a
+  load door, and a remote player stayed invisible. A spawn request for an entity whose actor is gone now
+  re-creates it.
 - **Dragon detection** also checks the race keyword `ActorTypeDragon`, so modded dragons get the wide
   range from their first spawn.
+- **Death sync:** the server sends a death to every player, not only players in range (a missed death left a
+  living body forever). A remote NPC is allowed to play its death animation, and a remote corpse runs its own
+  update and ragdoll instead of following network positions.
+- **Addresses from TiltedEvolutionVR:** about 60 VR addresses (remote NPC AI suppression, item sync, dialogue,
+  subtitles, waypoints, beast form, time skip and more) come from that fork's table, cross-checked against
+  SE/AE function sizes and this repo's git history. Its Papyrus VM vtable layout (two extra VR virtuals) is
+  also applied.
 - **Respawn** finishes once started. On VR the player left bleedout early, which left the screen black.
 - **Stutter report:** `Perf spike: ...` in the log when a frame is over 25 ms, naming the slowest mod
   section.
 
 ## 6. Open bugs
 
-- **Remote NPCs run AI on both clients** (`Actor::Process` hook, 37356, has no VR address). This is
-  the likely cause of "NPCs feel buggy".
-- **NPC deaths sync inconsistently.** `Death sync:` log lines were added to find out why. Also,
-  players with different modlists are missing NPCs (`Failed to retrieve Actor X, possibly missing
-  mod`).
+- **Many sync hooks were enabled at once** (see section 5) and are untested in play. If a crash
+  points at one of them, its address is the first suspect.
+- **VR menu shows an empty tab** (first test). The page loads in CEF; logging was added (`VRDashboard:` first
+  paint, first frame result, tab opened) to find where it stops.
+- **Crash while quitting the game**, in the game's memory manager during shutdown. Harmless for play.
+- **Players with different modlists** are missing each other's NPCs (`Failed to retrieve Actor X,
+  possibly missing mod`), so those NPCs can't sync.
 - **Shared follower** in both saves (Lydia): both clients claim her and ownership bounces. Dismiss
   her in one save.
 - **Remote dragons:** the client grid check still passes `IsDragon = false` for entities without a
@@ -127,7 +138,7 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 - **Symbol names near a crash are unreliable** (LTCG folding). Read the instructions.
 - **The game hangs on a screen:** attach non-invasively (`cdb -pv -p <pid> -c "~* kn 18; qd"`) and
   look for a `MessageBox`. Popups are invisible in the headset.
-- **The game closes silently with no log:** usually a CEF `CHECK` (an unguarded overlay call) or
+- **The game closes silently with no log:** usually a CEF `CHECK` (an overlay call before the overlay exists) or
   another plugin calling `TerminateProcess`. Crash Logger VR writes to
   `Documents\My Games\Skyrim VR\SKSE\`.
 - Logs from before 2026-09-13 say "coredump created" even when no dump was written.

@@ -11,8 +11,8 @@ before any change · **[big]** several sessions of work.
 
 ## 0. First thing next session: check what is already built
 
-Three changes were deployed and never played. They need a new server as well as the new client
-on both PCs.
+These changes were built and never played. They need a new server as well as the new client, the `UI`
+folder and `TPProcess.exe` on both PCs.
 
 - [ ] **[untested] Weapon, spell and torch sync (snapshot).** Switch weapons, spells and torches in
   both hands. The other player should see each change within about 1-2 s.
@@ -23,6 +23,12 @@ on both PCs.
 - [ ] **[untested] Kill and respawn.**
   - Kill an enemy that the other player "owns". Log: `Death sync:`.
   - Die and respawn. There should be no black screen. Log: `PlayerService:`.
+  - A killed NPC should fall (ragdoll) on both screens, even when killed far from the other player.
+- [ ] **[untested] Sync hooks enabled from the TiltedEvolutionVR address table.** Remote NPCs should no
+  longer act on both clients (no double attacks, no NPC walking off on one screen). Also check item
+  pickups, dialogue voice and subtitles, map markers, summons, and waiting or sleeping.
+- [ ] **[untested] VR menu.** Press the system button, open the **Skyrim Together** dashboard tab, and
+  connect from it. Check the laser pointer clicks, the SteamVR keyboard in text fields, and the chat.
 
 ---
 
@@ -84,17 +90,11 @@ What we know:
 ## 2. Sync correctness ("NPCs and animals feel buggy")
 
 ### 2.1 Combat and NPCs
-- [ ] **Remote NPCs run their AI on both clients.**
-  - The hook that stops AI for NPCs owned by the other player (`Actor::Process`, AE 37356) has no VR
-    address, so both copies act.
-  - This is probably the biggest cause of "NPCs feel buggy".
-  - Fix: find the SE id (`VR_POINTERS_TODO.md` section 1, first row).
-- [ ] **NPCs don't pick targets properly in co-op.**
-  - `CombatController::SortTargetSelectors` (33282) is unknown on VR, so the hook is off.
-  - Result: NPCs owned by one player react badly to the other player.
-  - Fix: find the SE id, then re-enable the hook.
-- [ ] **Kill sync is a coin flip.** Read the `Death sync:` logs from the next session (0), then fix
-  what they show.
+- [x] **[untested] Remote NPCs run their AI on both clients.** `Actor::Process` (37356) now has an
+  address from the TiltedEvolutionVR table.
+- [x] **[untested] NPCs don't pick targets properly in co-op.** `SortTargetSelectors` now resolves too.
+- [x] **[untested] Kill sync is a coin flip.** Deaths now go to every player, and remote bodies play the
+  death animation and ragdoll. Read the `Death sync:` logs after the next session.
 - [ ] **Hits from VR weapons.** A VR sword hit lands on the attacker's copy of the NPC. Check that
   damage reaches the NPC's owner, and that the health change is sent back when the NPC is owned by
   the other player.
@@ -112,11 +112,9 @@ What we know:
     ownership transfer.
 
 ### 2.2 Items and inventory
-- [ ] **Item pickups by NPCs** (`Actor::PickUpObject`, 37521) are not hooked on VR.
-- [ ] **Items added to actors** (`AddInventoryItem`, 37525) are not hooked on VR. It crashed with the
-  wrong address, so remote copies never get new items.
-  - Fix: find both SE ids.
-- [ ] Gold amount (37527) is unknown, so it always reads 0.
+- [x] **[untested] Item pickups by NPCs and players** (37521, 40533) are hooked again.
+- [x] **[untested] Items added to actors and containers** (37525, 19708) are hooked again.
+- [x] Gold amount (37527) resolves again.
 
 ### 2.3 VR body
 - [ ] **Finger and grip pose.** Remote hands are always open. Add finger curl (a few bytes per hand)
@@ -131,10 +129,9 @@ What we know:
 ### 2.4 World, quests, dialogue
 - [ ] **Message boxes show up for both players** ("player 1 opens text, player 2 sees the popup").
   Find which sync sends it, then limit it to the player it belongs to.
-- [ ] **Dialogue voice and subtitles.** SpeakSound (37542) and the subtitles function (52626) are off
-  on VR.
+- [x] **[untested] Dialogue voice and subtitles** (37542, 52626) are on again.
 - [ ] **Quest NPCs out of sync** (Bastianus Axius). Check quest sync with a party on the next test.
-- [ ] **Waypoint sharing** (40535/40536) is off on VR.
+- [x] **[untested] Waypoint sharing** (40535/40536) is on again.
 - [ ] **Weather and time.** `WeatherService` and `CalendarService` exist; confirm they work on VR.
 - [ ] **Shared horse.** Parked on purpose ("funny, minor"). InitiateMountPackage (37905) is left
   off.
@@ -143,18 +140,17 @@ What we know:
 
 ## 3. Stability
 
-- [ ] **39 VR addresses still missing** (`VR_POINTERS_TODO.md` sections 1-3).
+- [ ] **14 VR addresses still missing** (`VR_POINTERS_TODO.md` sections 1-3), mostly byte patches.
   - Work through them in batches, ordered by the features above; each batch is one session.
   - Method: size-sequence alignment, then check the code in `code.bin` with capstone.
-- [ ] **85 addresses never confirmed** (`VR_POINTERS_TODO.md` section 5: 53 matched by size, 32 from
-  the old diff table). Verify them with the same static method, starting with the diff-table ones.
-- [ ] **CEF crash guard audit.** Any overlay call on VR is a hard crash. Search every
-  `OverlayService` / `ExecuteAsync` / `CefListValue` path and add `m_pOverlay` guards everywhere at
-  once, instead of waiting for each crash.
+- [ ] **About 100 addresses never confirmed against VR code** (`VR_POINTERS_TODO.md` section 5). Most
+  were matched independently by two methods; confirm them in the disassembly when a crash points near one.
+- [ ] **CEF crash guard audit.** Before the VR menu is created, any overlay call is a hard crash. Check
+  that every `OverlayService` / `ExecuteAsync` / `CefListValue` path is guarded.
 - [ ] **Intermittent crash:** a script event sent to a freed temporary reference during cell attach
   (see `KNOWN_ISSUES.md`).
-- [ ] **Papyrus stand-ins.** Replace the Papyrus-native workarounds (SetNoBleedoutRecovery,
-  SetFactionRank) with the real functions once their SE ids are found.
+- [x] **Papyrus stand-ins** for SetNoBleedoutRecovery and SetFactionRank are replaced by the real
+  functions.
 
 ---
 
@@ -171,12 +167,10 @@ the headset off.
 - [ ] **HUD notifications** for connecting, connected, connection failed (with the reason), player
   joined or left, party joined, and player down. Some exist already; make them consistent.
 - [ ] **Reconnect automatically** after a drop, with a HUD message.
-- [ ] **[big] An in-game menu without CEF.** There is no overlay on VR, so there's no chat, player
-  list or settings. Options, cheapest first:
-  1. HUD messages only;
-  2. a small ESP with a "Skyrim Together" power or MCM page that calls into the client
-     (connect or disconnect, player list as message boxes);
-  3. an OpenVR overlay for ImGui.
+- [x] **[untested] In-headset menu:** the normal Skyrim Together UI as a SteamVR dashboard tab
+  (`Systems/VRDashboard.cpp`).
+  - [ ] Adapt the page layout for the dashboard (large text, no empty full-screen areas).
+  - [ ] A small always-visible overlay for chat and notifications while playing.
 
 ### 4.2 Versions and compatibility
 - [ ] **Version check with a clear message.** `AuthenticationRequest` has a `Version` field; make

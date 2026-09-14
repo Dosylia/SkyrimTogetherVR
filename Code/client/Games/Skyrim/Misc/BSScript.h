@@ -187,7 +187,14 @@ struct BSScript
         virtual void BindNativeMethod(IFunction* apFunction);
         virtual void sub_19();
         virtual void sub_1A();
+#ifdef SKYRIMVR
+        // VR has two extra virtuals here, which shifts every later slot (SendEvent, GetObjectHandlePolicy).
+        virtual void VR_Unk_1B();
+#endif
         virtual void sub_1B();
+#ifdef SKYRIMVR
+        virtual void VR_Unk_1D();
+#endif
         virtual void sub_1C();
         virtual void sub_1D();
         virtual void sub_1E();

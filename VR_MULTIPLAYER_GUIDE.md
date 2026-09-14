@@ -107,9 +107,14 @@ Just the address, nothing else: no `http://` and no quotes.
 2. **Everyone:** in MO2, pick **SkyrimTogetherVR** in the executable dropdown and click **Run**.
    Launching can take a while with this modlist.
 3. Load your save and wait until you're fully in the world.
-4. Press **F6** on the keyboard. A notification shows
-   `Skyrim Together: connecting to <address>`, then `Skyrim Together: connected to server`.
-5. Press **F6** again to disconnect.
+4. Connect, either way:
+   - **In the headset:** press the controller's **system button** to open the SteamVR dashboard, and pick
+     the **Skyrim Together** tab at the bottom. Use the laser pointer for the menu; text fields open the
+     SteamVR keyboard.
+   - **On the keyboard:** press **F6**. It uses `connect.txt`.
+
+   A notification shows `Skyrim Together: connected to server`.
+5. Disconnect from the same menu, or with **F6**.
 
 ---
 
@@ -119,7 +124,7 @@ When a new client build is ready:
 
 1. **Close the game first.**
 2. Replace `SkyrimTogetherVR.exe` (and `SkyrimTogetherVR.pdb`) in the `Skyrim Together VR` tools
-   folder.
+   folder. When the build notes say the menu changed, also replace the `UI` folder and `TPProcess.exe`.
 3. **Everyone must run the same build.** The friend replaces their exe too. Compare the file's
    *Date modified*.
 4. If the build notes say the server changed, restart the server as well.

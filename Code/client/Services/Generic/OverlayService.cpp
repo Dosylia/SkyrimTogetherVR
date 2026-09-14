@@ -9,6 +9,9 @@
 #include <OverlayRenderHandlerD3D11.hpp>
 
 #include <Systems/RenderSystemD3D11.h>
+#ifdef SKYRIMVR
+#include <Systems/VRDashboard.h>
+#endif
 
 #include <World.h>
 #include <Utils.h>
@@ -135,12 +138,30 @@ OverlayService::~OverlayService() noexcept
 {
 }
 
-// VR never creates the overlay (no D3D11 hook), so m_pOverlay stays null there. Every CEF call must
-// be guarded: CEF isn't initialized and any use of its API (even CefListValue::Create) kills the process.
+// m_pOverlay stays null until the overlay is created, which on VR only happens once OpenVR and CEF are up
+// (see CreateVR). Every CEF call must be guarded: before CefInitialize, any use of its API kills the process.
 void OverlayService::Create(RenderSystemD3D11* apRenderSystem) noexcept
 {
     m_pProvider = TiltedPhoques::MakeUnique<D3D11RenderProvider>(apRenderSystem);
-    m_pOverlay = new OverlayApp(m_pProvider.get(), new ::OverlayClient(m_transport, m_pProvider->Create()));
+    CreateOverlay(m_pProvider.get());
+}
+
+#ifdef SKYRIMVR
+void OverlayService::CreateVR() noexcept
+{
+    // CEF can only be initialized once per process, so a failed attempt is not retried.
+    if (m_vrOverlayAttempted)
+        return;
+    m_vrOverlayAttempted = true;
+
+    m_pVRDashboard = TiltedPhoques::MakeUnique<VRDashboard>();
+    CreateOverlay(m_pVRDashboard.get());
+}
+#endif
+
+void OverlayService::CreateOverlay(OverlayApp::RenderProvider* apProvider) noexcept
+{
+    m_pOverlay = new OverlayApp(apProvider, new ::OverlayClient(m_transport, apProvider->Create()));
 
     if (!m_pOverlay->Initialize())
     {
@@ -149,6 +170,12 @@ void OverlayService::Create(RenderSystemD3D11* apRenderSystem) noexcept
         {
             spdlog::critical("CEF failed to initialize, exit code {}. See 'cef_types.h' for description", exitCode);
         }
+
+#ifdef SKYRIMVR
+        // Without CEF every overlay call would kill the process; keep the overlay absent instead.
+        m_pOverlay = nullptr;
+        return;
+#endif
     }
 
     m_pOverlay->GetClient()->Create();
@@ -156,7 +183,7 @@ void OverlayService::Create(RenderSystemD3D11* apRenderSystem) noexcept
 
 void OverlayService::Render() noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     auto pPlayer = PlayerCharacter::Get();
@@ -167,11 +194,16 @@ void OverlayService::Render() noexcept
         SetInGame(false);
 
     m_pOverlay->GetClient()->Render();
+
+#ifdef SKYRIMVR
+    if (m_pVRDashboard)
+        m_pVRDashboard->Update(*this);
+#endif
 }
 
 void OverlayService::Reset() const noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     m_pOverlay->GetClient()->Reset();
@@ -179,7 +211,7 @@ void OverlayService::Reset() const noexcept
 
 void OverlayService::Reload() noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     SetInGame(false);
@@ -193,7 +225,7 @@ void OverlayService::Reload() noexcept
 
 void OverlayService::Initialize() noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     m_pOverlay->ExecuteAsync("init");
@@ -201,7 +233,7 @@ void OverlayService::Initialize() noexcept
 
 void OverlayService::SetActive(bool aActive) noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     if (!m_inGame)
@@ -221,7 +253,7 @@ bool OverlayService::GetActive() const noexcept
 
 void OverlayService::SetInGame(bool aInGame) noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     if (m_inGame == aInGame)
@@ -271,7 +303,7 @@ void OverlayService::SendSystemMessage(const std::string& acMessage)
 
 void OverlayService::SetPlayerHealthPercentage(uint32_t aFormId) const noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     Actor* pActor = Cast<Actor>(TESForm::GetById(aFormId));
@@ -304,7 +336,14 @@ void OverlayService::OnUpdate(const UpdateEvent&) noexcept
 {
     PerfScope perfScope("OverlayService::OnUpdate");
 
-    if (!m_pOverlay) // No overlay on VR
+#ifdef SKYRIMVR
+    // No renderer hook on VR: the overlay is created and drawn from here.
+    if (!m_pOverlay)
+        CreateVR();
+    Render();
+#endif
+
+    if (!m_pOverlay)
         return;
 
     RunDebugDataUpdates();
@@ -313,11 +352,11 @@ void OverlayService::OnUpdate(const UpdateEvent&) noexcept
 
 void OverlayService::OnConnectedEvent(const ConnectedEvent& acEvent) noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
-    {
-        Utils::ShowHudMessage("Skyrim Together: connected to server");
+#ifdef SKYRIMVR
+    Utils::ShowHudMessage("Skyrim Together: connected to server");
+#endif
+    if (!m_pOverlay)
         return;
-    }
 
     m_pOverlay->ExecuteAsync("connect");
 
@@ -328,18 +367,18 @@ void OverlayService::OnConnectedEvent(const ConnectedEvent& acEvent) noexcept
 
 void OverlayService::OnDisconnectedEvent(const DisconnectedEvent&) noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
-    {
-        Utils::ShowHudMessage("Skyrim Together: disconnected");
+#ifdef SKYRIMVR
+    Utils::ShowHudMessage("Skyrim Together: disconnected");
+#endif
+    if (!m_pOverlay)
         return;
-    }
 
     m_pOverlay->ExecuteAsync("disconnect");
 }
 
 void OverlayService::OnWaitingFor3DRemoved(entt::registry& aRegistry, entt::entity aEntity) const noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     const auto* pPlayerComponent = m_world.try_get<PlayerComponent>(aEntity);
@@ -366,7 +405,7 @@ void OverlayService::OnWaitingFor3DRemoved(entt::registry& aRegistry, entt::enti
 
 void OverlayService::OnPlayerComponentRemoved(entt::registry& aRegistry, entt::entity aEntity) const noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     const auto& playerComponent = m_world.get<PlayerComponent>(aEntity);
@@ -405,11 +444,11 @@ void OverlayService::OnPlayerDialogue(const NotifyPlayerDialogue& acMessage) noe
 
 void OverlayService::OnConnectionError(const ConnectionErrorEvent& acConnectedEvent) const noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
-    {
-        Utils::ShowHudMessage(TiltedPhoques::String("Skyrim Together: connection failed - ") + acConnectedEvent.ErrorDetail);
+#ifdef SKYRIMVR
+    Utils::ShowHudMessage(TiltedPhoques::String("Skyrim Together: connection failed - ") + acConnectedEvent.ErrorDetail);
+#endif
+    if (!m_pOverlay)
         return;
-    }
 
     auto pArgs = CefListValue::Create();
     pArgs->SetString(0, acConnectedEvent.ErrorDetail.c_str());
@@ -418,7 +457,7 @@ void OverlayService::OnConnectionError(const ConnectionErrorEvent& acConnectedEv
 
 void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     auto pArguments = CefListValue::Create();
@@ -434,7 +473,7 @@ void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcep
 
 void OverlayService::OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     auto pArguments = CefListValue::Create();
@@ -445,7 +484,7 @@ void OverlayService::OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept
 
 void OverlayService::OnPlayerLevel(const NotifyPlayerLevel& acMessage) noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     auto pArguments = CefListValue::Create();
@@ -456,7 +495,7 @@ void OverlayService::OnPlayerLevel(const NotifyPlayerLevel& acMessage) noexcept
 
 void OverlayService::OnPlayerCellChanged(const NotifyPlayerCellChanged& acMessage) const noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     auto pArguments = CefListValue::Create();
@@ -495,7 +534,7 @@ void OverlayService::OnNotifyTeleport(const NotifyTeleport& acMessage) noexcept
 
 void OverlayService::OnNotifyPlayerHealthUpdate(const NotifyPlayerHealthUpdate& acMessage) noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     const float percentage = acMessage.Percentage >= 0.f ? acMessage.Percentage : 0.f;
@@ -508,11 +547,11 @@ void OverlayService::OnNotifyPlayerHealthUpdate(const NotifyPlayerHealthUpdate& 
 
 void OverlayService::OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
-    {
-        Utils::ShowHudMessage(acEvent.IsLeader ? "Skyrim Together: party created" : "Skyrim Together: joined party");
+#ifdef SKYRIMVR
+    Utils::ShowHudMessage(acEvent.IsLeader ? "Skyrim Together: party created" : "Skyrim Together: joined party");
+#endif
+    if (!m_pOverlay)
         return;
-    }
 
     if (acEvent.IsLeader)
         m_world.GetOverlayService().GetOverlayApp()->ExecuteAsync("partyCreated");
@@ -520,18 +559,18 @@ void OverlayService::OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcep
 
 void OverlayService::OnPartyLeftEvent(const PartyLeftEvent& acEvent) noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
-    {
-        Utils::ShowHudMessage("Skyrim Together: left party");
+#ifdef SKYRIMVR
+    Utils::ShowHudMessage("Skyrim Together: left party");
+#endif
+    if (!m_pOverlay)
         return;
-    }
 
     m_world.GetOverlayService().GetOverlayApp()->ExecuteAsync("partyLeft");
 }
 
 void OverlayService::RunDebugDataUpdates() noexcept
 {
-    if (!m_pOverlay) // No overlay on VR
+    if (!m_pOverlay)
         return;
 
     static std::chrono::steady_clock::time_point lastSendTimePoint;

@@ -12,7 +12,8 @@
 // the VR code (disassembly or a crash dump, or an authoritative CommonLibVR-NG id); "unchecked"
 // means it was matched by neighbouring ids and function sizes only. Entries without a comment come
 // from an SE/VR binary-diff table and are unverified. Ids still without any VR address are listed in
-// VR_POINTERS_TODO.md.
+// VR_POINTERS_TODO.md. Entries marked "from TiltedEvolutionVR" come from that fork's address table
+// (github.com/cmpayc/TiltedEvolutionVR), cross-checked here against SE/AE function sizes.
 struct VRAddressOverrideEntry
 {
     uint32_t id;
@@ -30,22 +31,24 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 12060u, 0x01372b0u }, // SE 11921 ExtraDataList::SetEnchantment (CommonLibVR-NG), checked
     { 12401u, 0x01454a0u }, // SE 12274 Lock::SetLock, unchecked
     { 13718u, 0x017c4e0u }, // SE 13620 ModManager::GetCellFromCoordinates, unchecked
+    { 14375u, 0x019c0c0u }, // SE 14257 TESNPC::SetLeveledNpc, unchecked (from TiltedEvolutionVR)
     { 14529u, 0x019f970u }, // SE 14383 TESContainer::GetItemCount, unchecked
     { 14617u, 0x01a3f60u }, // SE 14461 TESForm::GetById, checked
     { 14953u, 0x01b0900u }, // SE 14775 TESTexture ctor, unchecked
-    { 15002u, 0x01bb6a0u }, // AnimationExperiments sub_1401A2220
-    { 15006u, 0x01bb820u }, // AnimationExperiments sub_1401A1D50
+    { 15002u, 0x01b1f00u }, // SE address from the symbol name, unchecked (from TiltedEvolutionVR)
+    { 15006u, 0x01b1a30u }, // SE address from the symbol name, unchecked (from TiltedEvolutionVR)
     { 16005u, 0x01e7740u }, // SE 15767 InventoryEntry::IsQuestObject, checked
     { 16142u, 0x01fce80u }, // SE 15902 InventoryChanges::Save, unchecked
     { 16143u, 0x01fcfb0u }, // SE 15903 InventoryChanges::Load, unchecked
-    { 18518u, 0x0275180u }, // CombatView getModifiedDistance
-    { 18563u, 0x0277910u }, // ImageSpaceModifierInstance clearImageSpaceModifier
+    { 18518u, 0x025b7c0u }, // SE 18133 BGSWorldLocation distance, unchecked (from TiltedEvolutionVR)
+    { 18563u, 0x025da30u }, // SE 18178 ImageSpaceModifierInstance stop, unchecked (from TiltedEvolutionVR)
     { 19075u, 0x027a4c0u }, // SE 18606 TESObjectCELL::GetCOCPlacementInfo, unchecked
     { 19362u, 0x02a7f00u }, // SE 19362 TESObjectREFR::SetAngleZ, checked
     { 19364u, 0x028ccd0u }, // SE 18949 EventDispatcher::PushEvent, unchecked
     { 19512u, 0x0297310u }, // SE 19110 TESObjectREFR::AddLockChange (CommonLibVR-NG), checked
     { 19689u, 0x029f110u }, // SE 19263 TESObjectREFR::RemoveItem, unchecked
     { 19702u, 0x029fac0u }, // SE 19276 TESObjectREFR::GetContainer, unchecked
+    { 19708u, 0x029fdb0u }, // SE 19282 TESObjectREFR::AddObjectToContainer, unchecked (from TiltedEvolutionVR)
     { 19742u, 0x02a5710u }, // SE 19315 TESObjectREFR::UpdateReference3D, checked
     { 19784u, 0x02a7ba0u }, // SE 19357 TESObjectREFR::GetWorldLocation, unchecked
     { 19787u, 0x02a7d80u }, // SE 19360 TESObjectREFR::SetAngleX, checked
@@ -54,6 +57,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 19846u, 0x02ad090u }, // SE 19418 TESObjectREFR::GetHandle, unchecked
     { 20203u, 0x02b8480u }, // SE 19798 GetLocationEncounterZone, unchecked
     { 20221u, 0x02b89e0u }, // SE 19816 TESObjectREFR::CreateLock, unchecked
+    { 21622u, 0x02ee440u }, // SE 21167 Actor::HasPerk, checked (from TiltedEvolutionVR)
     { 23231u, 0x0332a90u }, // SE 22754 TESQuest::CompleteAllObjectives, unchecked
     { 24568u, 0x0367980u }, // SE 24065 TESIdleForm property, unchecked
     { 24987u, 0x037f980u }, // SE 24468 TESQuest::SetStopped, unchecked
@@ -63,31 +67,49 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 26231u, 0x03c1a20u }, // SE 25684 Sky::UpdateWeather, checked
     { 26244u, 0x03c4970u }, // SE 25697 Sky::ReleaseWeatherOverride, unchecked
     { 27040u, 0x03eada0u }, // SE 26454 FaceGen CreateTints, unchecked
-    { 32802u, 0x052cf30u }, // AnimationExperiments sub_1404ECF50
+    { 27244u, 0x03f2ff0u }, // SE 26576 experience calculation, unchecked (from TiltedEvolutionVR)
+    { 32525u, 0x0510b20u }, // SE 32525 combat target selector sort predicate, unchecked (from TiltedEvolutionVR)
+    { 32802u, 0x04fd1c0u }, // SE 32048 animation action helper, unchecked (from TiltedEvolutionVR)
+    { 32803u, 0x04fd300u }, // SE 32049 animation action helper, unchecked (from TiltedEvolutionVR)
     { 32883u, 0x0500890u }, // SE 32139 IAnimationGraphManagerHolder::RevertAnimationGraphManager, unchecked
-    { 33235u, 0x0533c10u }, // CombatController setTarget
-    { 33261u, 0x05402d0u }, // CombatView checkMovement
-    { 33285u, 0x05410a0u }, // CombatController arrayQuickSort
+    { 33235u, 0x050e480u }, // SE 32488 CombatController::SetTarget, unchecked (from TiltedEvolutionVR)
+    { 33261u, 0x050ff00u }, // SE 32512 combat movement check, unchecked (from TiltedEvolutionVR)
+    { 33285u, 0x0510c90u }, // SE 32528 combat target array quick sort, unchecked (from TiltedEvolutionVR)
+    { 34053u, 0x0540cc0u }, // SE 33278 MagicTarget adjust for perks, checked (from TiltedEvolutionVR)
+    { 34140u, 0x0545640u }, // SE 33359 MagicCaster::InterruptCastImpl, checked (from TiltedEvolutionVR)
     { 34144u, 0x0546260u }, // SE 33363 ActorMagicCaster::SpellCast, checked
+    { 34370u, 0x054f500u }, // SE 33594 ActiveEffect::Finish, checked (from TiltedEvolutionVR)
     { 34401u, 0x0550540u }, // SE 33623 MagicCaster::CastSpell, unchecked
     { 34512u, 0x0557070u }, // SE 33728 MagicTarget::DispelAllSpells, unchecked
     { 34525u, 0x0557830u }, // SE 33741 MagicTarget::CheckAddEffectTargetData, unchecked
     { 34526u, 0x05579c0u }, // SE 33742 MagicTarget::AddTarget, checked
     { 34529u, 0x0557f80u }, // SE 33745 MagicTarget::GetTargetAsActor, unchecked
     { 34582u, 0x057f650u }, // SE 34582 BGSSaveLoadChangesMap::GetChangeFlags, checked
+    { 34989u, 0x0569920u }, // SE 34193 SummonCreatureEffect start, unchecked (from TiltedEvolutionVR)
     { 35086u, 0x056e070u }, // SE 34286 ValueModifierEffect::ApplyActorEffect, unchecked
+    { 35269u, 0x0574bf0u }, // SE 34444 MenuTopicManager::PlayDialogueOption, unchecked (from TiltedEvolutionVR)
     { 35993u, 0x059ef30u }, // SE 35100 BGSLoadGameBuffer ctor, checked
     { 36000u, 0x059f160u }, // SE 35107 BGSLoadFormBuffer::ReadFormId, unchecked
     { 36035u, 0x05a0b00u }, // SE 35145 BGSSaveFormBuffer ctor, checked
     { 36047u, 0x05a0ff0u }, // SE 35157 BGSSaveFormBuffer::WriteId, checked
     { 36048u, 0x05a1070u }, // SE 35158 BGSSaveFormBuffer::WriteFormId, unchecked
+    { 36291u, 0x05ad8f0u }, // SE 35402 Calendar::Update, checked (from TiltedEvolutionVR)
     { 36372u, 0x05e2010u }, // SE 36372 Character animation graph update (VRBodySync), checked
-    { 36544u, 0x05f2410u }, // TiltedOnlineApp winMain
-    { 37147u, 0x061e640u }, // AnimationExperiments sub_1405CCB20
-    { 37175u, 0x061f300u }, // Actor characterDtor
+    { 36525u, 0x05ef640u }, // SE 36525 Actor::AddObjectToContainer, unchecked (from TiltedEvolutionVR)
+    { 36527u, 0x05efa10u }, // SE 36527 Actor::GetGoldAmount, unchecked (from TiltedEvolutionVR)
+    { 36544u, 0x05b4290u }, // SE 35545 WinMain, checked (from TiltedEvolutionVR)
+    { 36741u, 0x0604f30u }, // SE 36741 Actor::GetDetectionState, unchecked (from TiltedEvolutionVR)
+    { 37147u, 0x05d5120u }, // SE 36174 animation helper, unchecked (from TiltedEvolutionVR)
+    { 37175u, 0x05d63a0u }, // SE 36196 Character dtor, unchecked (from TiltedEvolutionVR)
+    { 37356u, 0x05e0e20u }, // SE 36365 Actor process (AI) update, unchecked (from TiltedEvolutionVR)
     { 37511u, 0x05ee4f0u }, // SE 36511 TESObjectREFR::PayGoldToContainer, unchecked
+    { 37521u, 0x05eeca0u }, // SE 36521 Actor::PickUpObject, unchecked (from TiltedEvolutionVR)
+    { 37542u, 0x05f0e20u }, // SE 36541 Actor speak sound, checked (from TiltedEvolutionVR)
+    { 37577u, 0x05f5280u }, // SE 36575 Actor::IsFleeing, unchecked (from TiltedEvolutionVR)
+    { 37677u, 0x0600220u }, // SE 36669 Actor::SetFactionRank, unchecked (from TiltedEvolutionVR)
     { 37717u, 0x0602f40u }, // SE 36707 Actor::SetPlayerTeammate, checked
     { 37975u, 0x0612420u }, // SE 36950 Actor::UnequipObject, checked
+    { 38533u, 0x062c950u }, // SE 37583 Actor::SetNoBleedoutRecovery, checked (from TiltedEvolutionVR)
     { 38896u, 0x0640c40u }, // SE 37940 ActorEquipManager::EquipSpell (by hand index), checked
     { 38899u, 0x0640f30u }, // SE 37943 ActorEquipManager::UnequipAll, unchecked
     { 38903u, 0x06413c0u }, // SE 37947 ActorEquipManager::UnequipSpell (by hand index), checked
@@ -98,45 +120,53 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 38934u, 0x06436c0u }, // SE 37979 EquipManager internal Unequip, checked
     { 38935u, 0x0643910u }, // SE 37980 EquipManager internal UnequipShout, unchecked
     { 38949u, 0x0643f20u }, // SE 37996 ActorMediator::PerformAction, checked
-    { 38952u, 0x068aef0u }, // AnimationExperiments PerformIdleAction
+    { 38952u, 0x0644070u }, // SE 37998 ActorMediator::PerformIdleAction, unchecked (from TiltedEvolutionVR)
     { 38953u, 0x0644160u }, // SE 37999 ActorMediator::PerformComplexAction, checked
+    { 38959u, 0x0644510u }, // SE 38005 AI package init, unchecked (from TiltedEvolutionVR)
     { 38979u, 0x0645240u }, // SE 38023 ActorState::SetWeaponDrawn, checked
-    { 39002u, 0x068e580u }, // AnimationExperiments sub_14063CAA0
+    { 39002u, 0x0645b10u }, // SE 38046 animation helper, unchecked (from TiltedEvolutionVR)
     { 39004u, 0x0646160u }, // SE 38048 ApplyAnimationVariables, checked
     { 39114u, 0x064c170u }, // SE 38156 AIProcess::CheckForNewPackage, unchecked
+    { 39643u, 0x066dd50u }, // SE 38612 dialogue response processing, unchecked (from TiltedEvolutionVR)
     { 40245u, 0x069bec0u }, // SE 39171 Character ctor, checked
     { 40246u, 0x069bfc0u }, // SE 39172 Character ctor (uint8), checked
     { 40454u, 0x06c00f0u }, // SE 39382 Actor::DropObject, unchecked
+    { 40533u, 0x06c6e00u }, // SE 39456 PlayerCharacter::PickUpObject, unchecked (from TiltedEvolutionVR)
+    { 40535u, 0x06c74d0u }, // SE 39458 PlayerCharacter::SetWaypoint, unchecked (from TiltedEvolutionVR)
+    { 40536u, 0x06c7630u }, // SE 39459 PlayerCharacter::RemoveWaypoint, unchecked (from TiltedEvolutionVR)
     { 42345u, 0x072c0a0u }, // SE 41266 PlayerControls::SetEnabled, checked
     { 42704u, 0x0743170u }, // SE 41626 Actor::UpdateDetectionState, unchecked
-    { 47196u, 0x0818380u }, // CombatView isValidTarget
+    { 47196u, 0x07e1ac0u }, // SE 45923 combat target validity check, unchecked (from TiltedEvolutionVR)
     { 47303u, 0x07e7e90u }, // SE 46039 Actor::HasEquippedRangedWeapon, unchecked
     { 47307u, 0x07e8020u }, // SE 46043 Actor world location check, unchecked
     { 51925u, 0x08c23e0u }, // SE 51046 LoadingScreen RequestLoadingText, checked
+    { 52626u, 0x08f9c60u }, // SE 51753 SubtitleManager::ShowSubtitle, checked (from TiltedEvolutionVR)
+    { 52627u, 0x08f9ea0u }, // SE 51754 SubtitleManager::HideSubtitle, unchecked (from TiltedEvolutionVR)
     { 53112u, 0x095c430u }, // MapMenu hookLoc
     { 53915u, 0x095aa60u }, // SE 53105 BSScript Statement::SetSize, checked
     { 53926u, 0x095c670u }, // SE 53115 SkyrimVM::Update, unchecked
     { 54425u, 0x0976690u }, // SE 53604 EventDispatcher::RegisterSink, unchecked
     { 54522u, 0x097bd00u }, // SE 53705 EventDispatcher::UnregisterSink, checked
+    { 55497u, 0x09ad8a0u }, // SE 54864 beast form change, unchecked (from TiltedEvolutionVR)
     { 55739u, 0x09baf10u }, // SE 55141 BindEverythingToScript, checked
     { 56205u, 0x09d02a0u }, // SE 55674 TESObjectREFR::PlayAnimation, checked
     { 56206u, 0x09d0320u }, // SE 55675 TESObjectREFR::PlayAnimationAndWait, checked
-    { 57185u, 0x0a10880u }, // AnimationExperiments sub_1409CA9D0
+    { 57185u, 0x0a052c0u }, // SE 56763 behavior symbol lookup, unchecked (from TiltedEvolutionVR)
     { 58377u, 0x0a2e820u }, // SE 57804 hkbBehaviorGraph::HandleEvents, unchecked
     { 58378u, 0x0a2ea40u }, // SE 57805 hkbBehaviorGraph event helper, unchecked
-    { 59310u, 0x0a7b730u }, // AnimationExperiments sub_140A13150
-    { 60079u, 0x0aa6570u }, // AnimationExperiments sub_140A4DFA0
-    { 63362u, 0x0b57580u }, // AnimationExperiments BSSendEvent
-    { 63372u, 0x0b57b00u }, // AnimationExperiments sub_140AE2DB0
+    { 59310u, 0x0a4dca0u }, // SE 58656 behavior generator event, unchecked (from TiltedEvolutionVR)
+    { 60079u, 0x0a88950u }, // SE 59405 behavior graph update, unchecked (from TiltedEvolutionVR)
+    { 63362u, 0x0b1cfa0u }, // SE 62420 BSAnimationGraphManager send event, unchecked (from TiltedEvolutionVR)
+    { 63372u, 0x0b1d8b0u }, // SE 62430 BSAnimationGraphManager event helper, unchecked (from TiltedEvolutionVR)
     { 68221u, 0x0c413f0u }, // SE 66964 CRC hash stub, unchecked
     { 68545u, 0x0c4e600u }, // SE 67245 BSInputEnableManager::EnableOtherEvent, unchecked
     { 69066u, 0x0c6b170u }, // SE 67740 BSThreadUtils::SetThreadName, checked
     { 69165u, 0x0c6dc90u }, // SE 67823 BSFixedString::Set, unchecked
-    { 70639u, 0x0cd5180u }, // SE 70273 NiCamera::WorldPtToScreenPt3, unchecked
+    { 70639u, 0x0cac090u }, // SE 69269 NiCamera::WorldPtToScreenPt3, unchecked (from TiltedEvolutionVR)
     { 70717u, 0x0caef60u }, // SE 69335 FaceGen CreateTexture, unchecked
     { 76207u, 0x0d8a900u }, // SE 74481 BSFaceGenNiNode::GetObjectByName, unchecked
     { 82074u, 0x0f1a3b0u }, // SE 79937 UI::IsMenuOpen, unchecked
-    { 82088u, 0x0f93250u }, // UI CloseAll
+    { 82088u, 0x0f1bf10u }, // SE 79951 UI close all menus, unchecked (from TiltedEvolutionVR)
     { 104296u, 0x126f1c0u }, // SE 97508 BSScript::Variable::Reset, checked
     { 104483u, 0x129a6c0u }, // SE 97745 BSScript Stack::GetPageForFrame, checked
     { 104653u, 0x129e220u }, // SE 97925 NativeFunctionBase ctor, checked
@@ -144,23 +174,23 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 370892u, 0x1e96c58u }, // fAIMinGreetingDistance setting value, checked
     { 380768u, 0x1eabf30u }, // bAlwaysActive:General setting value, checked
     { 381472u, 0x1eaef68u }, // iDifficulty:GamePlay setting value, checked
-    { 382393u, 0x1bb3870u }, // CombatView value
-    { 382400u, 0x1bb38f4u }, // CombatView value
+    { 382393u, 0x1eb1d08u }, // combat detection time limit setting value, unchecked (from TiltedEvolutionVR)
+    { 382400u, 0x1eb1d24u }, // combat recent LOS time limit setting value, unchecked (from TiltedEvolutionVR)
     { 400188u, 0x1f81900u }, // MemoryManager instance (from MemoryManager::GetSingleton), checked
-    { 400312u, 0x1c39c68u }, // TESObjectREFR nullHandle
+    { 400312u, 0x1f8319cu }, // invalid reference handle, unchecked (from TiltedEvolutionVR)
     { 400441u, 0x2feb6f8u }, // SE 516923 TES singleton (CommonLibVR-NG), checked
     { 401069u, 0x2feb9f0u }, // SE 517014 PlayerCharacter singleton (CommonLibVR-NG), checked
-    { 401100u, 0x1c3cdc0u }, // AnimationExperiments qword_142EFF990
+    { 401100u, 0x2fc4880u }, // animation global, unchecked (from TiltedEvolutionVR)
     { 403566u, 0x2febcb0u }, // SE 517058 animation variables global, checked
     { 403567u, 0x2febcb8u }, // SE 517059 ActorMediator singleton, checked
-    { 403568u, 0x1c494c8u }, // AnimationExperiments qword_142F271C8
-    { 403988u, 0x1c4bde0u }, // AnimationExperiments qword_142F3A1E8
-    { 404125u, 0x1c4d1b0u }, // AITimer value
-    { 405282u, 0x1c53d48u }, // CombatView value
-    { 406126u, 0x1c58540u }, // HUDMenuUtils matrix
-    { 406160u, 0x1c587d8u }, // HUDMenuUtils port
+    { 403568u, 0x2febcc0u }, // SE 517060 animation global (next to 403566/403567), unchecked (from TiltedEvolutionVR)
+    { 403988u, 0x2fff008u }, // animation global, unchecked (from TiltedEvolutionVR)
+    { 404125u, 0x2fff43cu }, // AITimer, checked (from TiltedEvolutionVR)
+    { 405282u, 0x3010168u }, // combat setting value, unchecked (from TiltedEvolutionVR)
+    { 406126u, 0x3011d40u }, // HUD world-to-camera matrix, checked (from TiltedEvolutionVR)
+    { 406160u, 0x30133a8u }, // HUD camera viewport, checked (from TiltedEvolutionVR)
     { 410506u, 0x316ad98u }, // SE 523926 NiCamera NiRTTI, checked
-    { 414391u, 0x1c8d5e8u }, // BSScript policy
+    { 414391u, 0x3422948u }, // script object handle policy, unchecked (from TiltedEvolutionVR)
     { 414675u, 0x3423e20u }, // SE 527752 NiMaskedShader NiRTTI, unchecked
 
     // RTTI type descriptors, from CommonLibVR-NG Offsets_RTTI.h

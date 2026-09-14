@@ -87,8 +87,8 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     VRBodySync::SetRemotePose(apActor, vrPose);
 #endif
 
-    // Don't try to move a null actor
-    if (!apActor)
+    // Don't try to move a null actor, or a corpse: its ragdoll decides where it lies.
+    if (!apActor || apActor->actorState.IsDeadOrDying())
         return;
 
     apActor->ForcePosition(position);

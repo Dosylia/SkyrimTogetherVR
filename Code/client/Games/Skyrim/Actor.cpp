@@ -304,12 +304,6 @@ void Actor::SetEssentialEx(bool aSet) noexcept
 
 void Actor::SetNoBleedoutRecovery(bool aSet) noexcept
 {
-#ifdef SKYRIMVR
-    // No VR address for 38533: use the Papyrus native instead.
-    PAPYRUS_FUNCTION(void, Actor, SetNoBleedoutRecovery, bool);
-    s_pSetNoBleedoutRecovery(this, aSet);
-    return;
-#endif
     TP_THIS_FUNCTION(TSetNoBleedoutRecovery, void, Actor, bool);
     POINTER_SKYRIMSE(TSetNoBleedoutRecovery, s_setNoBleedoutRecovery, 38533, 38533);
     TiltedPhoques::ThisCall(s_setNoBleedoutRecovery, this, aSet);
@@ -687,7 +681,7 @@ Inventory Actor::GetEquipment() const noexcept
 int32_t Actor::GetGoldAmount() const noexcept
 {
     TP_THIS_FUNCTION(TGetGoldAmount, int32_t, const Actor);
-    POINTER_SKYRIMSE(TGetGoldAmount, s_getGoldAmount, 37527, 0); // No VR address
+    POINTER_SKYRIMSE(TGetGoldAmount, s_getGoldAmount, 37527, 36527);
     if (!s_getGoldAmount.Get())
         return 0;
     return TiltedPhoques::ThisCall(s_getGoldAmount, this);
@@ -776,12 +770,6 @@ void Actor::SetFactions(const Factions& acFactions) noexcept
 
 void Actor::SetFactionRank(const TESFaction* apFaction, int8_t aRank) noexcept
 {
-#ifdef SKYRIMVR
-    // The VR address for 37677 is unverified: use the Papyrus native instead.
-    PAPYRUS_FUNCTION(void, Actor, SetFactionRank, TESFaction*, int32_t);
-    s_pSetFactionRank(this, const_cast<TESFaction*>(apFaction), static_cast<int32_t>(aRank));
-    return;
-#endif
     TP_THIS_FUNCTION(TSetFactionRankInternal, void, Actor, const TESFaction*, int8_t);
 
     POINTER_SKYRIMSE(TSetFactionRankInternal, s_setFactionRankInternal, 37677, 37677);
@@ -820,7 +808,7 @@ static TInitiateMountPackage* RealInitiateMountPackage = nullptr;
 
 bool Actor::InitiateMountPackage(Actor* apMount) noexcept
 {
-    if (!RealInitiateMountPackage) // Null on VR (no address)
+    if (!RealInitiateMountPackage) // Null on VR: mounting a remote horse is left as is
         return false;
     return TiltedPhoques::ThisCall(RealInitiateMountPackage, this, apMount);
 }
@@ -882,15 +870,27 @@ void Actor::Kill() noexcept
     if (pExtension->IsPlayer())
         return;
 
+    // Remote actors only play animations sent by their owner (HookPerformAction). The death animation and
+    // ragdoll have to go through here, or the body dies standing up.
+    const bool forceAnimation = pExtension->IsRemote();
+    if (forceAnimation)
+        g_forceAnimation = true;
+
 #ifdef SKYRIMVR
     // Call KillImpl (SE 36872) by address rather than through the virtual, whose VR slot is unverified.
     TP_THIS_FUNCTION(TKillImpl, void, Actor, Actor* apAttacker, float aDamage, bool aSendEvent, bool aRagdollInstant);
     POINTER_SKYRIMSE(TKillImpl, s_killImpl, 0, 36872);
     TiltedPhoques::ThisCall(s_killImpl, this, nullptr, 100.f, true, true);
+
+    if (forceAnimation)
+        g_forceAnimation = false;
     return;
 #endif
     // TODO: these args are kind of bogus of course
     KillImpl(nullptr, 100.f, true, true);
+
+    if (forceAnimation)
+        g_forceAnimation = false;
 
     // Papyrus kill will not go through if it is queued by a kill move
     /*
@@ -973,7 +973,8 @@ char TP_MAKE_THISCALL(HookSetPosition, Actor, NiPoint3& aPosition)
     const auto pExtension = apThis ? apThis->GetExtension() : nullptr;
     const auto bIsRemote = pExtension && pExtension->IsRemote();
 
-    if (bIsRemote && !ScopedReferencesOverride::IsOverriden())
+    // A remote corpse moves with its own ragdoll (see HookActorProcess).
+    if (bIsRemote && !apThis->actorState.IsDeadOrDying() && !ScopedReferencesOverride::IsOverriden())
         return 1;
 
     // Don't interfere with non actor references, or the player, or if we are calling our self
@@ -1168,8 +1169,6 @@ void* TP_MAKE_THISCALL(HookPickUpObject, Actor, TESObjectREFR* apObject, int32_t
 
 void Actor::PickUpObject(TESObjectREFR* apObject, int32_t aCount, bool aUnk1, float aUnk2) noexcept
 {
-    if (!RealPickUpObject) // Null on VR (no address)
-        return;
     TiltedPhoques::ThisCall(RealPickUpObject, this, apObject, aCount, aUnk1, aUnk2);
 }
 
@@ -1289,8 +1288,6 @@ bool TP_MAKE_THISCALL(HookSpeakSoundFunction, Actor, const char* apName, uint32_
 
 void Actor::SpeakSound(const char* pFile)
 {
-    if (!RealSpeakSoundFunction) // Null on VR (no address)
-        return;
     uint32_t handle[3]{};
     handle[0] = -1;
     TiltedPhoques::ThisCall(RealSpeakSoundFunction, this, pFile, handle, 0, 0x32, 0, 0, 0, 0, 0, 0, 0, 1, 1);
@@ -1298,9 +1295,9 @@ void Actor::SpeakSound(const char* pFile)
 
 char TP_MAKE_THISCALL(HookActorProcess, Actor, float a2)
 {
-    // Don't process AI if we own the actor
-
-    if (apThis->GetExtension()->IsRemote())
+    // Remote actors are driven by their owner, so their AI doesn't run here. A remote corpse still updates, or its
+    // ragdoll never falls.
+    if (apThis->GetExtension()->IsRemote() && !apThis->actorState.IsDeadOrDying())
         return 0;
 
     return TiltedPhoques::ThisCall(RealActorProcess, apThis, a2);
@@ -1345,7 +1342,7 @@ static TiltedPhoques::Initializer s_actorHooks(
         POINTER_SKYRIMSE(TDamageActor, s_damageActor, 37335, 36345);
         POINTER_SKYRIMSE(TApplyActorEffect, s_applyActorEffect, 35086, 35086);
         POINTER_SKYRIMSE(TRegenAttributes, s_regenAttributes, 37448, 36452);
-        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525, 0); // No VR address
+        POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525, 36525);
         POINTER_SKYRIMSE(TPickUpObject, s_pickUpObject, 37521, 37521);
         POINTER_SKYRIMSE(TDropObject, s_dropObject, 40454, 40454);
         POINTER_SKYRIMSE(TUpdateDetectionState, s_updateDetectionState, 42704, 42704);

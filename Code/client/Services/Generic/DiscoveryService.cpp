@@ -9,6 +9,7 @@
 #include <Forms/TESObjectCELL.h>
 #include <Forms/TESWorldSpace.h>
 #include <Forms/TESNPC.h>
+#include <Games/ActorExtension.h>
 
 #include <Events/ActorAddedEvent.h>
 #include <Events/ActorRemovedEvent.h>
@@ -247,7 +248,13 @@ void DiscoveryService::VisitForms() noexcept
             known.MissingSince = now;
 
         const bool isSameObject = TESForm::GetById(formId) == static_cast<TESForm*>(known.pReference);
-        if (!isSameObject || now - known.MissingSince >= cRemovalGracePeriod)
+
+        // Copies of actors owned by another player are removed right away: the server may already be asking to
+        // spawn them again (after a load door, for example), and that request is ignored while the old copy exists.
+        auto* pActor = isSameObject ? Cast<Actor>(known.pReference) : nullptr;
+        const bool isRemote = pActor && pActor->GetExtension()->IsRemote();
+
+        if (!isSameObject || isRemote || now - known.MissingSince >= cRemovalGracePeriod)
             s_removedForms.push_back(formId);
     }
 

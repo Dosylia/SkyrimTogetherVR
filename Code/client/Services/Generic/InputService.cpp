@@ -104,7 +104,7 @@ void SetUIActive(OverlayService& aOverlay, auto apRenderer, bool aActive)
 
     // Ensures the game is actually loaded, in case the initial event was sent too early
     aOverlay.SetVersion(BUILD_COMMIT);
-    if (aOverlay.GetOverlayApp()) // No overlay on VR
+    if (aOverlay.GetOverlayApp())
         aOverlay.GetOverlayApp()->ExecuteAsync("enterGame");
 
     apRenderer->SetCursorVisible(aActive);

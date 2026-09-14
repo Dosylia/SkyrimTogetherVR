@@ -128,7 +128,7 @@ void PartyService::OnPartyInfo(const NotifyPartyInfo& acPartyInfo) noexcept
             pWorldEncountersEnabled->f = 1.f;
         }
 
-        if (!m_world.GetOverlayService().GetOverlayApp()) // No overlay on VR
+        if (!m_world.GetOverlayService().GetOverlayApp())
             return;
 
         auto pArguments = CefListValue::Create();
@@ -150,7 +150,7 @@ void PartyService::OnPartyInvite(const NotifyPartyInvite& acPartyInvite) noexcep
 
     m_invitations[acPartyInvite.InviterId] = acPartyInvite.ExpiryTick;
 
-    if (!m_world.GetOverlayService().GetOverlayApp()) // No overlay on VR
+    if (!m_world.GetOverlayService().GetOverlayApp())
         return;
 
     auto pArguments = CefListValue::Create();

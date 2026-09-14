@@ -105,18 +105,21 @@ void ActorValueService::OnDeathStateChange(const PacketEvent<RequestDeathStateCh
 
     const auto it = characterView.find(static_cast<entt::entity>(message.Id));
 
-    if (it != characterView.end())
+    if (it == characterView.end())
     {
-        auto& characterComponent = characterView.get<CharacterComponent>(*it);
-        characterComponent.SetDead(message.IsDead);
-        spdlog::debug("Updating death state {:x}:{}", message.Id, message.IsDead);
+        spdlog::warn("{}: no character with server id {:X}, death state not relayed", __FUNCTION__, message.Id);
+        return;
     }
+
+    auto& characterComponent = characterView.get<CharacterComponent>(*it);
+    characterComponent.SetDead(message.IsDead);
+    spdlog::debug("Updating death state {:x}:{}", message.Id, message.IsDead);
 
     NotifyDeathStateChange notify;
     notify.Id = message.Id;
     notify.IsDead = message.IsDead;
 
-    const entt::entity cEntity = static_cast<entt::entity>(message.Id);
-    if (!GameServer::Get()->SendToPlayersInRange(notify, cEntity, acMessage.pPlayer))
-        spdlog::error("{}: SendToPlayersInRange failed", __FUNCTION__);
+    // Sent to everyone, not only players in range: a death is sent once, and a client that misses it keeps a
+    // living body for the rest of the session. Clients without that actor ignore the message.
+    GameServer::Get()->SendToPlayers(notify, acMessage.pPlayer);
 }

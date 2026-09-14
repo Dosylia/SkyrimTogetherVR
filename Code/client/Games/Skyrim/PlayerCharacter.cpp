@@ -151,15 +151,11 @@ void PlayerCharacter::PayCrimeGoldToAllFactions() noexcept
 
 void PlayerCharacter::SetWaypoint(NiPoint3* apPosition, TESWorldSpace* apWorldSpace) noexcept
 {
-    if (!RealSetWaypoint) // Null on VR (no address)
-        return;
     return TiltedPhoques::ThisCall(RealSetWaypoint, this, apPosition, apWorldSpace);
 }
 
 void PlayerCharacter::RemoveWaypoint() noexcept
 {
-    if (!RealRemoveWaypoint) // Null on VR (no address)
-        return;
     return TiltedPhoques::ThisCall(RealRemoveWaypoint, this);
 }
 

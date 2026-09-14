@@ -8,7 +8,7 @@ void ArrayQuickSortRecursiveCombatTargets(GameArray<CombatTargetSelector*>* apAr
     POINTER_SKYRIMSE(TArrayQuickSort, arrayQuickSort, 33285, 33285);
 
     using TSortTargetSelectors = int64_t(int64_t, int64_t);
-    POINTER_SKYRIMSE(TSortTargetSelectors, sortTargetSelectors, 33282, 0); // No VR address
+    POINTER_SKYRIMSE(TSortTargetSelectors, sortTargetSelectors, 33282, 32525);
     if (!sortTargetSelectors.Get() || !arrayQuickSort.Get())
         return;
 

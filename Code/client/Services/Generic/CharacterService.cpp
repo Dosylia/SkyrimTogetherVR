@@ -405,8 +405,22 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
 
     if (remoteItor != std::end(remoteView))
     {
-        spdlog::warn("Character with remote id {:X} is already spawned.", acMessage.ServerId);
-        return;
+        const entt::entity cExisting = *remoteItor;
+        const auto* pFormIdComponent = m_world.try_get<FormIdComponent>(cExisting);
+        const bool hasActor = m_world.all_of<WaitingFor3D>(cExisting) || (pFormIdComponent && TESForm::GetById(pFormIdComponent->Id));
+
+        if (hasActor)
+        {
+            spdlog::warn("Character with remote id {:X} is already spawned.", acMessage.ServerId);
+            return;
+        }
+
+        // The server still counts this character as spawned here, but the local copy is gone. Spawn it again, or
+        // it stays invisible for the rest of the session.
+        spdlog::info("Character with remote id {:X} has no actor anymore, spawning it again", acMessage.ServerId);
+        DeleteRemoteEntityComponents(cExisting);
+        if (m_world.orphan(cExisting))
+            m_world.destroy(cExisting);
     }
 
     Actor* pActor = nullptr;

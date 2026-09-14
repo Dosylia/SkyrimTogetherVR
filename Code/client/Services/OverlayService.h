@@ -1,6 +1,7 @@
 #pragma once
 
 #include <include/internal/cef_ptr.h>
+#include <OverlayApp.hpp>
 
 namespace TiltedPhoques
 {
@@ -9,6 +10,7 @@ struct OverlayApp;
 
 struct RenderSystemD3D11;
 struct D3D11RenderProvider;
+struct VRDashboard;
 struct FormIdComponent;
 struct World;
 struct Actor;
@@ -43,6 +45,9 @@ struct OverlayService
     TP_NOCOPYMOVE(OverlayService);
 
     void Create(RenderSystemD3D11* apRenderSystem) noexcept;
+#ifdef SKYRIMVR
+    void CreateVR() noexcept;
+#endif
 
     void Render() noexcept;
     void Reset() const noexcept;
@@ -83,11 +88,16 @@ protected:
     void OnPartyLeftEvent(const PartyLeftEvent& acEvent) noexcept;
 
 private:
+    void CreateOverlay(OverlayApp::RenderProvider* apProvider) noexcept;
     void RunDebugDataUpdates() noexcept;
     void RunPlayerHealthUpdates() noexcept;
 
     CefRefPtr<OverlayApp> m_pOverlay{nullptr};
     TiltedPhoques::UniquePtr<D3D11RenderProvider> m_pProvider;
+#ifdef SKYRIMVR
+    TiltedPhoques::UniquePtr<VRDashboard> m_pVRDashboard;
+    bool m_vrOverlayAttempted = false;
+#endif
 
     World& m_world;
     TransportService& m_transport;
