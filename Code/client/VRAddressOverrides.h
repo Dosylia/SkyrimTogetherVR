@@ -109,6 +109,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 37577u, 0x05f5280u }, // SE 36575 Actor::IsFleeing, unchecked (from TiltedEvolutionVR)
     { 37677u, 0x0600220u }, // SE 36669 Actor::SetFactionRank, unchecked (from TiltedEvolutionVR)
     { 37717u, 0x0602f40u }, // SE 36707 Actor::SetPlayerTeammate, checked
+    { 37905u, 0x060e300u }, // SE 36881 Actor::InitiateMountPackage, checked (size 0x471 vs SE 0x460, null mount looked up by handle; from TiltedEvolutionVR)
     { 37975u, 0x0612420u }, // SE 36950 Actor::UnequipObject, checked
     { 38533u, 0x062c950u }, // SE 37583 Actor::SetNoBleedoutRecovery, checked (from TiltedEvolutionVR)
     { 38896u, 0x0640c40u }, // SE 37940 ActorEquipManager::EquipSpell (by hand index), checked

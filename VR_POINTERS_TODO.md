@@ -26,7 +26,6 @@ Most sync hooks got their VR address from the TiltedEvolutionVR fork's table (se
 
 | AE id | Used as | What is off on VR | AE 1.6.318 address | Candidate | Known neighbour below | Known neighbour above |
 | --- | --- | --- | --- | --- | --- | --- |
-| 37905 | `s_initiateMountPackage` (Actor.cpp) | Mounting a remote horse. Candidate VR 0x60e300; left off on purpose. | 0x14062D1D0 | SE 36881 → VR 0x60e300 (fp 2/5) | AE 37904 = SE 36880 = VR 0x60e130 | AE 37907 = SE 36883 = VR 0x60ee10 |
 
 ## 2. No VR address: patches and plumbing that are off
 

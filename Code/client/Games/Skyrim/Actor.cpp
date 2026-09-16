@@ -811,7 +811,7 @@ static TInitiateMountPackage* RealInitiateMountPackage = nullptr;
 
 bool Actor::InitiateMountPackage(Actor* apMount) noexcept
 {
-    if (!RealInitiateMountPackage) // Null on VR: mounting a remote horse is left as is
+    if (!RealInitiateMountPackage)
         return false;
     return TiltedPhoques::ThisCall(RealInitiateMountPackage, this, apMount);
 }

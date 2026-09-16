@@ -74,7 +74,7 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 | Projectile metadata (spell, weapon, ammo, cell) | **Not sent** | `Projectile::LaunchData` layout is wrong on VR. A remote shooter's projectile is launched and then deleted, because VR's `LaunchSpell` doesn't null-check. |
 | First-person checks and camera switching | Always third person, no switching | VR has no first-person graph (same as CommonLibVR). |
 | `Actor::Kill`, `Respawn` | Called by address | Chosen before the vtable was fully checked; works. |
-| Two players on one horse | Left as is | The user considers it minor. |
+| Mount sync | **On** since 2026-09-15 | `InitiateMountPackage` (SE 36881, VR 0x60e300) checked in the VR code: the rider takes ownership of the horse, and the other client mounts the remote rider on it. |
 
 ## 5. VR-specific sync added in this port
 
