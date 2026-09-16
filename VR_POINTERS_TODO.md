@@ -10,8 +10,15 @@ column keeps the AE (1.6.x) id, because that is what the Skyrim Together source 
 only way to find the line to change; ignore it otherwise. The same number is a different function in
 each numbering: AE 32883 is SE 32139 (VR `0x140500890`).
 
-A `?` in the SE columns means the SE/AE table has no pair for that function, so only the AE address
-is known. Those are the rows where a size and disassembly check has to start from the AE address.
+A `?` in the SE columns means no source pairs that function with an SE id, so only the AE address is
+known and the search has to start there. Everything that could be paired was, on 2026-09-16, from four
+sources: the SE/AE table, CommonLib's `RELOCATION_ID(se, ae)` pairs, this repo's own SE-era code
+(commit `5da6679e`, which still used literal SE addresses), and reverse lookup of a known VR address in
+the VR Address Library.
+
+"not in the VR library" means the SE id is known but the library has no VR address for it, so it still
+needs the neighbour and size work. A VR address in brackets means the library has it and no guessing is
+needed.
 
 Sources used below, most to least trusted: the official VR Address Library CSV, `vr_address_tools/database.csv`
 (names and VR addresses, with a confidence column), the SE/AE pair table, then neighbours and sizes.
@@ -37,28 +44,27 @@ Most sync hooks got their VR address from the TiltedEvolutionVR fork's table (se
 
 | SE id | SE 1.5.97 address | Used as | What is off on VR | VR candidate | Neighbour below | Neighbour above | AE id in the source |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 33672 | 0x1405506C0 | `hookLoc` (Projectile.cpp) | Null check patch in projectile launch. | 0x554980 (fp 3/5) | SE 33671 = VR 0x5547a0 | SE 33676 = VR 0x555020 | 34452 @ 0x14056B8F0 |
 | 51638 | 0x1408BF360 | `ProcessMessage` (SkillsMenu.cpp) | Skills menu fix (with AE 52518). Only needed if the skills menu is ever unpaused on VR again; unpaused it went black, so it stays paused. | 0x8ec3e0 (named `StatsMenu::ProcessMessage` in `vr_address_tools/database.csv`) | SE 51618 = VR 0x8ead70 | SE 51755 = VR 0x8fa0a0 | 52510 @ 0x1408EE960 |
-| ? | ? | `initWindowLoc` / `renderInit` (BSGraphicsRenderer.cpp) | Renderer init hook (with AE 68781). Not needed: the VR menu is a SteamVR dashboard overlay, and the frame end call it used to come with is resolved (SE 75461, VR 0xdbbdd0, now used by the body sync). | - | SE 75076 = VR 0xda4be0 | SE 75447 = VR 0xdbabc0 | 77226 @ 0x140DA3850 |
-| 67315 | 0x140C150B0 | `pollInputDevices` (BSInputDeviceManager.cpp) | Input focus check. Not needed on VR. | 0xc519e0 (named `BSInputDeviceManager::PollInputDevices` in `vr_address_tools/database.csv`) | SE 67253 = VR 0xc4e900 | SE 67316 = VR 0xc51ac0 | 68617 @ 0x140C3B360 |
+| 75445 | 0x140D68DD0 | `initWindowLoc` / `renderInit` (BSGraphicsRenderer.cpp) | Renderer init hook (with AE 68781). Not needed: the VR menu is a SteamVR dashboard overlay, and the frame end call it came with is resolved (SE 75461, VR 0xdbbdd0, now used by the body sync). | 0x5be850 (in the VR library as SE 75445) | SE 75076 = VR 0xda4be0 | SE 75447 = VR 0xdbabc0 | 77226 @ 0x140DA3850 |
+| 67315 | 0x140C150B0 | `pollInputDevices` (BSInputDeviceManager.cpp) | **Stays off on purpose.** It skips input polling while the game window is not focused, which in a headset is most of the time (the desktop mirror). Address confirmed 2026-09-16. | 0xc519e0 (confirmed) | SE 67253 = VR 0xc4e900 | SE 67316 = VR 0xc51ac0 | 68617 @ 0x140C3B360 |
 | ? | ? | `unsignedInt` (BSRandom.cpp) | Game random numbers (with AE 14774); falls back to the minimum. | - | SE 66988 = VR 0xc42730 | SE 67151 = VR 0xc485e0 | 68276 @ 0x140C2D180 |
-| ? | ? | `threadInit` (BSThread.cpp) | Thread names for debugging (with AE 69554). | - | SE 66988 = VR 0xc42730 | SE 67151 = VR 0xc485e0 | 68261 @ 0x140C2CD40 |
+| ? | ? | `threadInit` (BSThread.cpp) | Thread names for debugging. Its companion AE 69554 is SE 68203 @ 0x140C39950 (CommonLib pair), which is not in the VR library. | - | SE 66988 = VR 0xc42730 | SE 67151 = VR 0xc485e0 | 68261 @ 0x140C2CD40 |
 
 ## 3. No VR address: low priority
 
 | SE id | SE 1.5.97 address | Used as | What is off on VR | VR candidate | Neighbour below | Neighbour above | AE id in the source |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 35551? | 0x1405AF3D0 | `cMainLoop` (SkyrimVM64.cpp) | Empty placeholder hook. | 0x5b6d70 (named `MainLoop` in `vr_address_tools/database.csv`, its weakest confidence) or 0x5bab10 (earlier guess) | SE 35492 = VR 0x5b1710 | SE 51246 = VR 0x8d0500 | 36564 @ 0x1405D9F50 |
+| 35565 | 0x1405B2FF0 | `cMainLoop` (SkyrimVM64.cpp) | Empty placeholder hook, so nothing is lost by leaving it off. | 0x5bab10 (in the VR library as SE 35565) | SE 35492 = VR 0x5b1710 | SE 51246 = VR 0x8d0500 | 36564 @ 0x1405D9F50 |
 | 39341 | 0x140699DF0 | `cVMDestructor` (SkyrimVM64.cpp) | Empty placeholder hook. | 0x6a3a30 (fp 2/5) | SE 39340 = VR 0x6a26a0 | SE 39343 = VR 0x6bae40 | 40412 @ 0x1406C19F0 |
-| ? | ? | `s_ForceState` (Actor.cpp) | Placeholder hook. | - | SE 36286 = VR 0x5daae0 | SE 36344 = VR 0x5de910 | 37313 @ 0x1405F8860 |
+| 36323 | 0x1405D4090 | `s_ForceState` (Actor.cpp) | Placeholder hook. | - (SE 36323 is not in the VR library) | SE 36286 = VR 0x5daae0 | SE 36344 = VR 0x5de910 | 37313 @ 0x1405F8860 |
 | ? | ? | `s_signaturesMatch` (BSScript.cpp) | Pass-through hook. | - | SE 97536 = VR 0x12708c0 | SE 97692 = VR 0x12a0c50 | 104359 @ 0x141366590 |
 
 ## 4. Worked around, address still wanted
 
 | SE id | SE 1.5.97 address | Function | Current workaround | AE id in the source |
 | --- | --- | --- | --- | --- |
-| ? | ? | RegisterPapyrusFunction | Hooked from the VM vtable instead (VR 0x1278410 is known, but hooking both would conflict). | 104788 |
-| ? | ? | InventoryChanges::GetArmorInSlot | Not a function on VR (CommonLibVR reimplements it); the naked-NPC fix is off. | 16113 |
+| 98065 | 0x141258CB0 | RegisterPapyrusFunction | Hooked from the VM vtable instead (VR 0x1278410 is known, but hooking both would conflict). SE 98065 is not in the VR library. | 104788 |
+| 15873 | 0x1401E7570 | InventoryChanges::GetArmorInSlot | Not a function on VR (CommonLibVR reimplements it); the naked-NPC fix is off. SE 15873 is not in the VR library either. | 16113 |
 
 ## 5. Has an address, never confirmed
 

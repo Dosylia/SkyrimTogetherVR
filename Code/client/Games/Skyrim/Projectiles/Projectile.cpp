@@ -147,29 +147,42 @@ static TiltedPhoques::Initializer s_projectileHooks(
 
         TP_HOOK(&RealLaunch, HookLaunch);
 
+        // The projectile handle is read from the stack and dereferenced two instructions later; a null one crashed
+        // the game. The stub below re-reads it and returns false instead.
+        //
+        // Same function on both builds, with a different frame: SE 33672 / VR 0x554980 reads the handle at +0x397
+        // (`mov rbx, [rsp+0x58]`) and has a 0x158 frame, checked in the VR code, where AE 34452 reads it at +0x374
+        // (`mov rbx, [rsp+0x50]`) with a 0x138 frame. The read is exactly the five bytes a jump needs, and nothing
+        // branches into them.
 #ifdef SKYRIMVR
-        // No VR address for 34452: the patch below would land in an unrelated function.
-        return;
-#endif
+        VersionDbPtr<uint8_t> hookLoc(33672);
+        constexpr uint32_t cHandleRead = 0x397;
+        constexpr uint32_t cHandleSlot = 0x58;
+        constexpr uint32_t cFrameSize = 0x158;
+#else
         VersionDbPtr<uint8_t> hookLoc(34452);
+        constexpr uint32_t cHandleRead = 0x374;
+        constexpr uint32_t cHandleSlot = 0x50;
+        constexpr uint32_t cFrameSize = 0x138;
+#endif
 
         struct C : TiltedPhoques::CodeGenerator
         {
-            C(uint8_t* apLoc)
+            C(uint8_t* apLoc, uint32_t aHandleRead, uint32_t aHandleSlot, uint32_t aFrameSize)
             {
                 // replicate
-                mov(rbx, ptr[rsp + 0x50]);
+                mov(rbx, ptr[rsp + aHandleSlot]);
 
                 // nullptr check
                 cmp(rbx, 0);
                 jz("exit");
                 // jump back
-                jmp_S(apLoc + 0x379);
+                jmp_S(apLoc + aHandleRead + 5);
 
                 L("exit");
                 // return false; scratch space from the registers
                 mov(al, 0);
-                add(rsp, 0x138);
+                add(rsp, aFrameSize);
                 pop(r15);
                 pop(r14);
                 pop(r13);
@@ -180,6 +193,6 @@ static TiltedPhoques::Initializer s_projectileHooks(
                 pop(rbp);
                 ret();
             }
-        } gen(hookLoc.Get());
-        TiltedPhoques::Jump(hookLoc.Get() + 0x374, gen.getCode());
+        } gen(hookLoc.Get(), cHandleRead, cHandleSlot, cFrameSize);
+        TiltedPhoques::Jump(hookLoc.Get() + cHandleRead, gen.getCode());
     });

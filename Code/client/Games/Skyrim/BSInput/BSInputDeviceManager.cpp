@@ -24,5 +24,8 @@ static TiltedPhoques::Initializer s_initInputDeviceManager(
         BSInputDeviceManager_PollInputDevices = static_cast<decltype(BSInputDeviceManager_PollInputDevices)>(pollInputDevices.GetPtr());
 
         TP_HOOK_IMMEDIATE(&BSInputDeviceManager_PollInputDevices, &Hook_BSInputDeviceManager_PollInputDevices);
-        #endif // No verified VR address, and the hook does nothing there without a main window.
+        #endif
+        // Off on VR on purpose, although the address is confirmed (SE 67315, VR 0xc519e0). The desktop mirror window is
+        // rarely focused while somebody is in a headset, so skipping input polling when it isn't would stop the
+        // controllers. It would also do nothing today: the main window is null on VR, where Hook_Renderer_Init is off.
     });
