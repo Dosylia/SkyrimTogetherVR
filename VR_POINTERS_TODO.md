@@ -1,20 +1,26 @@
 # VR pointers still to find
 
 Game addresses Skyrim Together still lacks, or has never confirmed, on Skyrim VR 1.4.15.
-Regenerated 2026-09-13 from the current code. Resolved addresses live in `Code/client/VRAddressOverrides.h`.
+Regenerated 2026-09-16 from the current code, in SE numbering. Resolved addresses live in `Code/client/VRAddressOverrides.h`.
 
-## Read this first: the ids are AE ids
+## Everything here is in SE numbering
 
-Every id in the Skyrim Together source is an **Anniversary Edition (1.6.x)** Address Library id. VR
-uses SE numbering, so the same number in the SE or VR table is a *different* function. Always go
-**AE id → SE id → VR address**. Example: AE 32883 is SE 32139 (VR `0x140500890`); SE 32883 is
-something else.
+Ids and addresses below are **SE (1.5.97)**, the numbering the VR Address Library uses. The last
+column keeps the AE (1.6.x) id, because that is what the Skyrim Together source uses and it is the
+only way to find the line to change; ignore it otherwise. The same number is a different function in
+each numbering: AE 32883 is SE 32139 (VR `0x140500890`).
+
+A `?` in the SE columns means the SE/AE table has no pair for that function, so only the AE address
+is known. Those are the rows where a size and disassembly check has to start from the AE address.
+
+Sources used below, most to least trusted: the official VR Address Library CSV, `vr_address_tools/database.csv`
+(names and VR addresses, with a confidence column), the SE/AE pair table, then neighbours and sizes.
 
 ## How to find and confirm one
 
-1. Start from the AE 1.6.318 address, or the name in "Used as".
-2. The two nearest known neighbours are given as `AE id = SE id = VR address`. Ids are roughly in
-   address order, so the target usually sits between those two VR addresses.
+1. Start from the SE 1.5.97 address, or the name in "Used as".
+2. The two nearest known neighbours are given as `SE id = VR address`. Ids are roughly in address
+   order, so the target usually sits between those two VR addresses.
 3. Confirm with function sizes: the neighbours in VR have the same sizes and order as in SE. This
    rule was right on 153 of 153 known answers.
 4. Check the candidate in the disassembly (callers, arguments), then add it to
@@ -24,149 +30,149 @@ something else.
 
 Most sync hooks got their VR address from the TiltedEvolutionVR fork's table (see `VRAddressOverrides.h`).
 
-| AE id | Used as | What is off on VR | AE 1.6.318 address | Candidate | Known neighbour below | Known neighbour above |
-| --- | --- | --- | --- | --- | --- | --- |
+| SE id | SE 1.5.97 address | Used as | What is off on VR | VR candidate | Neighbour below | Neighbour above | AE id in the source |
+| --- | --- | --- | --- | --- | --- | --- | --- |
 
 ## 2. No VR address: patches and plumbing that are off
 
-| AE id | Used as | What is off on VR | AE 1.6.318 address | Candidate | Known neighbour below | Known neighbour above |
-| --- | --- | --- | --- | --- | --- | --- |
-| 34452 | `hookLoc` (Projectile.cpp) | Null check patch in projectile launch. | 0x14056B8F0 | SE 33672 → VR 0x554980 (fp 3/5) | AE 34451 = SE 33671 = VR 0x5547a0 | AE 34456 = SE 33676 = VR 0x555020 |
-| 52510 | `ProcessMessage` (SkillsMenu.cpp) | Skills menu fix (with 52518). | 0x1408EE960 | - | AE 52490 = SE 51618 = VR 0x8ead70 | AE 52628 = SE 51755 = VR 0x8fa0a0 |
-| 77226 | `initWindowLoc` / `renderInit` (BSGraphicsRenderer.cpp) | Renderer init hook (with 68781, 77246). Not needed: the VR menu is a SteamVR dashboard overlay. | 0x140DA3850 | - | AE 76844 = SE 75076 = VR 0xda4be0 | AE 77228 = SE 75447 = VR 0xdbabc0 |
-| 68617 | `pollInputDevices` (BSInputDeviceManager.cpp) | Input focus check. Not needed on VR. | 0x140C3B360 | - | AE 68553 = SE 67253 = VR 0xc4e900 | AE 68618 = SE 67316 = VR 0xc51ac0 |
-| 68276 | `unsignedInt` (BSRandom.cpp) | Game random numbers (with 14774); falls back to the minimum. | 0x140C2D180 | - | AE 68245 = SE 66988 = VR 0xc42730 | AE 68449 = SE 67151 = VR 0xc485e0 |
-| 68261 | `threadInit` (BSThread.cpp) | Thread names for debugging (with 69554). | 0x140C2CD40 | - | AE 68245 = SE 66988 = VR 0xc42730 | AE 68449 = SE 67151 = VR 0xc485e0 |
+| SE id | SE 1.5.97 address | Used as | What is off on VR | VR candidate | Neighbour below | Neighbour above | AE id in the source |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 33672 | 0x1405506C0 | `hookLoc` (Projectile.cpp) | Null check patch in projectile launch. | 0x554980 (fp 3/5) | SE 33671 = VR 0x5547a0 | SE 33676 = VR 0x555020 | 34452 @ 0x14056B8F0 |
+| 51638 | 0x1408BF360 | `ProcessMessage` (SkillsMenu.cpp) | Skills menu fix (with AE 52518). Only needed if the skills menu is ever unpaused on VR again; unpaused it went black, so it stays paused. | 0x8ec3e0 (named `StatsMenu::ProcessMessage` in `vr_address_tools/database.csv`) | SE 51618 = VR 0x8ead70 | SE 51755 = VR 0x8fa0a0 | 52510 @ 0x1408EE960 |
+| ? | ? | `initWindowLoc` / `renderInit` (BSGraphicsRenderer.cpp) | Renderer init hook (with AE 68781). Not needed: the VR menu is a SteamVR dashboard overlay, and the frame end call it used to come with is resolved (SE 75461, VR 0xdbbdd0, now used by the body sync). | - | SE 75076 = VR 0xda4be0 | SE 75447 = VR 0xdbabc0 | 77226 @ 0x140DA3850 |
+| 67315 | 0x140C150B0 | `pollInputDevices` (BSInputDeviceManager.cpp) | Input focus check. Not needed on VR. | 0xc519e0 (named `BSInputDeviceManager::PollInputDevices` in `vr_address_tools/database.csv`) | SE 67253 = VR 0xc4e900 | SE 67316 = VR 0xc51ac0 | 68617 @ 0x140C3B360 |
+| ? | ? | `unsignedInt` (BSRandom.cpp) | Game random numbers (with AE 14774); falls back to the minimum. | - | SE 66988 = VR 0xc42730 | SE 67151 = VR 0xc485e0 | 68276 @ 0x140C2D180 |
+| ? | ? | `threadInit` (BSThread.cpp) | Thread names for debugging (with AE 69554). | - | SE 66988 = VR 0xc42730 | SE 67151 = VR 0xc485e0 | 68261 @ 0x140C2CD40 |
 
 ## 3. No VR address: low priority
 
-| AE id | Used as | What is off on VR | AE 1.6.318 address | Candidate | Known neighbour below | Known neighbour above |
-| --- | --- | --- | --- | --- | --- | --- |
-| 36564 | `cMainLoop` (SkyrimVM64.cpp) | Empty placeholder hook. Candidate VR 0x5bab10. | 0x1405D9F50 | - | AE 36459 = SE 35492 = VR 0x5b1710 | AE 36604 = SE 51246 = VR 0x8d0500 |
-| 40412 | `cVMDestructor` (SkyrimVM64.cpp) | Empty placeholder hook. | 0x1406C19F0 | SE 39341 → VR 0x6a3a30 (fp 2/5) | AE 40411 = SE 39340 = VR 0x6a26a0 | AE 40414 = SE 39343 = VR 0x6bae40 |
-| 37313 | `s_ForceState` (Actor.cpp) | Placeholder hook. | 0x1405F8860 | - | AE 37275 = SE 36286 = VR 0x5daae0 | AE 37334 = SE 36344 = VR 0x5de910 |
-| 104359 | `s_signaturesMatch` (BSScript.cpp) | Pass-through hook. | 0x141366590 | - | AE 104321 = SE 97536 = VR 0x12708c0 | AE 104434 = SE 97692 = VR 0x12a0c50 |
+| SE id | SE 1.5.97 address | Used as | What is off on VR | VR candidate | Neighbour below | Neighbour above | AE id in the source |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 35551? | 0x1405AF3D0 | `cMainLoop` (SkyrimVM64.cpp) | Empty placeholder hook. | 0x5b6d70 (named `MainLoop` in `vr_address_tools/database.csv`, its weakest confidence) or 0x5bab10 (earlier guess) | SE 35492 = VR 0x5b1710 | SE 51246 = VR 0x8d0500 | 36564 @ 0x1405D9F50 |
+| 39341 | 0x140699DF0 | `cVMDestructor` (SkyrimVM64.cpp) | Empty placeholder hook. | 0x6a3a30 (fp 2/5) | SE 39340 = VR 0x6a26a0 | SE 39343 = VR 0x6bae40 | 40412 @ 0x1406C19F0 |
+| ? | ? | `s_ForceState` (Actor.cpp) | Placeholder hook. | - | SE 36286 = VR 0x5daae0 | SE 36344 = VR 0x5de910 | 37313 @ 0x1405F8860 |
+| ? | ? | `s_signaturesMatch` (BSScript.cpp) | Pass-through hook. | - | SE 97536 = VR 0x12708c0 | SE 97692 = VR 0x12a0c50 | 104359 @ 0x141366590 |
 
 ## 4. Worked around, address still wanted
 
-| AE id | Function | Current workaround |
-| --- | --- | --- |
-| 104788 | RegisterPapyrusFunction | Hooked from the VM vtable instead (VR 0x1278410 is known, but hooking both would conflict). |
-| 16113 | InventoryChanges::GetArmorInSlot | Not a function on VR (CommonLibVR reimplements it); the naked-NPC fix is off. |
+| SE id | SE 1.5.97 address | Function | Current workaround | AE id in the source |
+| --- | --- | --- | --- | --- |
+| ? | ? | RegisterPapyrusFunction | Hooked from the VM vtable instead (VR 0x1278410 is known, but hooking both would conflict). | 104788 |
+| ? | ? | InventoryChanges::GetArmorInSlot | Not a function on VR (CommonLibVR reimplements it); the naked-NPC fix is off. | 16113 |
 
 ## 5. Has an address, never confirmed
 
 These work in play so far, but were only matched by neighbours and function sizes. Confirm them in the
 disassembly when a crash points near one.
 
-| AE id | VR address | Matched as |
-| --- | --- | --- |
-| 11612 | `0x11e470` | SE 11466 ExtraDataList::SetWorn |
-| 11616 | `0x11ea00` | SE 11470 ExtraDataList::SetHealth |
-| 11619 | `0x11ede0` | SE 11473 ExtraDataList::SetCharge |
-| 11620 | `0x11ef40` | SE 11474 ExtraDataList::SetSoul |
-| 11822 | `0x12a640` | SE 11676 ExtraDataList::SetPoison |
-| 12401 | `0x1454a0` | SE 12274 Lock::SetLock |
-| 13718 | `0x17c4e0` | SE 13620 ModManager::GetCellFromCoordinates |
-| 14375 | `0x19c0c0` | SE 14257 TESNPC::SetLeveledNpc |
-| 14529 | `0x19f970` | SE 14383 TESContainer::GetItemCount |
-| 14953 | `0x1b0900` | SE 14775 TESTexture ctor |
-| 15002 | `0x1b1f00` | SE address from the symbol name |
-| 15006 | `0x1b1a30` | SE address from the symbol name |
-| 16142 | `0x1fce80` | SE 15902 InventoryChanges::Save |
-| 16143 | `0x1fcfb0` | SE 15903 InventoryChanges::Load |
-| 18518 | `0x25b7c0` | SE 18133 BGSWorldLocation distance |
-| 18563 | `0x25da30` | SE 18178 ImageSpaceModifierInstance stop |
-| 19075 | `0x27a4c0` | SE 18606 TESObjectCELL::GetCOCPlacementInfo |
-| 19364 | `0x28ccd0` | SE 18949 EventDispatcher::PushEvent |
-| 19689 | `0x29f110` | SE 19263 TESObjectREFR::RemoveItem |
-| 19702 | `0x29fac0` | SE 19276 TESObjectREFR::GetContainer |
-| 19708 | `0x29fdb0` | SE 19282 TESObjectREFR::AddObjectToContainer |
-| 19784 | `0x2a7ba0` | SE 19357 TESObjectREFR::GetWorldLocation |
-| 19846 | `0x2ad090` | SE 19418 TESObjectREFR::GetHandle |
-| 20203 | `0x2b8480` | SE 19798 GetLocationEncounterZone |
-| 20221 | `0x2b89e0` | SE 19816 TESObjectREFR::CreateLock |
-| 23231 | `0x332a90` | SE 22754 TESQuest::CompleteAllObjectives |
-| 24568 | `0x367980` | SE 24065 TESIdleForm property |
-| 24987 | `0x37f980` | SE 24468 TESQuest::SetStopped |
-| 25004 | `0x3803d0` | SE 24482 TESQuest::SetStage |
-| 26244 | `0x3c4970` | SE 25697 Sky::ReleaseWeatherOverride |
-| 27040 | `0x3eada0` | SE 26454 FaceGen CreateTints |
-| 27244 | `0x3f2ff0` | SE 26576 experience calculation |
-| 32525 | `0x510b20` | SE 32525 combat target selector sort predicate |
-| 32802 | `0x4fd1c0` | SE 32048 animation action helper |
-| 32803 | `0x4fd300` | SE 32049 animation action helper |
-| 32883 | `0x500890` | SE 32139 IAnimationGraphManagerHolder::RevertAnimationGraphManager |
-| 33235 | `0x50e480` | SE 32488 CombatController::SetTarget |
-| 33261 | `0x50ff00` | SE 32512 combat movement check |
-| 33285 | `0x510c90` | SE 32528 combat target array quick sort |
-| 34401 | `0x550540` | SE 33623 MagicCaster::CastSpell |
-| 34512 | `0x557070` | SE 33728 MagicTarget::DispelAllSpells |
-| 34525 | `0x557830` | SE 33741 MagicTarget::CheckAddEffectTargetData |
-| 34529 | `0x557f80` | SE 33745 MagicTarget::GetTargetAsActor |
-| 34989 | `0x569920` | SE 34193 SummonCreatureEffect start |
-| 35086 | `0x56e070` | SE 34286 ValueModifierEffect::ApplyActorEffect |
-| 35269 | `0x574bf0` | SE 34444 MenuTopicManager::PlayDialogueOption |
-| 36000 | `0x59f160` | SE 35107 BGSLoadFormBuffer::ReadFormId |
-| 36048 | `0x5a1070` | SE 35158 BGSSaveFormBuffer::WriteFormId |
-| 36525 | `0x5ef640` | SE 36525 Actor::AddObjectToContainer |
-| 36527 | `0x5efa10` | SE 36527 Actor::GetGoldAmount |
-| 36741 | `0x604f30` | SE 36741 Actor::GetDetectionState |
-| 37147 | `0x5d5120` | SE 36174 animation helper |
-| 37175 | `0x5d63a0` | SE 36196 Character dtor |
-| 37356 | `0x5e0e20` | SE 36365 Actor process (AI) update |
-| 37511 | `0x5ee4f0` | SE 36511 TESObjectREFR::PayGoldToContainer |
-| 37521 | `0x5eeca0` | SE 36521 Actor::PickUpObject |
-| 37577 | `0x5f5280` | SE 36575 Actor::IsFleeing |
-| 37677 | `0x600220` | SE 36669 Actor::SetFactionRank |
-| 38899 | `0x640f30` | SE 37943 ActorEquipManager::UnequipAll |
-| 38935 | `0x643910` | SE 37980 EquipManager internal UnequipShout |
-| 38952 | `0x644070` | SE 37998 ActorMediator::PerformIdleAction |
-| 38959 | `0x644510` | SE 38005 AI package init |
-| 39002 | `0x645b10` | SE 38046 animation helper |
-| 39114 | `0x64c170` | SE 38156 AIProcess::CheckForNewPackage |
-| 39643 | `0x66dd50` | SE 38612 dialogue response processing |
-| 40454 | `0x6c00f0` | SE 39382 Actor::DropObject |
-| 40533 | `0x6c6e00` | SE 39456 PlayerCharacter::PickUpObject |
-| 40535 | `0x6c74d0` | SE 39458 PlayerCharacter::SetWaypoint |
-| 40536 | `0x6c7630` | SE 39459 PlayerCharacter::RemoveWaypoint |
-| 42704 | `0x743170` | SE 41626 Actor::UpdateDetectionState |
-| 47196 | `0x7e1ac0` | SE 45923 combat target validity check |
-| 47303 | `0x7e7e90` | SE 46039 Actor::HasEquippedRangedWeapon |
-| 47307 | `0x7e8020` | SE 46043 Actor world location check |
-| 52627 | `0x8f9ea0` | SE 51754 SubtitleManager::HideSubtitle |
-| 53926 | `0x95c670` | SE 53115 SkyrimVM::Update |
-| 54425 | `0x976690` | SE 53604 EventDispatcher::RegisterSink |
-| 55497 | `0x9ad8a0` | SE 54864 beast form change |
-| 57185 | `0xa052c0` | SE 56763 behavior symbol lookup |
-| 58377 | `0xa2e820` | SE 57804 hkbBehaviorGraph::HandleEvents |
-| 58378 | `0xa2ea40` | SE 57805 hkbBehaviorGraph event helper |
-| 59310 | `0xa4dca0` | SE 58656 behavior generator event |
-| 60079 | `0xa88950` | SE 59405 behavior graph update |
-| 63362 | `0xb1cfa0` | SE 62420 BSAnimationGraphManager send event |
-| 63372 | `0xb1d8b0` | SE 62430 BSAnimationGraphManager event helper |
-| 68221 | `0xc413f0` | SE 66964 CRC hash stub |
-| 68545 | `0xc4e600` | SE 67245 BSInputEnableManager::EnableOtherEvent |
-| 69165 | `0xc6dc90` | SE 67823 BSFixedString::Set |
-| 70639 | `0xcac090` | SE 69269 NiCamera::WorldPtToScreenPt3 |
-| 70717 | `0xcaef60` | SE 69335 FaceGen CreateTexture |
-| 76207 | `0xd8a900` | SE 74481 BSFaceGenNiNode::GetObjectByName |
-| 82074 | `0xf1a3b0` | SE 79937 UI::IsMenuOpen |
-| 82088 | `0xf1bf10` | SE 79951 UI close all menus |
-| 382393 | `0x1eb1d08` | combat detection time limit setting value |
-| 382400 | `0x1eb1d24` | combat recent LOS time limit setting value |
-| 400312 | `0x1f8319c` | invalid reference handle |
-| 401100 | `0x2fc4880` | animation global |
-| 403568 | `0x2febcc0` | SE 517060 animation global (next to 403566/403567) |
-| 403988 | `0x2fff008` | animation global |
-| 405282 | `0x3010168` | combat setting value |
-| 414391 | `0x3422948` | script object handle policy |
-| 414675 | `0x3423e20` | SE 527752 NiMaskedShader NiRTTI |
+| SE id | VR address | What it is | AE id in the source |
+| --- | --- | --- | --- |
+| 11466 | `0x11e470` | ExtraDataList::SetWorn | 11612 |
+| 11470 | `0x11ea00` | ExtraDataList::SetHealth | 11616 |
+| 11473 | `0x11ede0` | ExtraDataList::SetCharge | 11619 |
+| 11474 | `0x11ef40` | ExtraDataList::SetSoul | 11620 |
+| 11676 | `0x12a640` | ExtraDataList::SetPoison | 11822 |
+| 12274 | `0x1454a0` | Lock::SetLock | 12401 |
+| 13620 | `0x17c4e0` | ModManager::GetCellFromCoordinates | 13718 |
+| 14257 | `0x19c0c0` | TESNPC::SetLeveledNpc | 14375 |
+| 14383 | `0x19f970` | TESContainer::GetItemCount | 14529 |
+| 14775 | `0x1b0900` | TESTexture ctor | 14953 |
+| ? | `0x1b1f00` | SE address from the symbol name | 15002 |
+| ? | `0x1b1a30` | SE address from the symbol name | 15006 |
+| 15902 | `0x1fce80` | InventoryChanges::Save | 16142 |
+| 15903 | `0x1fcfb0` | InventoryChanges::Load | 16143 |
+| 18133 | `0x25b7c0` | BGSWorldLocation distance | 18518 |
+| 18178 | `0x25da30` | ImageSpaceModifierInstance stop | 18563 |
+| 18606 | `0x27a4c0` | TESObjectCELL::GetCOCPlacementInfo | 19075 |
+| 18949 | `0x28ccd0` | EventDispatcher::PushEvent | 19364 |
+| 19263 | `0x29f110` | TESObjectREFR::RemoveItem | 19689 |
+| 19276 | `0x29fac0` | TESObjectREFR::GetContainer | 19702 |
+| 19282 | `0x29fdb0` | TESObjectREFR::AddObjectToContainer | 19708 |
+| 19357 | `0x2a7ba0` | TESObjectREFR::GetWorldLocation | 19784 |
+| 19418 | `0x2ad090` | TESObjectREFR::GetHandle | 19846 |
+| 19798 | `0x2b8480` | GetLocationEncounterZone | 20203 |
+| 19816 | `0x2b89e0` | TESObjectREFR::CreateLock | 20221 |
+| 22754 | `0x332a90` | TESQuest::CompleteAllObjectives | 23231 |
+| 24065 | `0x367980` | TESIdleForm property | 24568 |
+| 24468 | `0x37f980` | TESQuest::SetStopped | 24987 |
+| 24482 | `0x3803d0` | TESQuest::SetStage | 25004 |
+| 25697 | `0x3c4970` | Sky::ReleaseWeatherOverride | 26244 |
+| 26454 | `0x3eada0` | FaceGen CreateTints | 27040 |
+| 26576 | `0x3f2ff0` | experience calculation | 27244 |
+| 32525 | `0x510b20` | combat target selector sort predicate | 32525 |
+| 32048 | `0x4fd1c0` | animation action helper | 32802 |
+| 32049 | `0x4fd300` | animation action helper | 32803 |
+| 32139 | `0x500890` | IAnimationGraphManagerHolder::RevertAnimationGraphManager | 32883 |
+| 32488 | `0x50e480` | CombatController::SetTarget | 33235 |
+| 32512 | `0x50ff00` | combat movement check | 33261 |
+| 32528 | `0x510c90` | combat target array quick sort | 33285 |
+| 33623 | `0x550540` | MagicCaster::CastSpell | 34401 |
+| 33728 | `0x557070` | MagicTarget::DispelAllSpells | 34512 |
+| 33741 | `0x557830` | MagicTarget::CheckAddEffectTargetData | 34525 |
+| 33745 | `0x557f80` | MagicTarget::GetTargetAsActor | 34529 |
+| 34193 | `0x569920` | SummonCreatureEffect start | 34989 |
+| 34286 | `0x56e070` | ValueModifierEffect::ApplyActorEffect | 35086 |
+| 34444 | `0x574bf0` | MenuTopicManager::PlayDialogueOption | 35269 |
+| 35107 | `0x59f160` | BGSLoadFormBuffer::ReadFormId | 36000 |
+| 35158 | `0x5a1070` | BGSSaveFormBuffer::WriteFormId | 36048 |
+| 36525 | `0x5ef640` | Actor::AddObjectToContainer | 36525 |
+| 36527 | `0x5efa10` | Actor::GetGoldAmount | 36527 |
+| 36741 | `0x604f30` | Actor::GetDetectionState | 36741 |
+| 36174 | `0x5d5120` | animation helper | 37147 |
+| 36196 | `0x5d63a0` | Character dtor | 37175 |
+| 36365 | `0x5e0e20` | Actor process (AI) update | 37356 |
+| 36511 | `0x5ee4f0` | TESObjectREFR::PayGoldToContainer | 37511 |
+| 36521 | `0x5eeca0` | Actor::PickUpObject | 37521 |
+| 36575 | `0x5f5280` | Actor::IsFleeing | 37577 |
+| 36669 | `0x600220` | Actor::SetFactionRank | 37677 |
+| 37943 | `0x640f30` | ActorEquipManager::UnequipAll | 38899 |
+| 37980 | `0x643910` | EquipManager internal UnequipShout | 38935 |
+| 37998 | `0x644070` | ActorMediator::PerformIdleAction | 38952 |
+| 38005 | `0x644510` | AI package init | 38959 |
+| 38046 | `0x645b10` | animation helper | 39002 |
+| 38156 | `0x64c170` | AIProcess::CheckForNewPackage | 39114 |
+| 38612 | `0x66dd50` | dialogue response processing | 39643 |
+| 39382 | `0x6c00f0` | Actor::DropObject | 40454 |
+| 39456 | `0x6c6e00` | PlayerCharacter::PickUpObject | 40533 |
+| 39458 | `0x6c74d0` | PlayerCharacter::SetWaypoint | 40535 |
+| 39459 | `0x6c7630` | PlayerCharacter::RemoveWaypoint | 40536 |
+| 41626 | `0x743170` | Actor::UpdateDetectionState | 42704 |
+| 45923 | `0x7e1ac0` | combat target validity check | 47196 |
+| 46039 | `0x7e7e90` | Actor::HasEquippedRangedWeapon | 47303 |
+| 46043 | `0x7e8020` | Actor world location check | 47307 |
+| 51754 | `0x8f9ea0` | SubtitleManager::HideSubtitle | 52627 |
+| 53115 | `0x95c670` | SkyrimVM::Update | 53926 |
+| 53604 | `0x976690` | EventDispatcher::RegisterSink | 54425 |
+| 54864 | `0x9ad8a0` | beast form change | 55497 |
+| 56763 | `0xa052c0` | behavior symbol lookup | 57185 |
+| 57804 | `0xa2e820` | hkbBehaviorGraph::HandleEvents | 58377 |
+| 57805 | `0xa2ea40` | hkbBehaviorGraph event helper | 58378 |
+| 58656 | `0xa4dca0` | behavior generator event | 59310 |
+| 59405 | `0xa88950` | behavior graph update | 60079 |
+| 62420 | `0xb1cfa0` | BSAnimationGraphManager send event | 63362 |
+| 62430 | `0xb1d8b0` | BSAnimationGraphManager event helper | 63372 |
+| 66964 | `0xc413f0` | CRC hash stub | 68221 |
+| 67245 | `0xc4e600` | BSInputEnableManager::EnableOtherEvent | 68545 |
+| 67823 | `0xc6dc90` | BSFixedString::Set | 69165 |
+| 69269 | `0xcac090` | NiCamera::WorldPtToScreenPt3 | 70639 |
+| 69335 | `0xcaef60` | FaceGen CreateTexture | 70717 |
+| 74481 | `0xd8a900` | BSFaceGenNiNode::GetObjectByName | 76207 |
+| 79937 | `0xf1a3b0` | UI::IsMenuOpen | 82074 |
+| 79951 | `0xf1bf10` | UI close all menus | 82088 |
+| ? | `0x1eb1d08` | combat detection time limit setting value | 382393 |
+| ? | `0x1eb1d24` | combat recent LOS time limit setting value | 382400 |
+| 514164 | `0x1f8319c` | GetInvalidRefHandle (from `database.csv`, confidence 2) | 400312 |
+| ? | `0x2fc4880` | animation global | 401100 |
+| 517060 | `0x2febcc0` | animation global (next to 403566/403567) | 403568 |
+| ? | `0x2fff008` | animation global | 403988 |
+| ? | `0x3010168` | combat setting value | 405282 |
+| ? | `0x3422948` | script object handle policy | 414391 |
+| 527752 | `0x3423e20` | NiMaskedShader NiRTTI | 414675 |
 
 ### From the SE/VR binary-diff table only
 
 The least trusted: taken from a diff table that was wrong for every RTTI entry it was tested on.
 
-| AE id | VR address | Used as |
-| --- | --- | --- |
-| 53112 | `0x95c430` | MapMenu hookLoc |
+| SE id | VR address | Used as | AE id in the source |
+| --- | --- | --- | --- |
+| ? | `0x95c430` | MapMenu hookLoc | 53112 |
