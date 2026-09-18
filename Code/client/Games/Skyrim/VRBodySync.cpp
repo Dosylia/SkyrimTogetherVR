@@ -218,18 +218,46 @@ TiltedPhoques::Map<uint32_t, RemotePose> s_poses;
  * nothing may be written through these pointers (TiltedEvolutionVR crashed writing a transform into a shader property
  * that had taken over a freed bone's memory).
  */
+// Direct children of one node: how many slots the array holds and how many are filled. Plain reads, no virtual call
+// and no VirtualQuery, so unlike IsReadable this is cheap enough to run every frame. Enough to notice something being
+// attached below a bone, which is what the cached descendant list cannot see by itself.
+uint32_t ChildFingerprintOf(void* apChildOwner) noexcept
+{
+    if (!apChildOwner)
+        return 0;
+
+    void** pChildren = At<void**>(apChildOwner, kChildrenOffset + 0x8);
+    const uint16_t slots = At<uint16_t>(apChildOwner, kChildrenOffset + 0x10);
+    if (!pChildren)
+        return slots;
+
+    uint32_t filled = 0;
+    for (uint16_t i = 0; i < slots; ++i)
+        filled += pChildren[i] != nullptr;
+
+    return (static_cast<uint32_t>(slots) << 16) | filled;
+}
+
 struct RigBone
 {
     void* pNode = nullptr;
     uint8_t* pEntry = nullptr;
     void* NodeVTable = nullptr;
     void* EntryNode = nullptr;
+    // The node under which children hang, and what hung there when the skeleton was resolved.
+    void* pChildOwner = nullptr;
+    uint32_t ChildFingerprint = 0;
 
     [[nodiscard]] bool IsIntact() const noexcept
     {
         if (pNode && *static_cast<void**>(pNode) != NodeVTable)
             return false;
         return !pEntry || *reinterpret_cast<void**>(pEntry + kBoneEntryNode) == EntryNode;
+    }
+
+    [[nodiscard]] bool ChildrenUnchanged() const noexcept
+    {
+        return ChildFingerprintOf(pChildOwner) == ChildFingerprint;
     }
 
     [[nodiscard]] const NiTransform& World() const noexcept
@@ -258,7 +286,11 @@ RigBone MakeRigBone(void* apNode, uint8_t* apEntry) noexcept
 {
     RigBone bone{apNode, apEntry};
     if (apNode)
+    {
         bone.NodeVTable = *static_cast<void**>(apNode);
+        bone.pChildOwner = AsNode(apNode);
+        bone.ChildFingerprint = ChildFingerprintOf(bone.pChildOwner);
+    }
     if (apEntry)
         bone.EntryNode = *reinterpret_cast<void**>(apEntry + kBoneEntryNode);
     return bone;
@@ -272,6 +304,9 @@ struct Rig
     // Everything below each posed bone (nodes and flattened bones), the posed bones further down the chain included.
     std::array<std::vector<RigBone>, VRPose::kBoneCount> Descendants{};
     std::chrono::steady_clock::time_point RetryAt{};
+    // Re-resolving because something attached is rate limited: an effect that attaches and detaches every frame would
+    // otherwise rebuild the whole skeleton every frame.
+    std::chrono::steady_clock::time_point RestructureAt{};
     bool Valid = false;
 };
 
@@ -337,7 +372,7 @@ void CollectNodeDescendants(void* apNode, std::vector<void*>& aOut, uint32_t aDe
     }
 }
 
-bool ResolveRig(void* apRoot, Rig& aRig) noexcept
+bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
 {
     aRig = Rig{};
     aRig.pRoot = apRoot;
@@ -425,8 +460,11 @@ bool ResolveRig(void* apRoot, Rig& aRig) noexcept
     }
 
     aRig.Valid = true;
-    spdlog::info("VRBodySync: resolved skeleton under root {}: {} flattened bones, {} carried by the spine, {} by the head, {} by the right hand", apRoot, count,
-                 aRig.Descendants[VRPose::kSpine1].size(), aRig.Descendants[VRPose::kHead].size(), aRig.Descendants[VRPose::kRightHand].size());
+    // Quiet when this is only picking up a node that was attached below a bone, which happens on every equip.
+    if (aLog)
+        spdlog::info("VRBodySync: resolved skeleton under root {}: {} flattened bones, {} carried by the spine, {} by the head, {} by the left hand, {} by the right hand", apRoot, count,
+                     aRig.Descendants[VRPose::kSpine1].size(), aRig.Descendants[VRPose::kHead].size(), aRig.Descendants[VRPose::kLeftHand].size(),
+                     aRig.Descendants[VRPose::kRightHand].size());
     return true;
 }
 
@@ -438,6 +476,23 @@ bool ResolveRig(void* apRoot, Rig& aRig) noexcept
     for (const auto& descendants : acRig.Descendants)
         for (const auto& bone : descendants)
             if (!bone.IsIntact())
+                return false;
+    return true;
+}
+
+// The descendant lists are a snapshot taken when the skeleton was resolved. Anything attached afterwards - the art of a
+// readied spell hangs off the magic node, which is itself below the hand - is missing from them, so the hand was posed
+// to the VR pose while the spell stayed where the animation had left it, floating beside the hand. Notice the
+// attachment and resolve the skeleton again so the new node is carried too. Only call this on an intact rig: it reads
+// through the cached pointers.
+[[nodiscard]] bool RigStructureUnchanged(const Rig& acRig) noexcept
+{
+    for (const auto& bone : acRig.Bones)
+        if (!bone.ChildrenUnchanged())
+            return false;
+    for (const auto& descendants : acRig.Descendants)
+        for (const auto& bone : descendants)
+            if (!bone.ChildrenUnchanged())
                 return false;
     return true;
 }
@@ -558,15 +613,20 @@ void OnFrameEnd() noexcept
             continue;
 
         Rig& rig = s_rigs[formId];
-        if (rig.pRoot != pRoot || !rig.Valid || !RigIntact(rig))
+        const bool cGone = rig.pRoot != pRoot || !rig.Valid || !RigIntact(rig);
+        // Only worth asking once the rig is known good, and not more than a few times a second.
+        const bool cRestructured = !cGone && now >= rig.RestructureAt && !RigStructureUnchanged(rig);
+
+        if (cGone || cRestructured)
         {
-            if (rig.pRoot == pRoot && now < rig.RetryAt)
+            if (cGone && rig.pRoot == pRoot && now < rig.RetryAt)
                 continue;
-            if (!ResolveRig(pRoot, rig))
+            if (!ResolveRig(pRoot, rig, cGone))
             {
                 rig.RetryAt = now + std::chrono::seconds(1);
                 continue;
             }
+            rig.RestructureAt = now + std::chrono::milliseconds(200);
         }
 
         if (!IsInView(ToGlm(rig.Bones[VRPose::kSpine2].World().translate)))

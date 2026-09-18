@@ -89,6 +89,7 @@ protected:
 
 private:
     void CreateOverlay(OverlayApp::RenderProvider* apProvider) noexcept;
+    void PushUiState() noexcept;
     void RunDebugDataUpdates() noexcept;
     void RunPlayerHealthUpdates() noexcept;
 
@@ -104,6 +105,10 @@ private:
 
     bool m_active = false;
     bool m_inGame = false;
+    // What the page has actually been told. The overlay loads asynchronously, so the first enterGame used to be sent
+    // before there was anything to receive it; see PushUiState.
+    bool m_sentActive = false;
+    bool m_sentInGame = false;
 
     entt::scoped_connection m_updateConnection;
     entt::scoped_connection m_connectedConnection;

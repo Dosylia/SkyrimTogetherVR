@@ -77,6 +77,13 @@ void AnimationSystem::Update(World& aWorld, Actor* apActor, RemoteAnimationCompo
 
         // TEMPORARY sliding diagnostic: actors were reported sliding instead of walking. Counts replayed actions and
         // the ones the game refused, per event name, and logs a summary every 10 s. Remove once understood.
+        //
+        // Read the failure counts with care. ForceAction applies the animation variables whether or not it returns
+        // true, and the events that carry direction rather than state (moveForward, moveBackward) are not ones the
+        // behaviour graph accepts as actions at all, so they always count as failed and always did. A single actor
+        // being respawned in a loop also floods these totals, which is what happened the session this line was read
+        // from, so the busiest actors are named: one form id with a count far above the rest is a respawn loop rather
+        // than an animation problem.
         {
             struct EventStats
             {
@@ -85,12 +92,14 @@ void AnimationSystem::Update(World& aWorld, Actor* apActor, RemoteAnimationCompo
             };
             static TiltedPhoques::Map<TiltedPhoques::String, EventStats> s_players;
             static TiltedPhoques::Map<TiltedPhoques::String, EventStats> s_npcs;
+            static TiltedPhoques::Map<uint32_t, uint32_t> s_byActor;
             static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
 
             auto& stats = (apActor->GetExtension()->IsPlayer() ? s_players : s_npcs)[first.EventName.empty() ? "(no event)" : first.EventName.c_str()];
             ++stats.Replayed;
             if (!result)
                 ++stats.Failed;
+            ++s_byActor[apActor->formID];
 
             const auto now = std::chrono::steady_clock::now();
             if (now >= s_nextLog)
@@ -105,6 +114,20 @@ void AnimationSystem::Update(World& aWorld, Actor* apActor, RemoteAnimationCompo
                         line += fmt::format("{} {}/{} failed, ", name.c_str(), eventStats.Failed, eventStats.Replayed);
                     spdlog::info("AnimDiag {}: {}", pStats == &s_players ? "remote players" : "remote NPCs", line);
                     pStats->clear();
+                }
+
+                if (!s_byActor.empty())
+                {
+                    TiltedPhoques::Vector<std::pair<uint32_t, uint32_t>> busiest(s_byActor.begin(), s_byActor.end());
+                    std::partial_sort(busiest.begin(), busiest.begin() + std::min<size_t>(5, busiest.size()), busiest.end(),
+                                      [](const auto& acLhs, const auto& acRhs) { return acLhs.second > acRhs.second; });
+
+                    std::string line;
+                    for (size_t i = 0; i < busiest.size() && i < 5; ++i)
+                        line += fmt::format("{:X} x{}, ", busiest[i].first, busiest[i].second);
+
+                    spdlog::info("AnimDiag busiest actors ({} in total): {}", s_byActor.size(), line);
+                    s_byActor.clear();
                 }
             }
         }

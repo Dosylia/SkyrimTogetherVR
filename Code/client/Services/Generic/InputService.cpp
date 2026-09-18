@@ -102,10 +102,8 @@ void SetUIActive(OverlayService& aOverlay, auto apRenderer, bool aActive)
     TiltedPhoques::DInputHook::Get().SetEnabled(aActive);
     aOverlay.SetActive(aActive);
 
-    // Ensures the game is actually loaded, in case the initial event was sent too early
-    aOverlay.SetVersion(BUILD_COMMIT);
-    if (aOverlay.GetOverlayApp())
-        aOverlay.GetOverlayApp()->ExecuteAsync("enterGame");
+    // enterGame used to be resent here, because the one sent on start-up could land before the page had loaded.
+    // OverlayService::PushUiState now holds that state and sends it once the page is ready, so this is covered.
 
     apRenderer->SetCursorVisible(aActive);
 

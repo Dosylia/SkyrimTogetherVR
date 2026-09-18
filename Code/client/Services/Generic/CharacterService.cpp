@@ -481,6 +481,27 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
             return;
         }
 
+        // The reference exists on both machines, but its base form need not be the same one: a reference whose base is
+        // a levelled list is rolled separately on each. Adopting a mismatched actor meant a fox being driven with a
+        // rabbit's animation variables, which left it standing still for the rest of the session. Leave it as the
+        // local creature it actually is instead of turning it into a frozen puppet.
+        if (acMessage.BaseId != GameId{})
+        {
+            const uint32_t cRemoteBaseId = World::Get().GetModSystem().GetGameId(acMessage.BaseId);
+
+            const TESNPC* pLocalBase = Cast<TESNPC>(pActor->baseForm);
+            if (pLocalBase && pLocalBase->IsTemporary())
+                pLocalBase = pLocalBase->GetTemplateBase();
+
+            if (cRemoteBaseId && pLocalBase && pLocalBase->formID != cRemoteBaseId)
+            {
+                spdlog::warn("Base form mismatch on reference {:X}: the other side has {:X}, this one has {:X} ({}). A "
+                             "levelled reference resolved to a different creature here, so it will not be synced.",
+                             cActorId, cRemoteBaseId, pLocalBase->formID, pLocalBase->fullName.value.AsAscii());
+                return;
+            }
+        }
+
         const auto view = m_world.view<FormIdComponent>();
         const auto itor = std::find_if(std::begin(view), std::end(view), [cActorId, view](entt::entity entity) { return view.get<FormIdComponent>(entity).Id == cActorId; });
 
@@ -1302,9 +1323,15 @@ void CharacterService::RequestServerAssignment(const entt::entity aEntity) const
     if (pNpc->IsTemporary())
         pNpc = pNpc->GetTemplateBase();
 
-    if (isTemporary)
+    // A temporary actor has to be rebuilt from its base form on the other side, so that form has always travelled.
+    // A persistent world reference used to send only its reference id, and the other side adopted whatever actor sat
+    // at that id locally. When the reference's base is a levelled list the two machines roll it separately, so the
+    // same id was a rabbit here and a fox there, and the fox was then driven with the rabbit's animation data and
+    // stood frozen. Send the base form for those too, so the other side can tell its copy apart. The server only
+    // rejects a base form on the player entity, which is excluded here.
+    if (pNpc && !isPlayer)
     {
-        if (pNpc && !m_world.GetModSystem().GetServerModId(pNpc->formID, message.FormId))
+        if (!m_world.GetModSystem().GetServerModId(pNpc->formID, message.FormId) && isTemporary)
         {
             spdlog::error("Server NPC form id not found for form id {:X}", pNpc->formID);
             return;

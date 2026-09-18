@@ -193,6 +193,9 @@ void OverlayService::Render() noexcept
     else if (!inGame && m_inGame)
         SetInGame(false);
 
+    // Catches the state up the moment the page finishes loading; a no-op once the UI is in step.
+    PushUiState();
+
     m_pOverlay->GetClient()->Render();
 
 #ifdef SKYRIMVR
@@ -243,7 +246,7 @@ void OverlayService::SetActive(bool aActive) noexcept
 
     m_active = aActive;
 
-    m_pOverlay->ExecuteAsync(m_active ? "activate" : "deactivate");
+    PushUiState();
 }
 
 bool OverlayService::GetActive() const noexcept
@@ -260,16 +263,46 @@ void OverlayService::SetInGame(bool aInGame) noexcept
         return;
     m_inGame = aInGame;
 
-    if (m_inGame)
+    // Leaving the game closes the menu with it. SetActive would refuse this now that m_inGame is false, so drop the
+    // flag here and let PushUiState send the deactivate.
+    if (!m_inGame)
+        m_active = false;
+
+    PushUiState();
+}
+
+// CEF drops any ExecuteAsync sent before the page has loaded, and the page loads a second or so after the overlay is
+// created. enterGame was sent in that window and lost, so the UI stayed on its start-up view for the rest of the
+// session: in VR that is a menu that paints nothing at all. Hold the wanted state instead and push it once the page is
+// ready, then on every later change. Called every frame from Render().
+void OverlayService::PushUiState() noexcept
+{
+    if (!m_pOverlay)
+        return;
+
+    const auto* pClient = m_pOverlay->GetClient();
+    if (!pClient || !pClient->IsReady())
+        return;
+
+    if (m_sentInGame != m_inGame)
     {
-        SetVersion(BUILD_COMMIT);
-        m_pOverlay->ExecuteAsync("enterGame");
+        m_sentInGame = m_inGame;
+
+        if (m_inGame)
+        {
+            SetVersion(BUILD_COMMIT);
+            m_pOverlay->ExecuteAsync("enterGame");
+        }
+        else
+        {
+            m_pOverlay->ExecuteAsync("exitGame");
+        }
     }
-    else
+
+    if (m_sentActive != m_active)
     {
-        m_pOverlay->ExecuteAsync("exitGame");
-        // TODO: this does nothing, since m_inGame is false
-        SetActive(false);
+        m_sentActive = m_active;
+        m_pOverlay->ExecuteAsync(m_active ? "activate" : "deactivate");
     }
 }
 

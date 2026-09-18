@@ -249,12 +249,18 @@ void DiscoveryService::VisitForms() noexcept
 
         const bool isSameObject = TESForm::GetById(formId) == static_cast<TESForm*>(known.pReference);
 
-        // Copies of actors owned by another player are removed right away: the server may already be asking to
-        // spawn them again (after a load door, for example), and that request is ignored while the old copy exists.
+        // Copies of actors owned by another player are removed right away once their 3D is gone: the server may
+        // already be asking to spawn them again (after a load door, for example), and that request is dropped for good
+        // while the old copy still exists. This used to skip the grace period for every remote actor, including one
+        // that still had its 3D and had merely dropped out of the high process list for a frame. Removing it cancelled
+        // its server assignment, the next visit asked for a new one, and it fell out again: a remote follower could
+        // thrash between removed and re-assigned about eleven times a second, which is what "not synced at all" looked
+        // like. Still holding 3D means it is only flickering, so let it sit out the grace period like anything else.
         auto* pActor = isSameObject ? Cast<Actor>(known.pReference) : nullptr;
         const bool isRemote = pActor && pActor->GetExtension()->IsRemote();
+        const bool isUnloaded = !pActor || !pActor->GetNiNode();
 
-        if (!isSameObject || isRemote || now - known.MissingSince >= cRemovalGracePeriod)
+        if (!isSameObject || (isRemote && isUnloaded) || now - known.MissingSince >= cRemovalGracePeriod)
             s_removedForms.push_back(formId);
     }
 
