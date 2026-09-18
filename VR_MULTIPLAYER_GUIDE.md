@@ -132,6 +132,26 @@ When a new client build is ready:
    the build (`connected (build v1.8.0-...)`), and a mismatch is refused with both versions named.
 4. If the build notes say the server changed, restart the server as well.
 
+## 7b. Packaging a build to give to other people
+
+```
+powershell -ExecutionPolicy Bypass -File C:\dev\TiltedEvolution\Tools\VR\make-release.ps1
+```
+
+Works from any directory: the script finds the repo from its own location. Output goes to
+**`C:\dev\TiltedEvolution\build\release\`**, which is gitignored, and it makes two files:
+
+| File | Size | Who it is for |
+|---|---|---|
+| `SkyrimTogetherVR-<version>.zip` | a few hundred MB | First-time installers. Too big for a Discord attachment, so it goes on Drive/MEGA and you post the link. |
+| `SkyrimTogetherVR-<version>-update.zip` | about 5 MB | Everyone after that: just the exe and the pdb. Small enough to attach. |
+
+The exe always comes from `build\windows\x64\release`, not from the deployed folder, so a release
+can't ship a stale client. The server's password is blanked in the copied `STServer.ini`.
+
+**Never add `VR_MULTIPLAYER_GUIDE.md` to a release.** This file names the host's public IP, PC name
+and router settings. The zip ships `Tools\VR\README-release.md` instead, which has none of that.
+
 ---
 
 ## 8. Troubleshooting

@@ -20,6 +20,16 @@ the VR Address Library.
 needs the neighbour and size work. A VR address in brackets means the library has it and no guessing is
 needed.
 
+## The VR Address Library has a few wrong entries
+
+Ids and addresses both run in address order, so an entry sitting far from its neighbours is wrong. Eight
+of the library's 13291 entries are more than 1MB out of place: **39346, 51859, 74237, 74491, 75445,
+100997, 257153, 306372**. SE 75445 is the one that was caught in practice (the library says 0x5be850; the
+function is at 0xdba850). None of the eight is an address this client resolves, checked 2026-09-16.
+
+So a library entry is worth a size check before it is trusted for a hook or a byte patch: take the SE size
+from the id's neighbours, measure the VR function, and confirm it chains onto the next known id.
+
 Sources used below, most to least trusted: the official VR Address Library CSV, `vr_address_tools/database.csv`
 (names and VR addresses, with a confidence column), the SE/AE pair table, then neighbours and sizes.
 
@@ -44,8 +54,8 @@ Most sync hooks got their VR address from the TiltedEvolutionVR fork's table (se
 
 | SE id | SE 1.5.97 address | Used as | What is off on VR | VR candidate | Neighbour below | Neighbour above | AE id in the source |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 51638 | 0x1408BF360 | `ProcessMessage` (SkillsMenu.cpp) | Skills menu fix (with AE 52518). Only needed if the skills menu is ever unpaused on VR again; unpaused it went black, so it stays paused. | 0x8ec3e0 (named `StatsMenu::ProcessMessage` in `vr_address_tools/database.csv`) | SE 51618 = VR 0x8ead70 | SE 51755 = VR 0x8fa0a0 | 52510 @ 0x1408EE960 |
-| 75445 | 0x140D68DD0 | `initWindowLoc` / `renderInit` (BSGraphicsRenderer.cpp) | Renderer init hook (with AE 68781). Not needed: the VR menu is a SteamVR dashboard overlay, and the frame end call it came with is resolved (SE 75461, VR 0xdbbdd0, now used by the body sync). | 0x5be850 (in the VR library as SE 75445) | SE 75076 = VR 0xda4be0 | SE 75447 = VR 0xdbabc0 | 77226 @ 0x140DA3850 |
+| 51638 | 0x1408BF360 | `ProcessMessage` (SkillsMenu.cpp) | Skills menu fix, only needed if the skills menu is unpaused on VR again (unpaused without it, it was black). Confirmed 2026-09-16. Of its three NOPs, the freeze-frame one is located on VR: AE +0xA10 = **VR +0xBB6** (`or dword ptr [rsi+0x1c], 0x20`, 4 bytes, sets kFreezeFrameBackground). The other two (AE +0x84E, 6 bytes, "menu not appearing"; AE +0x1040, 2 bytes, "keep the menu updated") are Skyrim Together's own and have no VR offset yet. The control patch AE 52518 is `StatsMenu::CanProcess` +0x46 (6 bytes), VR address unknown. | 0x8ec3e0 (confirmed) | SE 51618 = VR 0x8ead70 | SE 51755 = VR 0x8fa0a0 | 52510 @ 0x1408EE960 |
+| 75445 | 0x140D68DD0 | `initWindowLoc` / `renderInit` (BSGraphicsRenderer.cpp) | Renderer init hook (with AE 68781). Not needed: the VR menu is a SteamVR dashboard overlay, and the frame end call it came with is resolved (SE 75461, VR 0xdbbdd0, now used by the body sync). | **0xdba850** (confirmed 2026-09-16: SE size 0x350, VR 0x34a, and it chains exactly onto SE 75446 then SE 75447 at 0xdbabc0). The VR Address Library says 0x5be850 for this id, which is wrong. | SE 75076 = VR 0xda4be0 | SE 75447 = VR 0xdbabc0 | 77226 @ 0x140DA3850 |
 | 67315 | 0x140C150B0 | `pollInputDevices` (BSInputDeviceManager.cpp) | **Stays off on purpose.** It skips input polling while the game window is not focused, which in a headset is most of the time (the desktop mirror). Address confirmed 2026-09-16. | 0xc519e0 (confirmed) | SE 67253 = VR 0xc4e900 | SE 67316 = VR 0xc51ac0 | 68617 @ 0x140C3B360 |
 | ? | ? | `unsignedInt` (BSRandom.cpp) | **Nothing calls this helper**, on any platform, so the missing address costs nothing. | - | SE 66988 = VR 0xc42730 | SE 67151 = VR 0xc485e0 | 68276 @ 0x140C2D180 |
 | ? | ? | `threadInit` (BSThread.cpp) | Thread names for debugging. Its companion AE 69554 is SE 68203 @ 0x140C39950 (CommonLib pair), which is not in the VR library. | - | SE 66988 = VR 0xc42730 | SE 67151 = VR 0xc485e0 | 68261 @ 0x140C2CD40 |

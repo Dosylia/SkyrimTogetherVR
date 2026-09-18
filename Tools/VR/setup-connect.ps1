@@ -12,7 +12,7 @@ if (Test-Path $file) {
 }
 
 Write-Host "Server address. The host playing on the same PC uses 127.0.0.1:10578,"
-Write-Host "everyone else uses the address the host gave (for example 86.248.47.218:10578)."
+Write-Host "everyone else uses the address the host gave (for example 203.0.113.10:10578)."
 $address = (Read-Host "Address").Trim()
 if ($address -notmatch ':\d+$') {
     $address = "$address`:10578"

@@ -44,9 +44,18 @@ Copy-Item (Join-Path $PSScriptRoot 'host-server.*') $server
 # Game files, installed as an MO2 mod.
 Copy-Item (Join-Path $RepoRoot 'GameFiles\Skyrim') (Join-Path $staging 'Skyrim Together mod') -Recurse
 
-Copy-Item (Join-Path $RepoRoot 'VR_MULTIPLAYER_GUIDE.md') $staging
+# Never VR_MULTIPLAYER_GUIDE.md: it carries the host's public IP, PC name and router settings.
+Copy-Item (Join-Path $PSScriptRoot 'README-release.md') (Join-Path $staging 'README.md')
 
 $zip = Join-Path $OutputFolder "$name.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip
-Write-Host "Release: $zip"
+
+# Update pack: what someone who already installed a build needs. Small enough to attach to a message,
+# unlike the full zip. The pdb goes with it, or crash logs from the new exe name the wrong functions.
+$updateZip = Join-Path $OutputFolder "$name-update.zip"
+if (Test-Path $updateZip) { Remove-Item $updateZip -Force }
+Compress-Archive -Path (Join-Path $buildFolder 'SkyrimTogetherVR.exe'), (Join-Path $buildFolder 'SkyrimTogetherVR.pdb') -DestinationPath $updateZip
+
+Write-Host ("Full install: {0} ({1:N0} MB)" -f $zip, ((Get-Item $zip).Length / 1MB))
+Write-Host ("Update only:  {0} ({1:N1} MB)" -f $updateZip, ((Get-Item $updateZip).Length / 1MB))

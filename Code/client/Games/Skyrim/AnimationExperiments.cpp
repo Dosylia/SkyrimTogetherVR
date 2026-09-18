@@ -333,7 +333,11 @@ bool ActorMediator::RePerformIdleAction(TESActionData* apData) noexcept
     using Tsub_1404ECF50 = bool(void*, TESActionData*);
 
     POINTER_SKYRIMSE(Tsub_14063CAA0, sub_14063CAA0, 39002, 39002);
-    POINTER_SKYRIMSE(Tsub_14063CFB0, sub_14063CFB0, 38952, 38952);
+    // AE 38952 is also PerformIdleAction's id, so on VR this resolved through that override to
+    // 0x140644070 -- the outer dispatcher, which starts with the same [rdx+0x58] flag test this
+    // function reimplements, so calling it here re-entered the whole action. The name carries the
+    // SE address: 0x14063cfb0 is SE 38047, VR 0x140646020.
+    POINTER_SKYRIMSE(Tsub_14063CFB0, sub_14063CFB0, 38952, 38047);
     POINTER_SKYRIMSE(Tsub_1405CCB20, sub_1405CCB20, 37147, 37147);
     POINTER_SKYRIMSE(Tsub_1404ECF50, sub_1404ECF50, 32802, 32802);
 

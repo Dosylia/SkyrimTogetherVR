@@ -351,8 +351,23 @@ public:
             if (!std::getline(ss, idStr, ',')) continue;
             if (!std::getline(ss, offsetStr, ',')) continue;
 
-            unsigned long long id = std::stoull(idStr);
-            unsigned long long offset = std::stoull(offsetStr, nullptr, 16);
+            // The library's second line is metadata ("13291,0.158.0"). stoull stops at the first
+            // dot and yields offset 0, which resolves to the image base instead of failing, so
+            // every field has to be consumed whole before the row is trusted.
+            size_t idEnd = 0, offsetEnd = 0;
+            unsigned long long id = 0, offset = 0;
+            try
+            {
+                id = std::stoull(idStr, &idEnd);
+                offset = std::stoull(offsetStr, &offsetEnd, 16);
+            }
+            catch (const std::exception&)
+            {
+                continue;
+            }
+
+            if (idEnd != idStr.length() || offsetEnd != offsetStr.length())
+                continue;
 
             _data[id] = offset;
             _rdata[offset] = id;

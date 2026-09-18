@@ -17,8 +17,13 @@ Stable, 45 fps on the host (`Perf last 30 s`: avg 22 ms, p99 23-32 ms, mod updat
 
 **Reported, with what the logs say:**
 
-- [ ] **Skills and level up screens black** while connected. Caused by the unpaused menu patch enabled that day:
-      StatsMenu no longer unpaused on VR. Verify it's fixed.
+- [ ] **Skills and level up screens black** while connected. Caused by the unpaused menu patch: unpaused, the
+      menu asked the game for a freeze frame background that VR never produces, so it drew nothing. Retried on
+      2026-09-16 with the flag write removed (`SkillsMenu.cpp`, SE 51638 +0xBB6, VR 0x8ec3e0), so StatsMenu is
+      unpaused again. Check, in this order: the log says `Skills menu: freeze frame background disabled`; the
+      skills and level up screens are visible; they respond to input (the "controls not working" patch has no VR
+      address, so this is the part that may fail); your character keeps moving for the other player while you are
+      in there. If the screen is black again, the flag was not the cause and the patch comes back out.
 - [ ] **VR menu tab is a grey panel.** The texture now reaches SteamVR (the grey is our panel), but the page is
       transparent when uploaded (`0% of the page has content`). A snapshot is saved to `logs\dashboard_frame.bmp`
       two seconds after opening: look at it and at the `VRDashboard: 2 s after opening` line.

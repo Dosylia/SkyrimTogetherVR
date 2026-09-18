@@ -1346,7 +1346,11 @@ static TiltedPhoques::Initializer s_actorHooks(
         POINTER_SKYRIMSE(TSpawnActorInWorld, s_SpawnActorInWorld, 19742, 19742);
         POINTER_SKYRIMSE(TDamageActor, s_damageActor, 37335, 36345);
         POINTER_SKYRIMSE(TApplyActorEffect, s_applyActorEffect, 35086, 35086);
-        POINTER_SKYRIMSE(TRegenAttributes, s_regenAttributes, 37448, 36452);
+        // SE 36452 was TESObjectREFR::GetSubmergeLevel, not a regen function: VR 0x1405e9b60 takes
+        // (this, float, TESObjectCELL*) and was being hooked with (this, int, float). SE 37513
+        // (Actor::RestoreActorValue, VR 0x1406296b0) is the one this hook wants, and it is what the
+        // SE-era code in 5da6679e called. Checked in the VR disassembly, not just the id tables.
+        POINTER_SKYRIMSE(TRegenAttributes, s_regenAttributes, 37448, 37513);
         POINTER_SKYRIMSE(TAddInventoryItem, s_addInventoryItem, 37525, 36525);
         POINTER_SKYRIMSE(TPickUpObject, s_pickUpObject, 37521, 37521);
         POINTER_SKYRIMSE(TDropObject, s_dropObject, 40454, 40454);

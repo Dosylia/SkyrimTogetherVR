@@ -18,6 +18,35 @@ Git history has the full investigation notes behind each item.
 | Free address space within ±2GB of the game for plugin trampolines | DynDOLOD shows an invisible "failed to create trampoline" popup at data load, and the game hangs or closes. | 80MB game buffer (`TargetConfig.h`), plus a reserved pool in `memory/NearImageReserve.cpp`. |
 | `uGridsToLoad = 5` | The server refuses the connection. | Checked on connect. |
 
+## 2b. Audit of 2026-09-18 (external, then re-checked here)
+
+A friend ran an automated audit of every address this client resolves. Its own conclusion was that
+only three comparisons had a strictly better alternative; the other sixteen "differences" were ties,
+where a tied score is not evidence against the address in use. Re-checking each one here:
+
+| Finding | Verdict | What was done |
+| --- | --- | --- |
+| `s_regenAttributes` VR id 36452 | **Confirmed wrong.** SE 36452 is `TESObjectREFR::GetSubmergeLevel`: VR 0x1405e9b60 loads `xmm1` and tests `r8` as a pointer, so it is `(this, float, TESObjectCELL*)`, while the hook declares `(this, int, float)`. SE 37513 (`Actor::RestoreActorValue`, VR 0x1406296b0) reads `edx` as an int and `xmm2` as the amount, and is what `5da6679e` called. | VR id changed to 37513. |
+| `sub_14063CFB0` VR id 38952 | **Confirmed wrong.** AE 38952 is also `PerformIdleAction`'s id, so the override for that id handed this pointer 0x140644070 — the outer dispatcher, which opens with the same `[rdx+0x58]` flag test that `ActorMediator::RePerformIdleAction` reimplements, so the call at the bottom of that function re-entered the whole action. The name carries its SE address: 0x14063cfb0 is SE 38047, VR 0x140646020. | VR id changed to 38047. |
+| `dispelAllSpells` alternative | **Not accepted**, as the audit itself said: the alternative scored about 53 and nothing else supports it. | Left alone. |
+| `s_release` VR id 67847 | **Left alone.** The audit's own second hypothesis ranks the current address first, and `se_ae.csv` pairs it at confidence 3. The SE-era literal points 0x1140 lower, at a sibling. | Left alone. |
+| Five RTTI overrides with offset 0 | **Real.** `{394235, 396753, 396833, 396837, 400180}` resolve to the image base rather than null, so those five type checks silently never match. Not a crash: 0x140000000 is readable. | Documented, not changed. |
+| CSV metadata row `13291,0.158.0` | **Real.** `stoull` stopped at the dot and produced offset 0, so id 13291 mapped to the image base. Nothing looks that id up, but any malformed row would have done the same silently. | `LoadCSV` now rejects a row unless both fields parse whole. |
+
+Two checks worth keeping, both run over every `POINTER_SKYRIMSE` this repo has ever declared:
+
+- **No AE id anywhere collides with a real SE id in the VR library.** Where nobody converted an id
+  (77 of them), the AE number simply is not in the library, so it falls to an override or stays
+  unresolved rather than silently resolving to the wrong function.
+- **Ten of the eleven overrides that the SE-era code can corroborate agree with it exactly.** The
+  one that did not was `sub_14063CFB0` above.
+
+A caution the audit did not raise: the AE id for `s_regenAttributes` (37448, AE 0x140607080) does
+not pair with SE 37513 in any table, and bracketing it between its paired neighbours puts it
+somewhere else entirely. Either upstream's AE id is wrong for this hook, or the pair table is too
+sparse there to bracket across. The VR side was decided on the disassembled signature, which is the
+stronger evidence; the AE path was left untouched.
+
 ## 2. How game addresses are resolved on VR
 
 - **Ids in this code are AE (1.6.x) ids; VR uses SE numbering.** The same number is a different function.
@@ -69,6 +98,7 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 | --- | --- | --- |
 | Skyrim Together UI (connect dialog, chat, party) | **SteamVR dashboard tab** "Skyrim Together" (`Systems/VRDashboard.cpp`). F6 and `connect.txt` still work, and status also shows as HUD messages. | No game window to draw into. CEF renders offscreen into a texture on our own D3D11 device; the laser pointer and SteamVR keyboard are forwarded to the page. |
 | Menu patches (menus don't pause the game while connected, favorites numbering, intro movie skip) | **On** since 2026-09-14 | Addresses from TiltedEvolutionVR, patch points checked in the VR code. Message boxes still pause: unpaused, they are invisible in the headset. |
+| Skills / level up menu unpaused | **On** since 2026-09-16, untested | Unpaused, the menu sets `kFreezeFrameBackground` and waits for a freeze frame VR never renders, which is why it was black. SE 51638 (`StatsMenu::ProcessMessage`, VR 0x8ec3e0) writes that flag at +0xBB6 (`or dword ptr [rsi+0x1C], 0x20`; AE has it at +0xA10), and the four bytes are NOP-ed after a byte check. The other three AE patches have no VR address: "menu not appearing" (+0x84E), "keep the menu updated" (+0x1040), and the controls fix (AE 52518), so in-menu input may not respond. |
 | Projectile null-handle patch | **On** since 2026-09-16 | SE 33672 is in the VR address library (0x554980). The VR frame differs, so the patch point is +0x397 (`mov rbx, [rsp+0x58]`) with a 0x158 frame, checked in the VR code. |
 | Renderer and input byte patches | **Off** | Addresses unverified; a wrong patch silently corrupts code. |
 | Naked-NPC re-equip workaround | **Off** | `GetArmorInSlot` doesn't exist on VR. |
