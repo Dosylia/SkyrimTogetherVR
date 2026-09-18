@@ -78,7 +78,7 @@ void InventoryService::OnInventoryChangeEvent(const InventoryChangeEvent& acEven
 
     m_transport.Send(request);
 
-    spdlog::info("Sending item request, item: {:X}, count: {}, target object: {:X}", acEvent.Item.BaseId.BaseId, acEvent.Item.Count, acEvent.FormId);
+    spdlog::info("Sending item request, item: {:X}, count: {}, target object: {:X}, drop: {}", acEvent.Item.BaseId.BaseId, acEvent.Item.Count, acEvent.FormId, acEvent.Drop);
 }
 
 void InventoryService::OnEquipmentChangeEvent(const EquipmentChangeEvent& acEvent) noexcept
@@ -138,6 +138,10 @@ void InventoryService::OnNotifyInventoryChanges(const NotifyInventoryChanges& ac
         }
 
         ScopedInventoryOverride _;
+
+        // Dropped items were reported invisible to the other player (2026-09-18). With the sender's "drop: true"
+        // line this shows whether the drop arrived here at all.
+        spdlog::info("Remote actor {:X} (server id {:X}) drops item {:X} x{}", pActor->formID, acMessage.ServerId, acMessage.Item.BaseId.BaseId, acMessage.Item.Count);
 
         pActor->DropOrPickUpObject(acMessage.Item, nullptr, nullptr);
     }

@@ -104,8 +104,49 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
         return;
     }
 
+#ifdef SKYRIMVR
+    // TEMPORARY: remote NPCs were seen standing under the ground on one side only (2026-09-18). Measures how far the
+    // game moved a remote actor down between two placements, so the log tells whether it is placed too low or sinks
+    // afterwards. Remove once understood.
+    {
+        static TiltedPhoques::Map<uint32_t, float> s_lastPlacedZ;
+        static float s_worstSink = 0.f;
+        static uint32_t s_sunkPlacements = 0;
+        static uint32_t s_worstActor = 0;
+        static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
+
+        if (const auto it = s_lastPlacedZ.find(apActor->formID); it != s_lastPlacedZ.end())
+        {
+            const float sink = it->second - apActor->position.z;
+            if (sink > 16.f)
+            {
+                ++s_sunkPlacements;
+                if (sink > s_worstSink)
+                {
+                    s_worstSink = sink;
+                    s_worstActor = apActor->formID;
+                }
+            }
+        }
+        s_lastPlacedZ[apActor->formID] = position.z;
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= s_nextLog)
+        {
+            s_nextLog = now + 10s;
+            if (s_sunkPlacements)
+                spdlog::info("SinkDiag: {} placements found a remote actor lower than where it was last put, worst {:.0f} units on {:X}", s_sunkPlacements, s_worstSink, s_worstActor);
+            s_sunkPlacements = 0;
+            s_worstSink = 0.f;
+            s_worstActor = 0;
+        }
+    }
+#endif
+
     apActor->ForcePosition(position);
-    apActor->LoadAnimationVariables(second.Variables);
+    // A creature of another kind than the owner's (see MarkForeignGraph) keeps its own animation state.
+    if (!aInterpolationComponent.ForeignGraph)
+        apActor->LoadAnimationVariables(second.Variables);
 
     if (apActor->currentProcess && apActor->currentProcess->middleProcess)
     {

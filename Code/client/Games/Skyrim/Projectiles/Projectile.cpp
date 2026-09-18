@@ -38,6 +38,35 @@ BSPointerHandle<Projectile>* Projectile::Launch(BSPointerHandle<Projectile>* apR
     return result;
 }
 
+// The form id behind a LaunchData pointer, or 0 unless (on VR) the memory is readable and the form table maps that id
+// back to this very pointer. On VR these pointers were once seen as garbage, so they were not read there at all: the
+// shooter id stayed 0, CombatService dropped every launch, and the other player never saw an arrow leave this client
+// (2026-09-18). TiltedEvolutionVR reads the same layout on VR. With this check a wrong layout costs an unsynced
+// projectile, never a crash; HookLaunch logs the first launches so the next session settles which it is.
+static uint32_t ValidFormId(const void* apForm) noexcept
+{
+    if (!apForm)
+        return 0;
+
+#ifdef SKYRIMVR
+    MEMORY_BASIC_INFORMATION info{};
+    if (!VirtualQuery(apForm, &info, sizeof(info)) || info.State != MEM_COMMIT || (info.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+        return 0;
+    if (static_cast<const uint8_t*>(apForm) + sizeof(TESForm) > static_cast<const uint8_t*>(info.BaseAddress) + info.RegionSize)
+        return 0;
+#endif
+
+    const auto* pForm = static_cast<const TESForm*>(apForm);
+    const uint32_t formId = pForm->formID;
+
+#ifdef SKYRIMVR
+    if (TESForm::GetById(formId) != pForm)
+        return 0;
+#endif
+
+    return formId;
+}
+
 BSPointerHandle<Projectile>* TP_MAKE_THISCALL(HookLaunch, BSPointerHandle<Projectile>, Projectile::LaunchData& arData)
 {
     // sync concentration spells through spell cast sync, the rest through projectile sync
@@ -88,26 +117,24 @@ BSPointerHandle<Projectile>* TP_MAKE_THISCALL(HookLaunch, BSPointerHandle<Projec
 
     ProjectileLaunchedEvent Event{};
     Event.Origin = arData.Origin;
-#ifndef SKYRIMVR
-    // The LaunchData layout past Origin is wrong on VR: these pointers read back as garbage there.
-    if (arData.pProjectileBase)
-        Event.ProjectileBaseID = arData.pProjectileBase->formID;
-    if (arData.pShooter)
-        Event.ShooterID = arData.pShooter->formID;
-    if (arData.pFromWeapon)
-        Event.WeaponID = arData.pFromWeapon->formID;
-    if (arData.pFromAmmo)
-        Event.AmmoID = arData.pFromAmmo->formID;
-#endif
+    Event.ProjectileBaseID = ValidFormId(arData.pProjectileBase);
+    Event.ShooterID = ValidFormId(arData.pShooter);
+    Event.WeaponID = ValidFormId(arData.pFromWeapon);
+    Event.AmmoID = ValidFormId(arData.pFromAmmo);
     Event.ZAngle = arData.fZAngle;
     Event.XAngle = arData.fXAngle;
     Event.YAngle = arData.fYAngle;
-#ifndef SKYRIMVR
-    if (arData.pParentCell)
-        Event.ParentCellID = arData.pParentCell->formID;
-    if (arData.pSpell)
-        Event.SpellID = arData.pSpell->formID;
-#endif
+    Event.ParentCellID = ValidFormId(arData.pParentCell);
+    Event.SpellID = ValidFormId(arData.pSpell);
+
+    // TEMPORARY: says which of the six resolved on VR. Remove once the layout is settled.
+    static uint32_t s_launchesLogged = 0;
+    if (s_launchesLogged < 10)
+    {
+        ++s_launchesLogged;
+        spdlog::info("Projectile launch: shooter {:X}, base {:X}, weapon {:X}, ammo {:X}, cell {:X}, spell {:X}", Event.ShooterID, Event.ProjectileBaseID,
+                     Event.WeaponID, Event.AmmoID, Event.ParentCellID, Event.SpellID);
+    }
     Event.CastingSource = arData.eCastingSource;
     Event.UnkBool1 = arData.bUnkBool1;
     Event.Area = arData.iArea;

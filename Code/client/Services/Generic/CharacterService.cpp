@@ -312,6 +312,64 @@ void CharacterService::OnDisconnected(const DisconnectedEvent& acDisconnectedEve
     m_world.clear<WaitingForAssignmentComponent, LocalComponent, RemoteComponent>();
 }
 
+namespace
+{
+// A levelled reference is rolled separately on each machine, so the creature at it need not be the one the owner
+// has. Two rolls of one list are usually variants of a kind (Bandit and Bandit, Deer and Deer): same skeleton, same
+// behaviour graph, and the owner's animation data fits them. A fox at a rabbit's reference is not: fed the rabbit's
+// variables it stood frozen, and refusing to adopt it instead left each player fighting a private copy of every
+// mismatched bandit (both seen 2026-09-18). So it is adopted and positioned by its owner like anything else, and only
+// its animation data is left unapplied. Races are compared through Actor::race (read on VR by PlayerService) and
+// TESNPC::raceForm (set on VR for every remote player's base by TESNPC::Initialize); if the two disagree for the
+// local actor itself, that offset is not trusted and names decide.
+void MarkForeignGraph(World& aWorld, const entt::entity aEntity, Actor* apActor, const GameId& acRemoteBaseId) noexcept
+{
+    if (acRemoteBaseId == GameId{})
+        return;
+
+    const uint32_t cRemoteBaseId = aWorld.GetModSystem().GetGameId(acRemoteBaseId);
+
+    const TESNPC* pLocalBase = Cast<TESNPC>(apActor->baseForm);
+    if (pLocalBase && pLocalBase->IsTemporary())
+        pLocalBase = pLocalBase->GetTemplateBase();
+
+    if (!cRemoteBaseId || !pLocalBase || pLocalBase->formID == cRemoteBaseId)
+        return;
+
+    const TESNPC* pRemoteBase = Cast<TESNPC>(TESForm::GetById(cRemoteBaseId));
+    if (!pRemoteBase)
+        return;
+
+    const char* pLocalName = pLocalBase->fullName.value.AsAscii();
+    const char* pRemoteName = pRemoteBase->fullName.value.AsAscii();
+
+    bool foreign;
+    const char* pHow;
+    if (apActor->race && pLocalBase->raceForm.race == apActor->race && pRemoteBase->raceForm.race)
+    {
+        foreign = pRemoteBase->raceForm.race != apActor->race;
+        pHow = "race";
+    }
+    else
+    {
+        foreign = std::strcmp(pLocalName ? pLocalName : "", pRemoteName ? pRemoteName : "") != 0;
+        pHow = "name";
+    }
+
+    spdlog::info("Base form differs on reference {:X}: owner has {:X} ({}), this side {:X} ({}); {} (decided by {})", apActor->formID, cRemoteBaseId,
+                 pRemoteName ? pRemoteName : "?", pLocalBase->formID, pLocalName ? pLocalName : "?",
+                 foreign ? "another kind of creature, its animation data will not be applied" : "same kind, synced normally", pHow);
+
+    if (!foreign)
+        return;
+
+    if (auto* pAnimation = aWorld.try_get<RemoteAnimationComponent>(aEntity))
+        pAnimation->ForeignGraph = true;
+    if (auto* pInterpolation = aWorld.try_get<InterpolationComponent>(aEntity))
+        pInterpolation->ForeignGraph = true;
+}
+} // namespace
+
 void CharacterService::OnAssignCharacter(const AssignCharacterResponse& acMessage) noexcept
 {
     spdlog::debug("Received for cookie {:X}, server id {:X}", acMessage.Cookie, acMessage.ServerId);
@@ -382,6 +440,8 @@ void CharacterService::OnAssignCharacter(const AssignCharacterResponse& acMessag
         InterpolationSystem::Setup(m_world, cEntity);
         AnimationSystem::Setup(m_world, cEntity);
         AnimationSystem::AddActionsForReplay(m_world.get<RemoteAnimationComponent>(cEntity), acMessage.ActionsToReplay);
+        // This path adopted a levelled reference without ever seeing the owner's base; the response carries it now.
+        MarkForeignGraph(m_world, cEntity, pActor, acMessage.BaseId);
 
 #if (!IS_MASTER)
         m_world.emplace_or_replace<ReplayedActionsDebugComponent>(cEntity, acMessage.ActionsToReplay);
@@ -481,27 +541,6 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
             return;
         }
 
-        // The reference exists on both machines, but its base form need not be the same one: a reference whose base is
-        // a levelled list is rolled separately on each. Adopting a mismatched actor meant a fox being driven with a
-        // rabbit's animation variables, which left it standing still for the rest of the session. Leave it as the
-        // local creature it actually is instead of turning it into a frozen puppet.
-        if (acMessage.BaseId != GameId{})
-        {
-            const uint32_t cRemoteBaseId = World::Get().GetModSystem().GetGameId(acMessage.BaseId);
-
-            const TESNPC* pLocalBase = Cast<TESNPC>(pActor->baseForm);
-            if (pLocalBase && pLocalBase->IsTemporary())
-                pLocalBase = pLocalBase->GetTemplateBase();
-
-            if (cRemoteBaseId && pLocalBase && pLocalBase->formID != cRemoteBaseId)
-            {
-                spdlog::warn("Base form mismatch on reference {:X}: the other side has {:X}, this one has {:X} ({}). A "
-                             "levelled reference resolved to a different creature here, so it will not be synced.",
-                             cActorId, cRemoteBaseId, pLocalBase->formID, pLocalBase->fullName.value.AsAscii());
-                return;
-            }
-        }
-
         const auto view = m_world.view<FormIdComponent>();
         const auto itor = std::find_if(std::begin(view), std::end(view), [cActorId, view](entt::entity entity) { return view.get<FormIdComponent>(entity).Id == cActorId; });
 
@@ -561,6 +600,7 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
     interpolationComponent.Position = acMessage.Position;
 
     AnimationSystem::Setup(m_world, *entity);
+    MarkForeignGraph(m_world, *entity, pActor, acMessage.BaseId);
 
     m_world.emplace_or_replace<WaitingFor3D>(*entity, acMessage);
 

@@ -3,6 +3,7 @@
 #include <Games/Skyrim/VRBodySync.h>
 
 #include <Actor.h>
+#include <Games/ActorExtension.h>
 #include <PlayerCharacter.h>
 #include <NetImmerse/NiNode.h>
 #include <NetImmerse/NiTransform.h>
@@ -670,6 +671,21 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
 
     if (!acPose.HasData)
     {
+        // Without pose data the arms fall back to the animation, which is what a sword held up in the vanilla idle
+        // on the other player looks like. Say so, at most every 10 s per actor, so the log tells whether the pose
+        // never arrived or arrived and was overwritten.
+        // Only players send a pose, so only a remote player without one is worth a line.
+        if (apActor->GetExtension()->IsRemotePlayer() && !apActor->actorState.IsDeadOrDying())
+        {
+            static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextNote;
+            const auto now = std::chrono::steady_clock::now();
+            auto& next = s_nextNote[apActor->formID];
+            if (now >= next)
+            {
+                next = now + std::chrono::seconds(10);
+                spdlog::warn("VRBodySync: no VR pose data for remote actor {:X}, its arms follow the animation", apActor->formID);
+            }
+        }
         ClearRemotePose(apActor->formID);
         return;
     }

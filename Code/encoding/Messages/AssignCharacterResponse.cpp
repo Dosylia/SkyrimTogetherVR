@@ -8,6 +8,7 @@ void AssignCharacterResponse::SerializeRaw(TiltedPhoques::Buffer::Writer& aWrite
     Position.Serialize(aWriter);
     CellId.Serialize(aWriter);
     WorldSpaceId.Serialize(aWriter);
+    BaseId.Serialize(aWriter);
     AllActorValues.Serialize(aWriter);
     CurrentInventory.Serialize(aWriter);
     ActionsToReplay.Serialize(aWriter);
@@ -24,6 +25,7 @@ void AssignCharacterResponse::DeserializeRaw(TiltedPhoques::Buffer::Reader& aRea
     Position.Deserialize(aReader);
     CellId.Deserialize(aReader);
     WorldSpaceId.Deserialize(aReader);
+    BaseId.Deserialize(aReader);
     AllActorValues.Deserialize(aReader);
     CurrentInventory.Deserialize(aReader);
     ActionsToReplay.Deserialize(aReader);

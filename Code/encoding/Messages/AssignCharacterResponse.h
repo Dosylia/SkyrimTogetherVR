@@ -22,7 +22,7 @@ struct AssignCharacterResponse final : ServerMessage
 
     bool operator==(const AssignCharacterResponse& achRhs) const noexcept
     {
-        return GetOpcode() == achRhs.GetOpcode() && Cookie == achRhs.Cookie && ServerId == achRhs.ServerId && PlayerId == achRhs.PlayerId && Position == achRhs.Position && CellId == achRhs.CellId && WorldSpaceId == achRhs.WorldSpaceId && AllActorValues == achRhs.AllActorValues &&
+        return GetOpcode() == achRhs.GetOpcode() && Cookie == achRhs.Cookie && ServerId == achRhs.ServerId && PlayerId == achRhs.PlayerId && Position == achRhs.Position && CellId == achRhs.CellId && WorldSpaceId == achRhs.WorldSpaceId && BaseId == achRhs.BaseId && AllActorValues == achRhs.AllActorValues &&
                CurrentInventory == achRhs.CurrentInventory && ActionsToReplay == achRhs.ActionsToReplay && Owner == achRhs.Owner && IsDead == achRhs.IsDead && IsWeaponDrawn == achRhs.IsWeaponDrawn;
     }
 
@@ -32,6 +32,8 @@ struct AssignCharacterResponse final : ServerMessage
     Vector3_NetQuantize Position{};
     GameId CellId{};
     GameId WorldSpaceId{};
+    // The owner's base form, so a client adopting a levelled reference can tell whether its own roll matches.
+    GameId BaseId{};
     ActorValues AllActorValues{};
     Inventory CurrentInventory{};
     ActionReplayChain ActionsToReplay;

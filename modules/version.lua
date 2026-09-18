@@ -13,6 +13,7 @@ function main (target)
 	local branch = "unknown-branch"
 	local commit = "unknown-commit"
 	local timestamp = ""
+	local describe = "unknown-version"
 	try
 	{
 		function ()
@@ -22,6 +23,18 @@ function main (target)
 				branch = os.iorunv(git, {"rev-parse", "--abbrev-ref", "HEAD"}):trim()
 				commit = os.iorunv(git, {"rev-parse", "--short", "HEAD"}):trim()
 				timestamp = os.iorunv(git, {"log", "-1", "--date=short", "--pretty=format:%ci"}):trim()
+				-- The version the client and server compare on connect. An uncommitted tree adds "-dirty."
+				-- and a hash of what is uncommitted, so any change to the tree changes the version, and two
+				-- different binaries can never claim the same one (on 2026-09-18 a client and a server built
+				-- from different trees both said "-dirty" and passed the check with different protocols).
+				describe = os.iorunv(git, {"describe", "--tags", "--always"}):trim()
+				local uncommitted = os.iorunv(git, {"diff", "HEAD"}) .. os.iorunv(git, {"status", "--porcelain"})
+				if uncommitted:trim() ~= "" then
+					local tmp = os.tmpfile()
+					io.writefile(tmp, uncommitted)
+					describe = describe .. "-dirty." .. os.iorunv(git, {"hash-object", tmp}):trim():sub(1, 7)
+					os.rm(tmp)
+				end
 			else
 				error("git not found")
 			end
@@ -35,5 +48,5 @@ function main (target)
 		}
     }
 
-    return branch, commit, timestamp
+    return branch, commit, timestamp, describe
 end

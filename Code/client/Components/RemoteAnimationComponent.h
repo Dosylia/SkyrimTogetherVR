@@ -11,4 +11,7 @@ struct RemoteAnimationComponent
     ActionEvent LastProcessedAction;
     uint32_t ReplayCount;
     bool ResetAnimationGraphForReplay{false};
+    // The owner has another kind of creature at this reference (see MarkForeignGraph in CharacterService): its
+    // actions belong to a graph this actor does not have, so none are replayed.
+    bool ForeignGraph{false};
 };

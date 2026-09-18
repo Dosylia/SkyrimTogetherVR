@@ -3,7 +3,6 @@ function component(name)
   target(name)
     set_kind("static")
     set_group("Components")
-    add_configfiles("BuildInfo.h.in")
     add_includedirs(
       ".",
       "../",
@@ -24,8 +23,7 @@ function unittest(name)
     target(name .. "_Tests")
       set_kind("binary")
       set_group("Tests")
-      add_configfiles("BuildInfo.h.in")
-      add_includedirs(
+        add_includedirs(
         ".",
         "../",
         "../../", 

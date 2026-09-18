@@ -27,4 +27,6 @@ struct InterpolationComponent
     glm::vec3 Position;
     // Latest interpolated VR pose, applied to the remote actor by VRBodySync.
     VRPose InterpolatedVRPose;
+    // See RemoteAnimationComponent::ForeignGraph: the owner's animation variables are not applied either.
+    bool ForeignGraph{false};
 };

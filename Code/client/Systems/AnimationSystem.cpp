@@ -30,6 +30,13 @@ void AnimationSystem::Update(World& aWorld, Actor* apActor, RemoteAnimationCompo
 {
     auto& actions = aAnimationComponent.TimePoints;
 
+    if (aAnimationComponent.ForeignGraph)
+    {
+        // The owner's actions belong to another creature's graph (see MarkForeignGraph); nothing here fits.
+        actions.clear();
+        return;
+    }
+
     const auto it = std::begin(actions);
     if (it != std::end(actions) && it->Tick <= aTick)
     {
@@ -208,7 +215,19 @@ void AnimationSystem::Serialize(World& aWorld, ClientReferencesMoveRequest& aMov
         auto* pPlayer = static_cast<PlayerCharacter*>(pActor);
 
         VRPose pose{};
-        VRBodySync::CaptureLocalPose(pPlayer, pose);
+        if (!VRBodySync::CaptureLocalPose(pPlayer, pose))
+        {
+            // The other player then sees this body in the plain animation pose (sword held up in the vanilla idle,
+            // 2026-09-18 screenshots). Nothing logged that before, so it could not be told apart from a receive
+            // side problem.
+            static std::chrono::steady_clock::time_point s_nextWarn{};
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= s_nextWarn)
+            {
+                s_nextWarn = now + 10s;
+                spdlog::warn("VRBodySync: could not read the local VR pose (skeleton bones not found), the other player sees the animation pose instead");
+            }
+        }
         update.UpdatedVRPose = pose;
     }
 #endif

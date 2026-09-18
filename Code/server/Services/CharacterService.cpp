@@ -238,6 +238,8 @@ void CharacterService::OnAssignCharacterRequest(const PacketEvent<AssignCharacte
             response.Position = movementComponent.Position;
             response.CellId = cellIdComponent.Cell;
             response.WorldSpaceId = cellIdComponent.WorldSpaceId;
+            // Empty for players and for actors whose owner sent none; see the client's base form check.
+            response.BaseId = characterComponent.BaseId.Id;
 
             if (auto* pAnimationComponent = m_world.try_get<AnimationComponent>(*itor))
             {

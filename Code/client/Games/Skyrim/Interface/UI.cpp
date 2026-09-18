@@ -64,7 +64,15 @@ void UI::DebugLogAllMenus()
 static void UnfreezeMenu(IMenu* apEntry)
 {
     if (apEntry->PausesGame())
+    {
         apEntry->ClearFlag(IMenu::kPausesGame);
+#ifdef SKYRIMVR
+        // VR only shows its menu panel (PlayerCharacter's UINode) while a menu pauses the game or carries this
+        // flag. MessageBoxMenu and Console lack it, so unpaused they opened invisibly in the headset
+        // (TiltedEvolutionVR 5c30ec6).
+        apEntry->SetFlag(IMenu::kUpdateUsesCursor);
+#endif
+    }
 
     if (apEntry->FreezesBackground())
         apEntry->ClearFlag(IMenu::kFreezeFrameBackground);
@@ -74,11 +82,15 @@ static void UnfreezeMenu(IMenu* apEntry)
 }
 
 static constexpr const char* kAllowList[] = {
-    "TweenMenu",     "MagicMenu",     "InventoryMenu",   "StatsMenu",
+    "TweenMenu",     "MagicMenu",     "InventoryMenu",
 #ifndef SKYRIMVR
-    // A message box that doesn't pause is invisible in the headset (found by TiltedEvolutionVR).
-    "MessageBoxMenu",
+    // On VR the skills and level up screen is black whenever it runs unpaused: it works in solo, where this hook is
+    // inactive, and never while connected (2026-09-18). There it pauses the game like vanilla.
+    "StatsMenu",
 #endif
+    // Unpaused, a message box used to be invisible in the headset; UnfreezeMenu now gives it the flag the VR
+    // panel needs, so it no longer has to pause the game for every player.
+    "MessageBoxMenu",
     "ContainerMenu", "FavoritesMenu", "Tutorial Menu", "Console"
     //"MapMenu", // MapMenu is disabled till we find a proper fix for first person.
     //"Journal Menu", // Journal menu, aka pause menu, is disabled until we find a fix for manual save crashing while unpaused.
