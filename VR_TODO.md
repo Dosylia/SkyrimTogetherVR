@@ -88,8 +88,12 @@ spawn, reconnect after a drop, shouts (ported, untested), PvP sword hits (new, u
       into a loose object makes havok fling it (their collision-layer table patch stops that); an NPC's capsule can
       be shoved 54 units off its body by a player and stay there (they read the capsule and warp it back). 1200
       lines, address-heavy; take it when under-the-ground or item drift is next.
-- [ ] **TiltedEvolutionVR `1660eb0`, ownership blacklists and former-owner updates.** Not read yet; it is the
-      bear-vanishes and follower tug-of-war class. Read it before starting the upstream rework.
+- [ ] **TiltedEvolutionVR `1660eb0`, ownership blacklists and former-owner updates.** Read 2026-09-19: a follow-up
+      to upstream #887 (ownership epochs); every change needs the epoch fields, so it only comes with the rework.
+- [x] **[untested] Server hand-off of abandoned actors** (2026-09-19, `HandOffAbandonedActors`): every 2 s, an actor
+      whose owner is out of its range while another player is in range goes to that player (two sweeps in a row
+      required; owner told to relinquish, candidate told to claim). Log: `Handoff:` on the server. Does not cover a
+      paused owner: that needs the client to say it is paused, and no safe VR way to detect the pause is known.
 - [ ] **TiltedEvolutionVR `29f99ed`, two havok crash guards** (`SkyrimVR.exe+0AB1ABA` ragdoll add,
       `+03AD7B1` shadow scene listener on a temporary with no 3D). None of our dumps have those addresses; port
       them the day one does, they name the reference.
@@ -178,10 +182,8 @@ What we know:
       0 and no projectile was ever sent. Read since 2026-09-18 behind a check (readable memory, and the form table
       maps the id back to the same pointer); arrows confirmed seen by the other player the same evening. The
       first launches and every spell projectile are logged (`Projectile launch`).
-- [ ] **Dragons on the remote side.** The client grid check still passes `IsDragon = false` for
-      remote entities.
-    - Fix: add the dragon flag to the spawn data so remote copies get the wide range too. (Reading the race
-      from `TESNPC` locally would avoid the protocol change, but its `raceForm` offset isn't verified on VR.)
+- [x] **[untested] Dragons on the remote side.** `CharacterSpawnRequest.IsDragon` travels with the spawn and the
+      client grid check uses it (2026-09-19).
 - [ ] **Actor ownership warnings.** Look into `Actor for ownership transfer not found` and
       `OnNotifyActorTeleport: failed to retrieve actor` once the churn fix is confirmed.
 - [ ] **Shared follower loops** (the Lydia case). A follower owned by one player gets pulled by the
@@ -261,11 +263,10 @@ the headset off.
 
 ### 4.2 Versions and compatibility
 
-- [x] **Version string per build** (2026-09-18): `git describe` plus a hash of the uncommitted changes, written
-      by the root `xmake.lua` before_build hook, which also touches the sources that embed it. Known wart: xmake
-      only picks the touched sources up on the *next* build, so a version change needs two builds (or move the
-      version to a compile define set at target load). A client-only change still forces a server rebuild,
-      since the string must match; restart the server after every deploy.
+- [x] **Version string per build** (2026-09-19): `git describe` plus a hash of the uncommitted changes, set as
+      the `BUILD_COMMIT` compile define in the root `xmake.lua` `on_load`, so one build always carries it
+      (`build/BuildInfo.h` only holds fallbacks now). A client-only change still forces a server rebuild, since the
+      string must match; restart the server after every deploy.
 - [ ] Add a protocol number that changes with every message change, so unrelated client changes stop forcing
       server restarts.
 - [x] **Build version** in the first log line and in the connected notification.

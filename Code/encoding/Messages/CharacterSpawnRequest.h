@@ -33,7 +33,7 @@ struct CharacterSpawnRequest final : ServerMessage
                InventoryContent == acRhs.InventoryContent && FactionsContent == acRhs.FactionsContent &&
                ActionsToReplay == acRhs.ActionsToReplay && FaceTints == acRhs.FaceTints && PlayerId == acRhs.PlayerId &&
                IsDead == acRhs.IsDead && IsPlayer == acRhs.IsPlayer && IsWeaponDrawn == acRhs.IsWeaponDrawn &&
-               IsPlayerSummon == acRhs.IsPlayerSummon && GetOpcode() == acRhs.GetOpcode();
+               IsPlayerSummon == acRhs.IsPlayerSummon && IsDragon == acRhs.IsDragon && GetOpcode() == acRhs.GetOpcode();
     }
 
     uint32_t ServerId{};
@@ -54,4 +54,6 @@ struct CharacterSpawnRequest final : ServerMessage
     bool IsPlayer{};
     bool IsWeaponDrawn{};
     bool IsPlayerSummon{};
+    // Dragons are kept at the wide range on the server; the client's own range check needs to know too.
+    bool IsDragon{};
 };

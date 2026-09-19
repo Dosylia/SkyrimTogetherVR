@@ -81,6 +81,7 @@ void CharacterService::Serialize(World& aRegistry, entt::entity aEntity, Charact
     apSpawnRequest->IsPlayer = characterComponent.IsPlayer();
     apSpawnRequest->IsWeaponDrawn = characterComponent.IsWeaponDrawn();
     apSpawnRequest->IsPlayerSummon = characterComponent.IsPlayerSummon();
+    apSpawnRequest->IsDragon = characterComponent.IsDragon();
     apSpawnRequest->PlayerId = characterComponent.PlayerId;
 
     const auto* pFormIdComponent = aRegistry.try_get<FormIdComponent>(aEntity);
@@ -124,10 +125,95 @@ void CharacterService::Serialize(World& aRegistry, entt::entity aEntity, Charact
     apSpawnRequest->ActionsToReplay = animationComponent.ActionsReplayCache.FormRefinedReplayChain();
 }
 
+namespace
+{
+// The party leader claims every NPC it sees and keeps it however far it walks, so the other player fights a bear the
+// leader's game is not animating (its movement was withheld for 10 to 30 s at a time on 2026-09-18 and 09-19), and
+// when the leader finally drops it the bear is teleported to the leader's last position. Every two seconds: an actor
+// whose owner is out of its range while another player is in range goes to that player. Two sweeps in a row are
+// required, so a player crossing a cell edge does not bounce actors back and forth. The current owner is told to
+// relinquish; the candidate is told to claim, exactly as after a disconnect. Players' own characters, summons and
+// dead actors stay where they are.
+void HandOffAbandonedActors(World& aWorld) noexcept
+{
+    static std::chrono::steady_clock::time_point s_nextSweep;
+    static TiltedPhoques::Map<uint32_t, uint32_t> s_outOfRangeSweeps; // entity -> consecutive sweeps out of range
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_nextSweep)
+        return;
+    s_nextSweep = now + 2s;
+
+    TiltedPhoques::Set<uint32_t> playerCharacters;
+    for (auto pPlayer : aWorld.GetPlayerManager())
+        if (pPlayer->GetCharacter())
+            playerCharacters.insert(World::ToInteger(*pPlayer->GetCharacter()));
+
+    auto view = aWorld.view<OwnerComponent, CharacterComponent, CellIdComponent>();
+    for (auto entity : view)
+    {
+        const uint32_t cId = World::ToInteger(entity);
+        auto& ownerComponent = view.get<OwnerComponent>(entity);
+        auto& characterComponent = view.get<CharacterComponent>(entity);
+        auto& cellIdComponent = view.get<CellIdComponent>(entity);
+
+        Player* pOwner = ownerComponent.GetOwner();
+        if (!pOwner || playerCharacters.count(cId) || characterComponent.IsPlayerSummon() || characterComponent.IsDead())
+        {
+            s_outOfRangeSweeps.erase(cId);
+            continue;
+        }
+
+        if (pOwner->GetCellComponent().IsInRange(cellIdComponent, characterComponent.IsDragon()))
+        {
+            s_outOfRangeSweeps.erase(cId);
+            continue;
+        }
+
+        Player* pCandidate = nullptr;
+        for (auto pPlayer : aWorld.GetPlayerManager())
+        {
+            if (pPlayer == pOwner || !pPlayer->GetCellComponent().IsInRange(cellIdComponent, characterComponent.IsDragon()))
+                continue;
+            if (std::find(ownerComponent.InvalidOwners.begin(), ownerComponent.InvalidOwners.end(), pPlayer) != ownerComponent.InvalidOwners.end())
+                continue;
+            pCandidate = pPlayer;
+            break;
+        }
+
+        if (!pCandidate)
+        {
+            s_outOfRangeSweeps.erase(cId);
+            continue;
+        }
+
+        if (++s_outOfRangeSweeps[cId] < 2)
+            continue;
+        s_outOfRangeSweeps.erase(cId);
+
+        const auto& ownerCell = pOwner->GetCellComponent().CenterCoords;
+        spdlog::info("Handoff: actor {:X} at grid ({}, {}) from player {:X} at ({}, {}), out of its range, to player {:X} who is in range", cId, cellIdComponent.CenterCoords.X,
+                     cellIdComponent.CenterCoords.Y, pOwner->GetConnectionId(), ownerCell.X, ownerCell.Y, pCandidate->GetConnectionId());
+
+        NotifyRelinquishControl relinquish;
+        relinquish.ServerId = cId;
+        pOwner->Send(relinquish);
+
+        ownerComponent.SetOwner(pCandidate);
+        ownerComponent.InvalidOwners.clear();
+
+        NotifyOwnershipTransfer transfer;
+        transfer.ServerId = cId;
+        pCandidate->Send(transfer);
+    }
+}
+} // namespace
+
 void CharacterService::OnUpdate(const UpdateEvent&) const noexcept
 {
     ProcessFactionsChanges();
     ProcessMovementChanges();
+    HandOffAbandonedActors(m_world);
 }
 
 void CharacterService::OnCharacterExteriorCellChange(const CharacterExteriorCellChangeEvent& acEvent) const noexcept

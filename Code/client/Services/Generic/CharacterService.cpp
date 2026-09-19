@@ -1890,8 +1890,10 @@ void CharacterService::RunSpawnUpdates() const noexcept
             const TES* pTES = TES::Get();
             const auto playerCoords = GridCellCoords(pTES->centerGridX, pTES->centerGridY);
 
-            // TODO(cosideci): IsDragon probably shouldn't be straight up false here.
-            if (GridCellCoords::IsCellInGridCell(characterCoords, playerCoords, false))
+            // A dragon the other player fights sits well outside the 5x5 grid; the server keeps it at the wide range and
+            // says so in the spawn request, so it is created here at that range too instead of never.
+            const bool isDragon = m_world.get<WaitingFor3D>(entity).SpawnRequest.IsDragon;
+            if (GridCellCoords::IsCellInGridCell(characterCoords, playerCoords, isDragon))
             {
                 auto* pActor = Cast<Actor>(TESForm::GetById(remoteComponent.CachedRefId));
                 if (!pActor)
