@@ -8,6 +8,7 @@
 #include <Games/References.h>
 
 #include <Forms/BGSAction.h>
+#include <Forms/TESNPC.h>
 #include <AI/AIProcess.h>
 #include <Misc/MiddleProcess.h>
 
@@ -81,6 +82,26 @@ void AnimationSystem::Update(World& aWorld, Actor* apActor, RemoteAnimationCompo
         actionData.someFlag = ((first.Type & 0x4) != 0) ? 1 : 0;
 
         const auto result = ActorMediator::Get()->ForceAction(&actionData);
+
+        // TEMPORARY: remote NPCs slide instead of walking on the receiving side, and AnimDiag shows the game refusing
+        // most of their moveStart and turnStop replays (2026-09-19, 7 of 9 moveStart refused). This names, for one
+        // refused replay per 10 s, everything the refusal could depend on. Remove once understood.
+        if (!result)
+        {
+            static std::chrono::steady_clock::time_point s_nextSample{};
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= s_nextSample)
+            {
+                s_nextSample = now + 10s;
+                const auto* pBase = Cast<TESNPC>(apActor->baseForm);
+                spdlog::info("ReplayDiag: refused '{}' on {:X} ({}): action {:X} resolved {}, idle {:X} resolved {}, type {}, target {:X} resolved {}, graph ready {}, has 3D {}, "
+                             "has process {}, flags1 {:#x}, flags2 {:#x}, dead or dying {}, replay left {}, queued {}",
+                             first.EventName.c_str(), apActor->formID, pBase ? pBase->fullName.value.AsAscii() : "?", actionId, pAction != nullptr, first.IdleId,
+                             actionData.idleForm != nullptr, first.Type, targetId, pTarget != nullptr, apActor->animationGraphHolder.IsReady(),
+                             apActor->GetNiNode() != nullptr, apActor->currentProcess != nullptr, apActor->actorState.flags1, apActor->actorState.flags2,
+                             apActor->actorState.IsDeadOrDying(), aAnimationComponent.ReplayCount, actions.size());
+            }
+        }
 
         // TEMPORARY sliding diagnostic: actors were reported sliding instead of walking. Counts replayed actions and
         // the ones the game refused, per event name, and logs a summary every 10 s. Remove once understood.

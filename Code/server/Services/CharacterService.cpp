@@ -866,8 +866,13 @@ void CharacterService::ProcessMovementChanges() const noexcept
             uint32_t WorstId = 0;
             int32_t WorstX = 0;
             int32_t WorstY = 0;
+            // Copied while the player exists: a player who disconnects before the 10 s log would otherwise be read
+            // through a dangling pointer (a line with grid (0, 402850048) on 2026-09-19 was exactly that).
+            int32_t CentreX = 0;
+            int32_t CentreY = 0;
+            uint32_t WorldSpace = 0;
         };
-        static TiltedPhoques::Map<Player*, RangeStats> s_stats;
+        static TiltedPhoques::Map<uint32_t, RangeStats> s_stats; // by connection id
         static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
 
         for (auto entity : characterView)
@@ -881,7 +886,10 @@ void CharacterService::ProcessMovementChanges() const noexcept
                 if (pPlayer == ownerComponent.GetOwner())
                     continue;
 
-                auto& stats = s_stats[pPlayer];
+                auto& stats = s_stats[pPlayer->GetConnectionId()];
+                stats.CentreX = pPlayer->GetCellComponent().CenterCoords.X;
+                stats.CentreY = pPlayer->GetCellComponent().CenterCoords.Y;
+                stats.WorldSpace = pPlayer->GetCellComponent().WorldSpaceId.BaseId;
                 if (cellIdComponent.IsInRange(pPlayer->GetCellComponent(), characterComponent.IsDragon()))
                 {
                     ++stats.Sent;
@@ -904,14 +912,12 @@ void CharacterService::ProcessMovementChanges() const noexcept
         if (now >= s_nextLog)
         {
             s_nextLog = now + 10s;
-            for (auto& [pPlayer, stats] : s_stats)
+            for (auto& [connectionId, stats] : s_stats)
             {
                 if (stats.Withheld)
                 {
-                    const auto& cell = pPlayer->GetCellComponent();
                     spdlog::info("RangeDiag: player {:X} at centre grid ({}, {}) worldspace {:X}: {} character updates sent, {} withheld; nearest withheld {:X} at grid ({}, {}), {} cells away",
-                                 pPlayer->GetConnectionId(), cell.CenterCoords.X, cell.CenterCoords.Y, cell.WorldSpaceId.BaseId, stats.Sent, stats.Withheld, stats.WorstId, stats.WorstX,
-                                 stats.WorstY, stats.WorstDistance);
+                                 connectionId, stats.CentreX, stats.CentreY, stats.WorldSpace, stats.Sent, stats.Withheld, stats.WorstId, stats.WorstX, stats.WorstY, stats.WorstDistance);
                 }
             }
             s_stats.clear();

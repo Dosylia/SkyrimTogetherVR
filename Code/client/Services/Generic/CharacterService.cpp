@@ -70,7 +70,151 @@
 #include <Games/TES.h>
 #ifdef SKYRIMVR
 #include <Games/Skyrim/VRBodySync.h>
+
 #endif
+
+namespace
+{
+// Levelled references the other player rolled as another kind of creature (a rabbit here, a snow fox there). Adopting
+// the wrong creature froze it or made it slide; refusing it gave each player a private copy. So the owner's creature
+// is spawned here as a copy (a temporary actor from the owner's base, the path summons already use) and the local
+// reference becomes a "ghost": disabled while the copy stands in for it, never assigned to the server. Key: the
+// ghost's form id; value: the copy's. The ghost is enabled again the moment its copy is deleted, on disconnect, or when
+// this client goes away. Disable is saved with the reference, so a crash while a ghost is disabled leaves that one
+// spawn point disabled in the save made during the session; a small, known cost (2026-09-19).
+TiltedPhoques::Map<uint32_t, uint32_t> s_ghosts;
+
+struct BaseMatch
+{
+    bool Differs = false;       // the owner's base is not this side's base
+    bool Foreign = false;       // and it is another kind of creature
+    TESNPC* pOwnerBase = nullptr;
+};
+
+// Same name first: a levelled list of humanoids mixes races freely (Nord and Breton bandits are both "Bandit"),
+// and all of those share the humanoid skeleton and graph. Comparing races alone marked six Bandit/Bandit pairs
+// as foreign on 2026-09-18 and left them without animations. Only when the names differ does the race decide
+// (Elk vs Deer, Bear vs Frostbite Spider are foreign; Dragon vs Blood Dragon is not). Races are compared through
+// Actor::race (read on VR by PlayerService) and TESNPC::raceForm (set on VR for every remote player's base by
+// TESNPC::Initialize); if the two disagree for the local actor itself, that offset is not trusted.
+BaseMatch CompareBase(World& aWorld, Actor* apActor, const GameId& acRemoteBaseId, const bool aLog) noexcept
+{
+    BaseMatch match{};
+    if (acRemoteBaseId == GameId{})
+        return match;
+
+    const uint32_t cRemoteBaseId = aWorld.GetModSystem().GetGameId(acRemoteBaseId);
+
+    const TESNPC* pLocalBase = Cast<TESNPC>(apActor->baseForm);
+    if (pLocalBase && pLocalBase->IsTemporary())
+        pLocalBase = pLocalBase->GetTemplateBase();
+
+    if (!cRemoteBaseId || !pLocalBase || pLocalBase->formID == cRemoteBaseId)
+        return match;
+
+    TESNPC* pRemoteBase = Cast<TESNPC>(TESForm::GetById(cRemoteBaseId));
+    if (!pRemoteBase)
+        return match;
+
+    match.Differs = true;
+    match.pOwnerBase = pRemoteBase;
+
+    const char* pLocalName = pLocalBase->fullName.value.AsAscii();
+    const char* pRemoteName = pRemoteBase->fullName.value.AsAscii();
+
+    const bool sameName = std::strcmp(pLocalName ? pLocalName : "", pRemoteName ? pRemoteName : "") == 0;
+
+    const char* pHow;
+    if (sameName)
+    {
+        match.Foreign = false;
+        pHow = "name";
+    }
+    else if (apActor->race && pLocalBase->raceForm.race == apActor->race && pRemoteBase->raceForm.race)
+    {
+        match.Foreign = pRemoteBase->raceForm.race != apActor->race;
+        pHow = "race";
+    }
+    else
+    {
+        match.Foreign = true;
+        pHow = "name, race unreadable";
+    }
+
+    if (aLog)
+        spdlog::info("Base form differs on reference {:X}: owner has {:X} ({}), this side {:X} ({}); {} (decided by {})", apActor->formID, cRemoteBaseId,
+                     pRemoteName ? pRemoteName : "?", pLocalBase->formID, pLocalName ? pLocalName : "?",
+                     match.Foreign ? "another kind of creature" : "same kind, synced normally", pHow);
+
+    return match;
+}
+
+// The fallback when no copy could be made: adopt the local creature but never feed it the owner's animation data,
+// which belongs to a graph it does not have (it slides instead of freezing).
+void MarkForeignGraph(World& aWorld, const entt::entity aEntity, Actor* apActor, const GameId& acRemoteBaseId) noexcept
+{
+    if (!CompareBase(aWorld, apActor, acRemoteBaseId, true).Foreign)
+        return;
+
+    if (auto* pAnimation = aWorld.try_get<RemoteAnimationComponent>(aEntity))
+        pAnimation->ForeignGraph = true;
+    if (auto* pInterpolation = aWorld.try_get<InterpolationComponent>(aEntity))
+        pInterpolation->ForeignGraph = true;
+}
+
+// Spawns the owner's creature and turns the local one into a ghost. Null when no copy could be made; the caller then
+// adopts the local creature as before.
+Actor* StandInForForeignCreature(Actor* apLocal, TESNPC* apOwnerBase) noexcept
+{
+    Actor* pCopy = Actor::Create(apOwnerBase);
+    if (!pCopy)
+    {
+        spdlog::warn("Ghost: could not create a copy of {:X} for reference {:X}, adopting the local creature instead", apOwnerBase->formID, apLocal->formID);
+        return nullptr;
+    }
+
+    const TESNPC* pLocalBase = Cast<TESNPC>(apLocal->baseForm);
+    if (pLocalBase && pLocalBase->IsTemporary())
+        pLocalBase = pLocalBase->GetTemplateBase();
+
+    s_ghosts[apLocal->formID] = pCopy->formID;
+    apLocal->Disable();
+
+    spdlog::info("Ghost: reference {:X} rolled as {} ({:X}) here but the owner has {} ({:X}); copy {:X} stands in for it and the local one is disabled", apLocal->formID,
+                 pLocalBase ? pLocalBase->fullName.value.AsAscii() : "?", pLocalBase ? pLocalBase->formID : 0, apOwnerBase->fullName.value.AsAscii(), apOwnerBase->formID,
+                 pCopy->formID);
+    return pCopy;
+}
+
+void EnableGhost(const uint32_t aGhostFormId) noexcept
+{
+    Actor* pGhost = Cast<Actor>(TESForm::GetById(aGhostFormId));
+    if (pGhost && pGhost->IsDisabled())
+        pGhost->EnableImpl();
+    spdlog::info("Ghost: reference {:X} is a normal local creature again{}", aGhostFormId, pGhost ? "" : " (not loaded)");
+}
+
+// Called for every temporary actor this client deletes: if it was a stand-in, its ghost comes back.
+void ReleaseGhostOf(const uint32_t aCopyFormId) noexcept
+{
+    for (auto it = s_ghosts.begin(); it != s_ghosts.end(); ++it)
+    {
+        if (it->second != aCopyFormId)
+            continue;
+        const uint32_t cGhost = it->first;
+        s_ghosts.erase(it);
+        EnableGhost(cGhost);
+        return;
+    }
+}
+
+void ReleaseAllGhosts() noexcept
+{
+    for (const auto& [ghost, copy] : s_ghosts)
+        EnableGhost(ghost);
+    s_ghosts.clear();
+}
+} // namespace
 
 CharacterService::CharacterService(World& aWorld, entt::dispatcher& aDispatcher, TransportService& aTransport) noexcept
     : m_world(aWorld)
@@ -171,6 +315,7 @@ void CharacterService::DeleteTempActor(const uint32_t aFormId) noexcept
     {
         pActor->Delete();
         spdlog::info("\tDeleted actor {:X}", aFormId);
+        ReleaseGhostOf(aFormId);
     }
 }
 
@@ -310,76 +455,9 @@ void CharacterService::OnDisconnected(const DisconnectedEvent& acDisconnectedEve
     }
 
     m_world.clear<WaitingForAssignmentComponent, LocalComponent, RemoteComponent>();
+
+    ReleaseAllGhosts();
 }
-
-namespace
-{
-// A levelled reference is rolled separately on each machine, so the creature at it need not be the one the owner
-// has. Two rolls of one list are usually variants of a kind (Bandit and Bandit, Deer and Deer): same skeleton, same
-// behaviour graph, and the owner's animation data fits them. A fox at a rabbit's reference is not: fed the rabbit's
-// variables it stood frozen, and refusing to adopt it instead left each player fighting a private copy of every
-// mismatched bandit (both seen 2026-09-18). So it is adopted and positioned by its owner like anything else, and only
-// its animation data is left unapplied. Races are compared through Actor::race (read on VR by PlayerService) and
-// TESNPC::raceForm (set on VR for every remote player's base by TESNPC::Initialize); if the two disagree for the
-// local actor itself, that offset is not trusted and names decide.
-void MarkForeignGraph(World& aWorld, const entt::entity aEntity, Actor* apActor, const GameId& acRemoteBaseId) noexcept
-{
-    if (acRemoteBaseId == GameId{})
-        return;
-
-    const uint32_t cRemoteBaseId = aWorld.GetModSystem().GetGameId(acRemoteBaseId);
-
-    const TESNPC* pLocalBase = Cast<TESNPC>(apActor->baseForm);
-    if (pLocalBase && pLocalBase->IsTemporary())
-        pLocalBase = pLocalBase->GetTemplateBase();
-
-    if (!cRemoteBaseId || !pLocalBase || pLocalBase->formID == cRemoteBaseId)
-        return;
-
-    const TESNPC* pRemoteBase = Cast<TESNPC>(TESForm::GetById(cRemoteBaseId));
-    if (!pRemoteBase)
-        return;
-
-    const char* pLocalName = pLocalBase->fullName.value.AsAscii();
-    const char* pRemoteName = pRemoteBase->fullName.value.AsAscii();
-
-    // Same name first: a levelled list of humanoids mixes races freely (Nord and Breton bandits are both "Bandit"),
-    // and all of those share the humanoid skeleton and graph. Comparing races alone marked six Bandit/Bandit pairs
-    // as foreign on 2026-09-18 and left them without animations. Only when the names differ does the race decide
-    // (Elk vs Deer, Bear vs Frostbite Spider are foreign; Dragon vs Blood Dragon is not).
-    const bool sameName = std::strcmp(pLocalName ? pLocalName : "", pRemoteName ? pRemoteName : "") == 0;
-
-    bool foreign;
-    const char* pHow;
-    if (sameName)
-    {
-        foreign = false;
-        pHow = "name";
-    }
-    else if (apActor->race && pLocalBase->raceForm.race == apActor->race && pRemoteBase->raceForm.race)
-    {
-        foreign = pRemoteBase->raceForm.race != apActor->race;
-        pHow = "race";
-    }
-    else
-    {
-        foreign = true;
-        pHow = "name, race unreadable";
-    }
-
-    spdlog::info("Base form differs on reference {:X}: owner has {:X} ({}), this side {:X} ({}); {} (decided by {})", apActor->formID, cRemoteBaseId,
-                 pRemoteName ? pRemoteName : "?", pLocalBase->formID, pLocalName ? pLocalName : "?",
-                 foreign ? "another kind of creature, its animation data will not be applied" : "same kind, synced normally", pHow);
-
-    if (!foreign)
-        return;
-
-    if (auto* pAnimation = aWorld.try_get<RemoteAnimationComponent>(aEntity))
-        pAnimation->ForeignGraph = true;
-    if (auto* pInterpolation = aWorld.try_get<InterpolationComponent>(aEntity))
-        pInterpolation->ForeignGraph = true;
-}
-} // namespace
 
 void CharacterService::OnAssignCharacter(const AssignCharacterResponse& acMessage) noexcept
 {
@@ -442,6 +520,37 @@ void CharacterService::OnAssignCharacter(const AssignCharacterResponse& acMessag
     else
     {
         spdlog::info("Received remote actor, form id: {:X}, isweapondrawn: {}", pActor->formID, acMessage.IsWeaponDrawn);
+
+        // Another kind of creature than the owner's (this side asked first, the response carries the owner's base):
+        // a copy stands in, set up through the deferred path a temporary actor takes, and the local reference keeps
+        // its bare entity as a ghost.
+        if (const BaseMatch match = CompareBase(m_world, pActor, acMessage.BaseId, false); match.Foreign && match.pOwnerBase)
+        {
+            if (Actor* pCopy = StandInForForeignCreature(pActor, match.pOwnerBase))
+            {
+                CharacterSpawnRequest spawn{};
+                spawn.ServerId = acMessage.ServerId;
+                spawn.BaseId = acMessage.BaseId;
+                spawn.Position = acMessage.Position;
+                spawn.CellId = acMessage.CellId;
+                spawn.InitialActorValues = acMessage.AllActorValues;
+                spawn.InventoryContent = acMessage.CurrentInventory;
+                spawn.ActionsToReplay = acMessage.ActionsToReplay;
+                spawn.PlayerId = acMessage.PlayerId;
+                spawn.IsDead = acMessage.IsDead;
+                spawn.IsWeaponDrawn = acMessage.IsWeaponDrawn;
+
+                const entt::entity copyEntity = m_world.create();
+                m_world.emplace<RemoteComponent>(copyEntity, acMessage.ServerId, pCopy->formID);
+                pCopy->MoveTo(PlayerCharacter::Get()->parentCell, acMessage.Position);
+                pCopy->SetActorValues(acMessage.AllActorValues);
+                auto& copyInterpolation = InterpolationSystem::Setup(m_world, copyEntity);
+                copyInterpolation.Position = acMessage.Position;
+                AnimationSystem::Setup(m_world, copyEntity);
+                m_world.emplace<WaitingFor3D>(copyEntity, spawn);
+                return;
+            }
+        }
 
         m_world.emplace_or_replace<RemoteComponent>(cEntity, acMessage.ServerId, formIdComponent->Id);
 
@@ -552,13 +661,27 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
             return;
         }
 
-        const auto view = m_world.view<FormIdComponent>();
-        const auto itor = std::find_if(std::begin(view), std::end(view), [cActorId, view](entt::entity entity) { return view.get<FormIdComponent>(entity).Id == cActorId; });
+        // Another kind of creature than the owner's: a copy of the owner's stands in, the local one becomes a ghost.
+        // The local reference keeps its own entity (a bare FormIdComponent that ProcessNewEntity skips).
+        if (const BaseMatch match = CompareBase(m_world, pActor, acMessage.BaseId, false); match.Foreign && match.pOwnerBase)
+        {
+            if (Actor* pCopy = StandInForForeignCreature(pActor, match.pOwnerBase))
+            {
+                pActor = pCopy;
+                entity = m_world.create();
+            }
+        }
 
-        if (itor != std::end(view))
-            entity = *itor;
-        else
-            entity = m_world.create();
+        if (!entity)
+        {
+            const auto view = m_world.view<FormIdComponent>();
+            const auto itor = std::find_if(std::begin(view), std::end(view), [cActorId, view](entt::entity entity) { return view.get<FormIdComponent>(entity).Id == cActorId; });
+
+            if (itor != std::end(view))
+                entity = *itor;
+            else
+                entity = m_world.create();
+        }
     }
 
     if (!pActor)
@@ -1232,6 +1355,10 @@ void CharacterService::ProcessNewEntity(entt::entity aEntity) const noexcept
         return;
     }
 
+    // A ghost: a copy of the owner's creature is bound to the server in its place (see s_ghosts).
+    if (s_ghosts.find(formIdComponent.Id) != s_ghosts.end())
+        return;
+
     if (auto* pRemoteComponent = m_world.try_get<RemoteComponent>(aEntity); pRemoteComponent)
     {
         // TODO(cosideci): don't just take all actors (i.e. from other parties),
@@ -1417,6 +1544,7 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
             {
                 spdlog::info("Temporary Remote Deleted {:X}", aFormId);
                 pActor->Delete();
+                ReleaseGhostOf(aFormId);
             }
             else
             {
