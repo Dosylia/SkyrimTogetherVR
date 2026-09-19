@@ -134,6 +134,10 @@ namespace
 // required, so a player crossing a cell edge does not bounce actors back and forth. The current owner is told to
 // relinquish; the candidate is told to claim, exactly as after a disconnect. Players' own characters, summons and
 // dead actors stay where they are.
+//
+// An owner that has gone silent counts as away too: a paused game sends nothing (the mod's update runs off the
+// Papyrus VM, which pausing suspends), and until now its NPCs simply froze for the other player. Three seconds of
+// silence is well past any network hiccup at 10 snapshots a second. A silent player is never a candidate.
 void HandOffAbandonedActors(World& aWorld) noexcept
 {
     static std::chrono::steady_clock::time_point s_nextSweep;
@@ -143,6 +147,10 @@ void HandOffAbandonedActors(World& aWorld) noexcept
     if (now < s_nextSweep)
         return;
     s_nextSweep = now + 2s;
+
+    constexpr auto cSilence = 3s;
+    const auto isSilent = [now](const Player* apPlayer)
+    { return apPlayer->GetLastMovementAt() != std::chrono::steady_clock::time_point{} && now - apPlayer->GetLastMovementAt() > cSilence; };
 
     TiltedPhoques::Set<uint32_t> playerCharacters;
     for (auto pPlayer : aWorld.GetPlayerManager())
@@ -164,7 +172,8 @@ void HandOffAbandonedActors(World& aWorld) noexcept
             continue;
         }
 
-        if (pOwner->GetCellComponent().IsInRange(cellIdComponent, characterComponent.IsDragon()))
+        const bool ownerSilent = isSilent(pOwner);
+        if (!ownerSilent && pOwner->GetCellComponent().IsInRange(cellIdComponent, characterComponent.IsDragon()))
         {
             s_outOfRangeSweeps.erase(cId);
             continue;
@@ -173,7 +182,7 @@ void HandOffAbandonedActors(World& aWorld) noexcept
         Player* pCandidate = nullptr;
         for (auto pPlayer : aWorld.GetPlayerManager())
         {
-            if (pPlayer == pOwner || !pPlayer->GetCellComponent().IsInRange(cellIdComponent, characterComponent.IsDragon()))
+            if (pPlayer == pOwner || isSilent(pPlayer) || !pPlayer->GetCellComponent().IsInRange(cellIdComponent, characterComponent.IsDragon()))
                 continue;
             if (std::find(ownerComponent.InvalidOwners.begin(), ownerComponent.InvalidOwners.end(), pPlayer) != ownerComponent.InvalidOwners.end())
                 continue;
@@ -192,8 +201,9 @@ void HandOffAbandonedActors(World& aWorld) noexcept
         s_outOfRangeSweeps.erase(cId);
 
         const auto& ownerCell = pOwner->GetCellComponent().CenterCoords;
-        spdlog::info("Handoff: actor {:X} at grid ({}, {}) from player {:X} at ({}, {}), out of its range, to player {:X} who is in range", cId, cellIdComponent.CenterCoords.X,
-                     cellIdComponent.CenterCoords.Y, pOwner->GetConnectionId(), ownerCell.X, ownerCell.Y, pCandidate->GetConnectionId());
+        spdlog::info("Handoff: actor {:X} at grid ({}, {}) from player {:X} at ({}, {}), {}, to player {:X} who is in range", cId, cellIdComponent.CenterCoords.X,
+                     cellIdComponent.CenterCoords.Y, pOwner->GetConnectionId(), ownerCell.X, ownerCell.Y, ownerSilent ? "silent (paused or loading)" : "out of its range",
+                     pCandidate->GetConnectionId());
 
         NotifyRelinquishControl relinquish;
         relinquish.ServerId = cId;
@@ -480,6 +490,8 @@ void CharacterService::OnReferencesMoveRequest(const PacketEvent<ClientReference
     OwnerView<AnimationComponent, MovementComponent, CellIdComponent> view(m_world, acMessage.GetSender());
 
     auto& message = acMessage.Packet;
+
+    acMessage.pPlayer->MarkMovement();
 
     for (auto& entry : message.Updates)
     {

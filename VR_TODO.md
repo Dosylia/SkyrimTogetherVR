@@ -57,7 +57,8 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
 - [ ] **Pause menu: "weird things happen to both players".** No trace in either log. Needs a description.
 - [ ] **Nocked arrow not shown** on the other player's bow (the arrow leaves fine). The nocked arrow is an
       animation attachment and VR players never play the draw animation.
-- [ ] **Bandits naked** (known: the re-equip workaround is off on VR, no `GetArmorInSlot` address).
+- [x] **[untested] Bandits naked.** `Actor::IsWearingBodyPiece` answers from the container entries on VR (a worn
+      armour flagged as a body piece), so the once-a-second re-equip check is on again (2026-09-19).
 - [ ] **Crash when quitting** still happens: both players on 2026-09-18 21:58, in whatever DLL is freeing at exit
       (`po3_ENBLightForEffectShaders`, `EnchantmentEffectExtender`). Not a gameplay crash; ask before attributing.
 - [ ] **Grabbing an NPC with HIGGS isn't visible** to the other player. Analysis:
@@ -92,8 +93,9 @@ spawn, reconnect after a drop, shouts (ported, untested), PvP sword hits (new, u
       to upstream #887 (ownership epochs); every change needs the epoch fields, so it only comes with the rework.
 - [x] **[untested] Server hand-off of abandoned actors** (2026-09-19, `HandOffAbandonedActors`): every 2 s, an actor
       whose owner is out of its range while another player is in range goes to that player (two sweeps in a row
-      required; owner told to relinquish, candidate told to claim). Log: `Handoff:` on the server. Does not cover a
-      paused owner: that needs the client to say it is paused, and no safe VR way to detect the pause is known.
+      required; owner told to relinquish, candidate told to claim). Log: `Handoff:` on the server. A paused or
+      loading owner is covered too: the mod's update runs off the Papyrus VM, which a pause suspends, so a paused
+      client goes silent, and an owner silent for 3 s counts as away (a silent player is never a candidate).
 - [ ] **TiltedEvolutionVR `29f99ed`, two havok crash guards** (`SkyrimVR.exe+0AB1ABA` ragdoll add,
       `+03AD7B1` shadow scene listener on a temporary with no 3D). None of our dumps have those addresses; port
       them the day one does, they name the reference.

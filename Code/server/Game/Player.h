@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+
 struct ServerMessage;
 struct Player
 {
@@ -42,6 +44,11 @@ struct Player
 
     void Send(const ServerMessage& acServerMessage) const;
 
+    // When the last movement snapshot came from this client. A paused client sends none: the mod's update runs off
+    // the Papyrus VM, which the game suspends. Its actors are handed to whoever is near them meanwhile.
+    [[nodiscard]] std::chrono::steady_clock::time_point GetLastMovementAt() const noexcept { return m_lastMovementAt; }
+    void MarkMovement() noexcept { m_lastMovementAt = std::chrono::steady_clock::now(); }
+
 private:
     uint32_t m_id{0};
     ConnectionId_t m_connectionId;
@@ -56,4 +63,5 @@ private:
     CellIdComponent m_cell;
     uint32_t m_stringCacheId{0};
     uint16_t m_level{0};
+    std::chrono::steady_clock::time_point m_lastMovementAt{};
 };

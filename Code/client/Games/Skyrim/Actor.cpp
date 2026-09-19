@@ -483,9 +483,30 @@ TESForm* Actor::GetEquippedAmmo() const noexcept
 bool Actor::IsWearingBodyPiece() const noexcept
 {
 #ifdef SKYRIMVR
-    // GetArmor has no VR address. Answering "yes" turns the naked-NPC workaround off instead of
-    // re-equipping every NPC each second.
-    return true;
+    // GetArmorInSlot has no VR address. The same answer from the container entries: an armour flagged as a body
+    // piece with a worn extra on one of its stacks. Cheap enough for the once-a-second naked-NPC check, which this
+    // turns back on (it was off on VR, so bandits stayed naked; 2026-09-19).
+    const ExtraContainerChanges::Data* pChanges = GetContainerChanges();
+    if (!pChanges || !pChanges->entries)
+        return true; // nothing to look at, and re-equipping blindly is worse than leaving it
+
+    for (ExtraContainerChanges::Entry* pEntry : *pChanges->entries)
+    {
+        if (!pEntry || !pEntry->form || !pEntry->dataList)
+            continue;
+
+        const TESObjectARMO* pArmor = Cast<TESObjectARMO>(pEntry->form);
+        if (!pArmor || !pArmor->IsBodyPiece())
+            continue;
+
+        for (ExtraDataList* pList : *pEntry->dataList)
+        {
+            if (pList && (pList->Contains(ExtraDataType::Worn) || pList->Contains(ExtraDataType::WornLeft)))
+                return true;
+        }
+    }
+
+    return false;
 #endif
     return GetContainerChanges()->GetArmor(32) != nullptr;
 }
