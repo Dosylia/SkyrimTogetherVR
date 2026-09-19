@@ -28,7 +28,9 @@ function main (target)
 				-- different binaries can never claim the same one (on 2026-09-18 a client and a server built
 				-- from different trees both said "-dirty" and passed the check with different protocols).
 				describe = os.iorunv(git, {"describe", "--tags", "--always"}):trim()
-				local uncommitted = os.iorunv(git, {"diff", "HEAD"}) .. os.iorunv(git, {"status", "--porcelain"})
+				-- Submodule state is left out: Libraries/TiltedReverse carries a local fix whose upstream we cannot
+				-- push to, and nothing the server links comes from it, so it must not keep every build "dirty".
+				local uncommitted = os.iorunv(git, {"diff", "HEAD", "--ignore-submodules"}) .. os.iorunv(git, {"status", "--porcelain", "--ignore-submodules"})
 				if uncommitted:trim() ~= "" then
 					local tmp = os.tmpfile()
 					io.writefile(tmp, uncommitted)
