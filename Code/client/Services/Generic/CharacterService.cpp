@@ -67,6 +67,7 @@
 #include <Messages/NotifyRelinquishControl.h>
 
 #include <World.h>
+#include <Games/Memory.h>
 #include <Games/TES.h>
 #ifdef SKYRIMVR
 #include <Games/Skyrim/VRBodySync.h>
@@ -188,6 +189,9 @@ Actor* StandInForForeignCreature(Actor* apLocal, TESNPC* apOwnerBase) noexcept
 
 void EnableGhost(const uint32_t aGhostFormId) noexcept
 {
+    if (IsProcessExiting())
+        return;
+
     Actor* pGhost = Cast<Actor>(TESForm::GetById(aGhostFormId));
     if (pGhost && pGhost->IsDisabled())
         pGhost->EnableImpl();
@@ -310,6 +314,9 @@ bool CharacterService::TakeOwnership(const uint32_t acFormId, const uint32_t acS
 
 void CharacterService::DeleteTempActor(const uint32_t aFormId) noexcept
 {
+    if (IsProcessExiting())
+        return;
+
     Actor* pActor = Cast<Actor>(TESForm::GetById(aFormId));
     if (pActor && ((pActor->formID & 0xFF000000) == 0xFF000000))
     {
@@ -439,6 +446,17 @@ void CharacterService::OnConnected(const ConnectedEvent& acConnectedEvent) const
 
 void CharacterService::OnDisconnected(const DisconnectedEvent& acDisconnectedEvent) const noexcept
 {
+    // The disconnect that comes with quitting arrives while the game is tearing itself down. Deleting remote players
+    // and flipping actors back to local then fires equip events into plugins whose singletons are already gone:
+    // every quit crash on 2026-09-18/19 was Enchantment Art Extender reading the destroyed UI singleton from its
+    // equip handler (SkyrimVR+0x1F83200, +0x160 = numPausesGame), and the ENB effect-shader light plugin freeing
+    // shader art the same way. The process is ending; the actors do not need putting back.
+    if (IsProcessExiting())
+    {
+        spdlog::info("Disconnected while the game is exiting; actors are left alone");
+        return;
+    }
+
     auto remoteView = m_world.view<FormIdComponent, RemoteComponent>();
     for (auto entity : remoteView)
     {
@@ -1540,7 +1558,7 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
 
         if (pActor)
         {
-            if (pActor->IsTemporary())
+            if (pActor->IsTemporary() && !IsProcessExiting())
             {
                 spdlog::info("Temporary Remote Deleted {:X}", aFormId);
                 pActor->Delete();

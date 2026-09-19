@@ -218,6 +218,77 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     }
 #endif
 
+#ifdef SKYRIMVR
+    // TEMPORARY: remote NPCs slide for the receiving player while the owner sees them walk (2026-09-19). Either their
+    // animation graph is not advancing at all (Actor::Process is skipped for remote actors, and on VR that id may
+    // cover more than AI) or it advances with wrong variables. Every fourth frame, for a remote NPC that moved
+    // since its last sample, the skeleton's local transforms are fingerprinted: a body that moves while its bones
+    // never change has a frozen graph. Remove once understood.
+    if (!apActor->GetExtension()->IsRemotePlayer() && !apActor->actorState.IsDeadOrDying())
+    {
+        struct MotionSample
+        {
+            uint64_t Fingerprint = 0;
+            glm::vec3 Position{};
+            uint32_t Frame = 0;
+            uint32_t FrozenSamples = 0;
+        };
+        static TiltedPhoques::Map<uint32_t, MotionSample> s_samples;
+        static uint32_t s_frame = 0;
+        static uint32_t s_moving = 0;
+        static uint32_t s_frozen = 0;
+        static uint32_t s_worstActor = 0;
+        static uint32_t s_worstFrozen = 0;
+        static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
+
+        ++s_frame;
+        MotionSample& sample = s_samples[apActor->formID];
+        if (s_frame - sample.Frame >= 4)
+        {
+            sample.Frame = s_frame;
+            const bool moved = glm::distance(position, sample.Position) > 2.f;
+            sample.Position = position;
+            if (moved)
+            {
+                const uint64_t fingerprint = VRBodySync::SkeletonMotionFingerprint(apActor);
+                if (fingerprint != 0 && fingerprint == sample.Fingerprint)
+                    ++sample.FrozenSamples;
+                else
+                    sample.FrozenSamples = 0;
+                sample.Fingerprint = fingerprint;
+
+                ++s_moving;
+                if (sample.FrozenSamples >= 5)
+                {
+                    ++s_frozen;
+                    if (sample.FrozenSamples > s_worstFrozen)
+                    {
+                        s_worstFrozen = sample.FrozenSamples;
+                        s_worstActor = apActor->formID;
+                    }
+                }
+            }
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= s_nextLog)
+        {
+            s_nextLog = now + 10s;
+            if (s_moving)
+            {
+                const Actor* pWorst = s_worstActor ? Cast<Actor>(TESForm::GetById(s_worstActor)) : nullptr;
+                const TESNPC* pBase = pWorst ? Cast<TESNPC>(pWorst->baseForm) : nullptr;
+                spdlog::info("MotionDiag: {} samples of remote NPCs moving, {} with bones that had not changed for 5+ samples; worst {:X} ({}) frozen for {} samples", s_moving, s_frozen,
+                             s_worstActor, pBase ? pBase->fullName.value.AsAscii() : "-", s_worstFrozen);
+            }
+            s_moving = 0;
+            s_frozen = 0;
+            s_worstActor = 0;
+            s_worstFrozen = 0;
+        }
+    }
+#endif
+
     apActor->ForcePosition(position);
     // A creature of another kind than the owner's (see MarkForeignGraph) keeps its own animation state.
     if (!aInterpolationComponent.ForeignGraph)

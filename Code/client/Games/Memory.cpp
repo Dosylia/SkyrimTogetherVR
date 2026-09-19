@@ -107,6 +107,11 @@ static void RehookFormAllocate(TFormAllocate* apEngineFixesAllocate) noexcept
 // first.
 static std::atomic<bool> s_processExiting{false};
 
+bool IsProcessExiting() noexcept
+{
+    return s_processExiting.load(std::memory_order_relaxed);
+}
+
 size_t Hook_msize(void* apData)
 {
     return mi_malloc_size(apData);

@@ -9,8 +9,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $buildFolder = Join-Path $RepoRoot 'build\windows\x64\release'
-$buildInfo = Get-Content (Join-Path $RepoRoot 'build\BuildInfo.h') -Raw
-$version = if ($buildInfo -match 'BUILD_COMMIT "([^"]+)"') { $Matches[1] } else { 'unknown' }
+# The build writes its version string to build\BuildVersion.txt (root xmake.lua, before_build). BuildInfo.h only
+# carries fallbacks since the version became a compile define.
+$versionFile = Join-Path $RepoRoot 'build\BuildVersion.txt'
+$version = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { 'unknown' }
+if (-not $version -or $version -like 'unknown*') { throw "No build version found in $versionFile; build first (xmake -y)." }
 
 $name = "SkyrimTogetherVR-$version"
 $staging = Join-Path $OutputFolder $name

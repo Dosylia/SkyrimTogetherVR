@@ -77,9 +77,14 @@ void FadeOutGame(bool aFadingOut, bool aBlackFade, float aFadeDuration, bool aRe
     // VR takes two more arguments: a flag and a ref-counted "fade done" callback (its own callers pass false and a
     // pointer). Leaving them out made the game store stack garbage as the callback and call it when the fade
     // finished, which crashed right after respawning.
-    using TFadeOutGame = void(bool, bool, float, bool, float, bool, void*);
+    //
+    // It also reads the first two arguments as dwords, and the FIRST ONE WITH THE OPPOSITE POLARITY (TiltedEvolutionVR
+    // checked the VR prologue and the fade object it fills against SE's). Passing the bools through made every call
+    // do the opposite: the death fade did nothing and the respawn fade-in faded to black, which is the "bright light,
+    // then black screen" after a respawn on 2026-09-19.
+    using TFadeOutGame = void(int32_t, int32_t, float, bool, float, bool, void*);
     POINTER_SKYRIMSE(TFadeOutGame, fadeOutGame, 52847, 51909);
-    fadeOutGame.Get()(aFadingOut, aBlackFade, aFadeDuration, aRemainVisible, aSecondsToFade, false, nullptr);
+    fadeOutGame.Get()(aFadingOut ? 0 : 1, aBlackFade ? 1 : 0, aFadeDuration, aRemainVisible, aSecondsToFade, false, nullptr);
 #else
     using TFadeOutGame = void(bool, bool, float, bool, float);
     POINTER_SKYRIMSE(TFadeOutGame, fadeOutGame, 52847, 51909);

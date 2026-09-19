@@ -33,11 +33,14 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       skeleton when something is attached below a bone (the held spell art hangs off the magic node). Sword and
       casting confirmed 2026-09-18.
 - [x] **Arms following the VR pose:** confirmed; the `no VR pose data` line never named a player.
-- [ ] **One player stops seeing the other** (21:56, cured by a reconnect). Both copies were alive and receiving
-      actions the whole time, so it is not a removed actor. It coincides with the host equipping a staff (`29B75`,
-      enchantment `B602E`) at 21:56:14, and the friend reported the host's "light scepter" breaking things.
-      Logs now: `InterpDiag` (buffered movement ahead of playback), `Remote spell cast`, `Remote projectile
-      launched`, every spell projectile on the sender. Needs the friend's description: invisible, frozen, or elsewhere.
+- [x] **[untested] One player stops seeing the other until "he reconnects".** The reconnect was the cure the
+      players applied, not the cause. His copy on the other side was in the data the whole time (3D, actions,
+      equipment, even taking an arrow) but lying in the grass: `OnActorValueChanges` skipped health for every remote
+      actor, so a player's copy only ever *lost* health (damage deltas arrive, healing never did), and copies are
+      essential with no bleedout recovery, so at zero the copy went down for good. Since 2026-09-19 the owner's
+      broadcast health is applied to remote player copies, a delta can't take a copy below 1, and a local hit never
+      reports a kill on a copy. Log: `Remote player X copy health corrected ...`, `... kept at 1 health ...`,
+      `... would have been downed by a local hit`. Seen 09-18 21:56, 09-19 09:14 and 10:26, always after fights.
 - [ ] **Different animals on each screen.** The owner's base form now travels on both spawn paths
       (`CharacterSpawnRequest.BaseId`, `AssignCharacterResponse.BaseId`). Same name or same race: synced normally.
       A different creature (fox at a rabbit's reference, spider at a bear's): adopted and positioned by its owner,
@@ -59,8 +62,16 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       animation attachment and VR players never play the draw animation.
 - [x] **[untested] Bandits naked.** `Actor::IsWearingBodyPiece` answers from the container entries on VR (a worn
       armour flagged as a body piece), so the once-a-second re-equip check is on again (2026-09-19).
-- [ ] **Crash when quitting** still happens: both players on 2026-09-18 21:58, in whatever DLL is freeing at exit
-      (`po3_ENBLightForEffectShaders`, `EnchantmentEffectExtender`). Not a gameplay crash; ask before attributing.
+- [ ] **[untested] Crash when quitting.** Read from the DLL's disassembly (2026-09-19): Enchantment Art Extender's
+      equip handler reads the `UI` singleton (`SkyrimVR+0x1F83200`, our id 400327) and tests `numPausesGame`
+      (`+0x160`); at quit the singleton is already destroyed while our disconnect handler was still deleting remote
+      players and flipping actors back to local, which fires equip events. `IsProcessExiting()` now gates the
+      disconnect handler, temporary-actor deletion and ghost re-enables. The ENB light plugin's quit crash is the
+      same class (shader art freed on our teardown). The "black screen then crash" after the friend's respawn was
+      the same quit crash after giving up. The black screen itself: VR's `FadeOutGame` takes its first argument
+      with inverted polarity and as a dword (TiltedEvolutionVR, checked against the VR prologue); ours passed bools
+      through, so the death fade did nothing and the respawn fade-in faded to black ("bright light, then black
+      screen", 10:39 on the 19th). Fixed 2026-09-19, untested.
 - [ ] **Grabbing an NPC with HIGGS isn't visible** to the other player. Analysis:
     - A grabbed NPC is a ragdoll on the grabber's game only. The owner of that NPC keeps simulating it standing, and
       the grabber's copy is overwritten by the owner's position.
@@ -176,10 +187,10 @@ What we know:
 - [ ] **Hits from VR weapons.** A VR sword hit lands on the attacker's copy of the NPC. Check that
       damage reaches the NPC's owner, and that the health change is sent back when the NPC is owned by
       the other player.
-- [ ] **[untested] PvP sword fights** (added 2026-09-18). A VR player never plays an attack animation, so the
-      victim's game never sees the swing; with `bEnablePvp=true` (or `TogglePvp` in the server console) a hit on a
-      remote player is sent as a health change and applied on their side. Damage only: no stagger, and blades do
-      not clash (that needs PLANCK-style weapon physics).
+- [x] **PvP sword fights** confirmed 2026-09-19 (`bEnablePvp=true`). A hit on a remote player is sent as a health
+      change and applied on their side. Bug found the same day: any hitter's damage was forwarded, so the host's
+      spider bit the friend 90 times a second on top of his own spider; now only this player's own sword, arrow
+      and spell hits travel. Still damage only: no stagger, and blades do not clash (PLANCK-style weapon physics).
 - [x] **Projectile details missing.** The `LaunchData` pointers were never read on VR, so the shooter id stayed
       0 and no projectile was ever sent. Read since 2026-09-18 behind a check (readable memory, and the form table
       maps the id back to the same pointer); arrows confirmed seen by the other player the same evening. The

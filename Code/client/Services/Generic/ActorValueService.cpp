@@ -293,7 +293,16 @@ void ActorValueService::OnHealthChangeBroadcast(const NotifyHealthChangeBroadcas
         return;
     }
 
-    const float newHealth = pActor->GetActorValue(ActorValueInfo::kHealth) + acMessage.DeltaHealth;
+    float newHealth = pActor->GetActorValue(ActorValueInfo::kHealth) + acMessage.DeltaHealth;
+
+    // A player's copy is essential with no bleedout recovery: at zero it lies down for the rest of the session.
+    // Only its owner's game decides when that player is down (and a respawn replaces the copy anyway).
+    if (pActor->GetExtension() && pActor->GetExtension()->IsRemotePlayer() && newHealth < 1.f)
+    {
+        spdlog::info("Remote player {:X} copy kept at 1 health instead of {:.0f}; its owner decides", pActor->formID, newHealth);
+        newHealth = 1.f;
+    }
+
     pActor->ForceActorValue(ActorValueOwner::ForceMode::DAMAGE, ActorValueInfo::kHealth, newHealth);
 
     const float health = pActor->GetActorValue(ActorValueInfo::kHealth);
@@ -330,11 +339,28 @@ void ActorValueService::OnActorValueChanges(const NotifyActorValueChanges& acMes
     if (!pActor)
         return;
 
+    const bool isRemotePlayer = pActor->GetExtension() && pActor->GetExtension()->IsRemotePlayer();
+
     for (const auto& [key, value] : acMessage.Values)
     {
         // Syncing dragon souls triggers "Dragon soul collected" event
-        if (key == ActorValueInfo::kDragonSouls || key == ActorValueInfo::kHealth)
+        if (key == ActorValueInfo::kDragonSouls)
             continue;
+
+        // Health used to be skipped for everyone. A remote player's copy then only ever lost health (the damage
+        // deltas arrive, the healing never did), and the copy is essential with no bleedout recovery, so once that
+        // stale health hit zero the copy lay down in the grass for good: "his body is gone, I can still see his spell
+        // light", cured only by his reconnect (2026-09-18 21:56, 09-19 09:14 and 10:26). The owner's own health is
+        // the truth for a player copy; NPC copies keep the delta path, which also carries their deaths.
+        if (key == ActorValueInfo::kHealth)
+        {
+            if (!isRemotePlayer || pActor->IsDead())
+                continue;
+
+            const float current = pActor->GetActorValue(ActorValueInfo::kHealth);
+            if (std::abs(current - value) >= 10.f)
+                spdlog::info("Remote player {:X} copy health corrected from {:.0f} to the owner's {:.0f}", pActor->formID, current, value);
+        }
 
         spdlog::debug("Actor value update, server ID: {:X}, key: {}, value: {}", acMessage.Id, key, value);
 

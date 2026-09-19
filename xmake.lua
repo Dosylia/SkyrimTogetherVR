@@ -99,8 +99,15 @@ end)
 
 before_build(function (target)
     import("modules.version")
-    local branch, commitHash = version()
+    local branch, commitHash, timestamp, describe = version()
     bool_to_number={ [true]=1, [false]=0 }
+
+    -- The version string for tooling (Tools\VR\make-release.ps1 names the zips after it). BuildInfo.h only holds
+    -- fallbacks since the real value became a compile define, which left the release named "unknown-version".
+    local versionPath = "build/BuildVersion.txt"
+    if not os.exists(versionPath) or io.readfile(versionPath) ~= describe then
+        io.writefile(versionPath, describe)
+    end
     local contents = string.format([[
     #pragma once
     #define IS_MASTER %d

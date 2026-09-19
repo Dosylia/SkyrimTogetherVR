@@ -736,4 +736,29 @@ void ClearRemotePose(uint32_t aFormId) noexcept
     std::unique_lock lock(s_posesLock);
     s_poses.erase(aFormId);
 }
+uint64_t SkeletonMotionFingerprint(Actor* apActor) noexcept
+{
+    void* pRoot = apActor ? apActor->GetNiNode() : nullptr;
+    if (!pRoot)
+        return 0;
+
+    // The same walk the pose code uses; every NiAVObject below the root carries a local transform at kLocalOffset.
+    std::vector<void*> nodes;
+    CollectNodeDescendants(pRoot, nodes);
+
+    uint64_t hash = 1469598103934665603ull;
+    size_t hashed = 0;
+    for (void* pNode : nodes)
+    {
+        const auto* pBytes = reinterpret_cast<const uint8_t*>(&At<NiTransform>(pNode, kLocalOffset));
+        for (size_t i = 0; i < sizeof(NiTransform); ++i)
+        {
+            hash ^= pBytes[i];
+            hash *= 1099511628211ull;
+        }
+        if (++hashed >= 64)
+            break;
+    }
+    return hash;
+}
 } // namespace VRBodySync

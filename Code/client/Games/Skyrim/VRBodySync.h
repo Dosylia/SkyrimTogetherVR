@@ -24,4 +24,9 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept;
 void ClearRemotePose(uint32_t aFormId) noexcept;
 //! TEMPORARY: logs the magic node position against the posed hand for the first remote casts (spell offset report).
 void LogCastOrigin(Actor* apActor, uint32_t aCastingSource) noexcept;
+
+//! A cheap fingerprint of the local transforms of the first nodes below an actor's 3D root. Equal fingerprints across
+//! frames on a body that is moving mean its animation graph is not advancing (the walk cycle would change them).
+//! 0 when the actor has no 3D.
+uint64_t SkeletonMotionFingerprint(Actor* apActor) noexcept;
 } // namespace VRBodySync

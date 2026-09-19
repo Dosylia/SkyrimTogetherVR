@@ -1,5 +1,10 @@
 #pragma once
 
+// True once the game has called exit: its exit handlers are tearing singletons down (the UI singleton among them)
+// while plugins still receive equip events. Anything that would make an actor equip, unequip or vanish must stop at
+// that point; see CharacterService::OnDisconnected.
+[[nodiscard]] bool IsProcessExiting() noexcept;
+
 struct Memory
 {
     [[nodiscard]] static void* Allocate(size_t aSize) noexcept;

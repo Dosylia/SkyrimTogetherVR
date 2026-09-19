@@ -1078,12 +1078,21 @@ bool TP_MAKE_THISCALL(HookDamageActor, Actor, float aDamage, Actor* apHitter, bo
         // could not apply it; the only game that knows this sword hit that body is this one. With PvP on, the hit is
         // sent as a health change, which the other side applies to its own player through the usual broadcast
         // (health is floored at zero there, players are never killed). Sword fights between players, 2026-09-18.
-        if (World::Get().GetServerSettings().PvpEnabled && realDamage > 0.f)
+        // Only this player's own hits (sword, arrow, spell): the other player's game already handles what its own
+        // copies of NPCs do to it, and forwarding an NPC's hits from here doubled them (a spider's bites arrived
+        // 90 times a second on top of the victim's own spider, 2026-09-19).
+        if (World::Get().GetServerSettings().PvpEnabled && realDamage > 0.f && apHitter && apHitter->GetExtension()->IsLocalPlayer())
         {
-            spdlog::info("PvP: hit remote player {:X} for {:.0f}", apThis->formID, realDamage);
+            if (realDamage >= 1.f)
+                spdlog::info("PvP: hit remote player {:X} for {:.0f}", apThis->formID, realDamage);
             World::Get().GetRunner().Trigger(HealthChangeEvent(apThis->formID, -realDamage));
         }
-        return wouldKill;
+
+        // Never "killed": that answer made the game put the copy down here on the strength of its stale health,
+        // while the player it stands for was fine. The owner's game decides, and a respawn replaces the copy.
+        if (wouldKill)
+            spdlog::info("Remote player {:X} copy would have been downed by a local hit; left standing", apThis->formID);
+        return false;
     }
 
     if (apHitter)
