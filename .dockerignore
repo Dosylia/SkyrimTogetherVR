@@ -1,9 +1,9 @@
-.githooks/*
-.github/*
+# Only build output stays out of the Docker context. Tracked directories must go in: the version string is derived
+# from git inside the container, and a context missing tracked files (as .githooks, .github and Tools were until
+# 2026-09-19) made every Docker-built server report a "-dirty" version the clients then refused.
 .xmake/*
 Services/*
 build/*
 vsxmake/*
-Tools/*
 vs*/*
 package/*

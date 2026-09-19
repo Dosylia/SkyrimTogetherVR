@@ -341,7 +341,7 @@ void ActorValueService::OnActorValueChanges(const NotifyActorValueChanges& acMes
 
     const bool isRemotePlayer = pActor->GetExtension() && pActor->GetExtension()->IsRemotePlayer();
 
-    for (const auto& [key, value] : acMessage.Values)
+    for (auto [key, value] : acMessage.Values)
     {
         // Syncing dragon souls triggers "Dragon soul collected" event
         if (key == ActorValueInfo::kDragonSouls)
@@ -360,6 +360,16 @@ void ActorValueService::OnActorValueChanges(const NotifyActorValueChanges& acMes
             const float current = pActor->GetActorValue(ActorValueInfo::kHealth);
             if (std::abs(current - value) >= 10.f)
                 spdlog::info("Remote player {:X} copy health corrected from {:.0f} to the owner's {:.0f}", pActor->formID, current, value);
+
+            // The owner's own death arrives here as a health at or below zero (-4 at 19:52:54, -1 and -16 at 19:57:24
+            // on 2026-09-19). Applied as is, it put the copy into its unrecoverable bleedout, and the owner's respawn
+            // then handed the fresh copy the same stored value (see StandingValues in CharacterService). A copy never
+            // goes down; the owner's game decides, and his respawn replaces the copy.
+            if (value < 1.f)
+            {
+                spdlog::info("Remote player {:X} copy kept at 1 health instead of the owner's {:.0f}; a copy never goes down", pActor->formID, value);
+                value = 1.f;
+            }
         }
 
         spdlog::debug("Actor value update, server ID: {:X}, key: {}, value: {}", acMessage.Id, key, value);

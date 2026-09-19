@@ -33,6 +33,20 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       skeleton when something is attached below a bone (the held spell art hangs off the magic node). Sword and
       casting confirmed 2026-09-18.
 - [x] **Arms following the VR pose:** confirmed; the `no VR pose data` line never named a player.
+- [x] **[untested] Same symptom on 2026-09-19 evening, second half of the cause.** Three logs (host, Seen, Elbios)
+      side by side: every reconnect was manual (`Disconnected from server 4` is the client closing on purpose), the
+      other copies were fed and at the right height until each one, and "the player is still here, we can hurt each
+      other, we just can't see him" is a copy in its unrecoverable bleedout. Two paths still put it there: the
+      owner's own death arrives in `OnActorValueChanges` as a health at or below zero and was applied as is
+      (`corrected from 30 to the owner's -4`, 19:52:54), and his respawn gives everyone a fresh copy built from the
+      server's stored values, which are the ones from his death (`corrected from -4 to the owner's 125` on the
+      copy spawned one second earlier, on both other clients, 19:52:58 and 19:53:03). A copy born down never gets
+      up when the real health arrives. Now: `StandingValues` clamps a player copy's spawn health to 1, and the
+      owner-health path clamps to 1 (`kept at 1 health instead of the owner's -4; a copy never goes down`). Built
+      pinned to the friend's server string (`v1.8.0-62-g9163b26b-dirty.db0f49e`) so all three could swap the exe
+      without touching the server; the pin is a one-off in `modules/version.lua`, reverted after each build.
+      Still unexplained: Seen's reconnect at 19:44:08 (nobody had died yet), and Elbios's game ending five
+      seconds after his second respawn (19:57:39) with no crash log in his bundle.
 - [x] **[untested] One player stops seeing the other until "he reconnects".** The reconnect was the cure the
       players applied, not the cause. His copy on the other side was in the data the whole time (3D, actions,
       equipment, even taking an arrow) but lying in the grass: `OnActorValueChanges` skipped health for every remote

@@ -68,6 +68,7 @@
 
 #include <World.h>
 #include <Games/Memory.h>
+#include <Forms/ActorValueInfo.h>
 #include <Games/TES.h>
 #ifdef SKYRIMVR
 #include <Games/Skyrim/VRBodySync.h>
@@ -217,6 +218,22 @@ void ReleaseAllGhosts() noexcept
     for (const auto& [ghost, copy] : s_ghosts)
         EnableGhost(ghost);
     s_ghosts.clear();
+}
+//! The values a player's fresh copy starts with, health never below 1.
+//! The server hands a respawning player's copy the values it last stored, and those are the ones from his death
+//! (-4, -16 on 2026-09-19 19:52 and 19:57). The copy is essential with no bleedout recovery, so a copy born at -4 goes
+//! down on the spot and the owner's real health arriving a second later cannot stand it back up: "still there, we can
+//! hurt each other, but nobody sees him" until he reconnects. A copy never goes down; the owner's game decides.
+ActorValues StandingValues(const ActorValues& acValues, const uint32_t aFormId) noexcept
+{
+    ActorValues values = acValues;
+    auto it = values.ActorValuesList.find(ActorValueInfo::kHealth);
+    if (it != values.ActorValuesList.end() && it->second < 1.f)
+    {
+        spdlog::info("Remote player {:X} copy would have spawned with the owner's health {:.0f} (a copy that starts down never gets up); started at 1 instead", aFormId, it->second);
+        it.value() = 1.f;
+    }
+    return values;
 }
 } // namespace
 
@@ -725,7 +742,7 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
     pActor->rotation.x = acMessage.Rotation.x;
     pActor->rotation.z = acMessage.Rotation.y;
     pActor->MoveTo(PlayerCharacter::Get()->parentCell, acMessage.Position);
-    pActor->SetActorValues(acMessage.InitialActorValues);
+    pActor->SetActorValues(acMessage.IsPlayer ? StandingValues(acMessage.InitialActorValues, pActor->formID) : acMessage.InitialActorValues);
 
     pActor->GetExtension()->SetPlayer(acMessage.IsPlayer);
     if (acMessage.IsPlayer)
@@ -1682,7 +1699,7 @@ Actor* CharacterService::CreateCharacterForEntity(entt::entity aEntity) const no
     pActor->rotation.x = acMessage.Rotation.x;
     pActor->rotation.z = acMessage.Rotation.y;
     pActor->MoveTo(PlayerCharacter::Get()->parentCell, pInterpolationComponent->Position);
-    pActor->SetActorValues(acMessage.InitialActorValues);
+    pActor->SetActorValues(acMessage.IsPlayer ? StandingValues(acMessage.InitialActorValues, pActor->formID) : acMessage.InitialActorValues);
 
     pActor->GetExtension()->SetPlayer(acMessage.IsPlayer);
     if (acMessage.IsPlayer)
