@@ -133,10 +133,22 @@ void MagicService::OnSpellCastEvent(const SpellCastEvent& acEvent) const noexcep
         return;
 #endif
 
+    SpellItem* pCastSpell = Cast<SpellItem>(TESForm::GetById(acEvent.SpellId));
+
+#ifdef SKYRIMVR
+    // Powers and dragon shouts are fire-and-forget, so the concentration filter below dropped them and the other
+    // player never heard or felt a shout. They cast through the OTHER source with spell type POWER, LESSER_POWER or
+    // VOICE_POWER (TiltedEvolutionVR 20a62f9, confirmed at runtime 2026-08-29). Ported 2026-09-18.
+    using ST = MagicSystem::SpellType;
+    const bool cIsVoiceCast = pCastSpell && (pCastSpell->eSpellType == ST::POWER || pCastSpell->eSpellType == ST::LESSER_POWER || pCastSpell->eSpellType == ST::VOICE_POWER);
+#else
+    constexpr bool cIsVoiceCast = false;
+#endif
+
     // only sync concentration spells through spell cast sync, the rest through projectile sync for accuracy
-    if (SpellItem* pSpell = Cast<SpellItem>(TESForm::GetById(acEvent.SpellId)))
+    if (pCastSpell && !cIsVoiceCast)
     {
-        if ((pSpell->eCastingType != MagicSystem::CastingType::CONCENTRATION || pSpell->IsHealingSpell()) && !pSpell->IsWardSpell() && !pSpell->IsInvisibilitySpell())
+        if ((pCastSpell->eCastingType != MagicSystem::CastingType::CONCENTRATION || pCastSpell->IsHealingSpell()) && !pCastSpell->IsWardSpell() && !pCastSpell->IsInvisibilitySpell())
         {
             spdlog::debug("Canceled magic spell");
             return;
@@ -215,7 +227,12 @@ void MagicService::OnNotifySpellCast(const NotifySpellCast& acMessage) const noe
 
     MagicItem* pSpell = nullptr;
 
-    pSpell = pActor->magicItems[acMessage.CastingSource];
+#ifdef SKYRIMVR
+    // magicItems[OTHER] on a remote actor holds whatever was last staged there, not necessarily the power or shout
+    // just used, so a voice cast is always resolved from the form id that was sent (TiltedEvolutionVR 20a62f9).
+    if (acMessage.CastingSource != CS::OTHER)
+#endif
+        pSpell = pActor->magicItems[acMessage.CastingSource];
 
     if (!pSpell)
     {
@@ -241,6 +258,10 @@ void MagicService::OnNotifySpellCast(const NotifySpellCast& acMessage) const noe
         spdlog::error("Could not find spell.");
         return;
     }
+
+    // Pairs with the sender's cast: what this side is about to cast for a remote caster (a staff of light was
+    // reported breaking things for the other player on 2026-09-18, and nothing here said what arrived).
+    spdlog::info("Remote spell cast: caster {:X}, spell {:X}, source {}, dual {}", pActor->formID, pSpell->formID, acMessage.CastingSource, acMessage.IsDualCasting);
 
 #ifdef SKYRIMVR
     if (IsLocalControlForm(pSpell->formID))

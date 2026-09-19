@@ -343,17 +343,28 @@ void MarkForeignGraph(World& aWorld, const entt::entity aEntity, Actor* apActor,
     const char* pLocalName = pLocalBase->fullName.value.AsAscii();
     const char* pRemoteName = pRemoteBase->fullName.value.AsAscii();
 
+    // Same name first: a levelled list of humanoids mixes races freely (Nord and Breton bandits are both "Bandit"),
+    // and all of those share the humanoid skeleton and graph. Comparing races alone marked six Bandit/Bandit pairs
+    // as foreign on 2026-09-18 and left them without animations. Only when the names differ does the race decide
+    // (Elk vs Deer, Bear vs Frostbite Spider are foreign; Dragon vs Blood Dragon is not).
+    const bool sameName = std::strcmp(pLocalName ? pLocalName : "", pRemoteName ? pRemoteName : "") == 0;
+
     bool foreign;
     const char* pHow;
-    if (apActor->race && pLocalBase->raceForm.race == apActor->race && pRemoteBase->raceForm.race)
+    if (sameName)
+    {
+        foreign = false;
+        pHow = "name";
+    }
+    else if (apActor->race && pLocalBase->raceForm.race == apActor->race && pRemoteBase->raceForm.race)
     {
         foreign = pRemoteBase->raceForm.race != apActor->race;
         pHow = "race";
     }
     else
     {
-        foreign = std::strcmp(pLocalName ? pLocalName : "", pRemoteName ? pRemoteName : "") != 0;
-        pHow = "name";
+        foreign = true;
+        pHow = "name, race unreadable";
     }
 
     spdlog::info("Base form differs on reference {:X}: owner has {:X} ({}), this side {:X} ({}); {} (decided by {})", apActor->formID, cRemoteBaseId,

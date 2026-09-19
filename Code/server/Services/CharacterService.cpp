@@ -853,6 +853,71 @@ void CharacterService::ProcessMovementChanges() const noexcept
         }
     }
 
+    // TEMPORARY: a client saw a fifth of its remote actor updates starve for up to 30 s (2026-09-19) while the owner
+    // sent every actor every 100 ms, so the gap is here. Every 10 s, per player: characters sent, characters
+    // withheld for range, and the nearest withheld one with both grids, so the log says whether the range check is
+    // wrong or the player's reported centre is.
+    {
+        struct RangeStats
+        {
+            uint32_t Sent = 0;
+            uint32_t Withheld = 0;
+            int32_t WorstDistance = INT32_MAX;
+            uint32_t WorstId = 0;
+            int32_t WorstX = 0;
+            int32_t WorstY = 0;
+        };
+        static TiltedPhoques::Map<Player*, RangeStats> s_stats;
+        static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
+
+        for (auto entity : characterView)
+        {
+            auto& cellIdComponent = characterView.get<CellIdComponent>(entity);
+            auto& characterComponent = characterView.get<CharacterComponent>(entity);
+            auto& ownerComponent = characterView.get<OwnerComponent>(entity);
+
+            for (auto pPlayer : m_world.GetPlayerManager())
+            {
+                if (pPlayer == ownerComponent.GetOwner())
+                    continue;
+
+                auto& stats = s_stats[pPlayer];
+                if (cellIdComponent.IsInRange(pPlayer->GetCellComponent(), characterComponent.IsDragon()))
+                {
+                    ++stats.Sent;
+                    continue;
+                }
+
+                ++stats.Withheld;
+                const auto& playerCoords = pPlayer->GetCellComponent().CenterCoords;
+                const int32_t distance = std::max(std::abs(cellIdComponent.CenterCoords.X - playerCoords.X), std::abs(cellIdComponent.CenterCoords.Y - playerCoords.Y));
+                if (distance < stats.WorstDistance)
+                {
+                    stats.WorstDistance = distance;
+                    stats.WorstId = World::ToInteger(entity);
+                    stats.WorstX = cellIdComponent.CenterCoords.X;
+                    stats.WorstY = cellIdComponent.CenterCoords.Y;
+                }
+            }
+        }
+
+        if (now >= s_nextLog)
+        {
+            s_nextLog = now + 10s;
+            for (auto& [pPlayer, stats] : s_stats)
+            {
+                if (stats.Withheld)
+                {
+                    const auto& cell = pPlayer->GetCellComponent();
+                    spdlog::info("RangeDiag: player {:X} at centre grid ({}, {}) worldspace {:X}: {} character updates sent, {} withheld; nearest withheld {:X} at grid ({}, {}), {} cells away",
+                                 pPlayer->GetConnectionId(), cell.CenterCoords.X, cell.CenterCoords.Y, cell.WorldSpaceId.BaseId, stats.Sent, stats.Withheld, stats.WorstId, stats.WorstX,
+                                 stats.WorstY, stats.WorstDistance);
+                }
+            }
+            s_stats.clear();
+        }
+    }
+
     m_world.view<AnimationComponent>().each([](AnimationComponent& animationComponent)
     {
         // Remove actions we've sent

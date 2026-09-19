@@ -9,46 +9,57 @@ before any change · **[big]** several sessions of work.
 
 ---
 
-## 0. Session of 2026-09-14 evening: results, and what the next session must answer
+## 0. Sessions of 2026-09-18 (three sessions, builds v1.8.0-35 to -58): results, and what the next session must answer
 
-Stable, 45 fps on the host (`Perf last 30 s`: avg 22 ms, p99 23-32 ms, mod update 0.1 ms, VR pose 0.04 ms/frame).
+Deployed and untested since: `v1.8.0-58-g00cd9643-dirty.67dc30f` (same-named levelled variants synced, PvP sword
+hits, shouts and powers, cast/projectile/drift logs). Every build goes into the tools folder; the friend gets the exe
+and pdb from there. Both players run `collect-logs.bat` after each session and note the time of each problem.
 
-**Confirmed working:** auto-connect.
+**Confirmed working on 2026-09-18:** skills and level up screens while connected; the sword in the other player's
+hand; spell casting and the held spell in the hands; arrows seen leaving the other player's bow; Lydia follows,
+fights, and attacks the other player; sync of same-kind levelled bandits.
 
-**Reported, with what the logs say:**
-
-- [ ] **Skills and level up screens black** while connected. Caused by the unpaused menu patch: unpaused, the
-      menu asked the game for a freeze frame background that VR never produces, so it drew nothing. Retried on
-      2026-09-16 with the flag write removed (`SkillsMenu.cpp`, SE 51638 +0xBB6, VR 0x8ec3e0), so StatsMenu is
-      unpaused again. Check, in this order: the log says `Skills menu: freeze frame background disabled`; the
-      skills and level up screens are visible; they respond to input (the "controls not working" patch has no VR
-      address, so this is the part that may fail); your character keeps moving for the other player while you are
-      in there. If the screen is black again, the flag was not the cause and the patch comes back out.
-- [ ] **VR menu tab is a grey panel.** The texture now reaches SteamVR (the grey is our panel), but the page is
-      transparent when uploaded (`0% of the page has content`). A snapshot is saved to `logs\dashboard_frame.bmp`
-      two seconds after opening: look at it and at the `VRDashboard: 2 s after opening` line.
-- [ ] **Sliding instead of walking** (the other player, guards, a giant, enemies). `AnimDiag` lines every 10 s
-      list replayed actions per event name and how many the game refused, for remote players and NPCs. If the
-      remote player sends no locomotion events at all, VR locomotion doesn't produce them (VRIK) and remote
-      players need another source for walking.
-- [ ] **Different animals on each screen** (fox/rabbit, bear/wolf), and the friend saw no bears or spiders.
-      `CharacterSpawnRequest ... local base X (name)` now names the local base: compare both players' logs by form
-      id. The owner only sends its base for temporary actors, so a placed leveled creature keeps whatever each
-      client rolled. The friend's log is needed for the "no bears or spiders" part (`Failed to retrieve Actor`).
-- [ ] **Spells off.** `CastDiag` shows the magic node 10 units in front of the posed hand, attached to it,
-      which is normal. So the origin is right; the likely problem is direction (a remote caster aims where its body
-      faces, not where the VR hand points) or projectiles launched from the owner's position while the body is
-      shown 300 ms late. Needs a description of what "off" looks like (wrong direction or wrong start point).
-- [ ] **[untested] White flicker, body jumping for a split second, spell beams starting below the hands.**
-      Body sync rewritten to write once per frame at the renderer's frame end (see `KNOWN_ISSUES.md`). The screenshots
-      showed the lightning on the posed hands but the beam starting where the animation's hands are, which is the same
-      timing problem. Check: no flicker, the face stays in the helmet in Gallows Rock, beams leave the hands, and the
-      arms still follow the VR pose. Log: `VRBodySync: resolved skeleton under root ...` once per spawn, and the
-      `VR pose` cost in `Perf last 30 s`.
-- [ ] **If the arms stop following the VR pose** after this build, the frame end is too late in the frame on this
-      setup; that is the first thing to look at.
-- [ ] **Crash when quitting** still happened: the exit flag was set by an atexit handler that ran after the
-      game's own exit handlers. It is now set when the game calls `exit`/`_exit`/`_cexit`. Verify.
+- [ ] **VR menu tab (in-headset menu) is still blank for the host. Priority: a menu that exists must work.**
+      The friend's tab rendered (`100% of the page has content`, 20:38); the host's reported `0%` on every open
+      (20:40, 20:42, 20:56, old build) and was not opened once in the session that carried the fix. The fix holds
+      `enterGame`/`activate` until the page has loaded (`OverlayService::PushUiState`); CEF dropped them before,
+      so the page stayed on its start-up view. Next session: open the tab on the host, then read
+      `VRDashboard: 2 s after opening` and `logs\dashboard_frame.bmp`. If still blank with the page loaded, the
+      page is not the problem and the upload is.
+- [x] **Skills and level up screens black** while connected. The cause was the unpaused-menu patch itself:
+      it worked in solo (hook inactive) and never while connected. On VR `StatsMenu` is out of the unpause
+      allow-list and pauses like vanilla. Confirmed 2026-09-18. The other player sees you standing still in there.
+- [x] **Spells off / spell beams below the hands / white flicker.** Body sync at frame end plus re-resolving the
+      skeleton when something is attached below a bone (the held spell art hangs off the magic node). Sword and
+      casting confirmed 2026-09-18.
+- [x] **Arms following the VR pose:** confirmed; the `no VR pose data` line never named a player.
+- [ ] **One player stops seeing the other** (21:56, cured by a reconnect). Both copies were alive and receiving
+      actions the whole time, so it is not a removed actor. It coincides with the host equipping a staff (`29B75`,
+      enchantment `B602E`) at 21:56:14, and the friend reported the host's "light scepter" breaking things.
+      Logs now: `InterpDiag` (buffered movement ahead of playback), `Remote spell cast`, `Remote projectile
+      launched`, every spell projectile on the sender. Needs the friend's description: invisible, frozen, or elsewhere.
+- [ ] **Different animals on each screen.** The owner's base form now travels on both spawn paths
+      (`CharacterSpawnRequest.BaseId`, `AssignCharacterResponse.BaseId`). Same name or same race: synced normally.
+      A different creature (fox at a rabbit's reference, spider at a bear's): adopted and positioned by its owner,
+      but the owner's animation data is withheld (`ForeignGraph`), so it slides instead of freezing. Refusing it
+      instead was tried on 2026-09-18 and gave each player private bandits; never again. What remains is
+      ownership: the bear the friend was fighting vanished when the host walked out of range and dropped it
+      (see the ownership rework below). Levels differ between variants; cosmetic.
+- [ ] **Sliding instead of walking.** `AnimDiag` readings from 2026-09-18 were polluted by a respawn loop (Lydia
+      removed and re-assigned 11 times a second, fixed in `DiscoveryService`: remote actors get the grace period
+      unless their 3D is gone). `AnimDiag busiest actors` now names loops. Re-read after the next session.
+- [ ] **NPC under the ground for one player only** (Durak, a rabbit). `SinkDiag` measures how far the game moves a
+      remote actor down between placements; it only ever named an Ice Wraith at a wolf's ground position. Next
+      diagnostic: read the havok capsule with TiltedEvolutionVR's VR offsets (`aaf5d83`: controller at
+      `MiddleProcess+0x250`, `+0x360` bhkRigidBody, `+0x10` hkpRigidBody, position `+0x1A0`, filter `+0x4C`).
+- [ ] **Dropped items not visible** to the other player. Sender logs `drop: true`, receiver logs
+      `Remote actor ... drops item`. Check both on the next drop.
+- [ ] **Pause menu: "weird things happen to both players".** No trace in either log. Needs a description.
+- [ ] **Nocked arrow not shown** on the other player's bow (the arrow leaves fine). The nocked arrow is an
+      animation attachment and VR players never play the draw animation.
+- [ ] **Bandits naked** (known: the re-equip workaround is off on VR, no `GetArmorInSlot` address).
+- [ ] **Crash when quitting** still happens: both players on 2026-09-18 21:58, in whatever DLL is freeing at exit
+      (`po3_ENBLightForEffectShaders`, `EnchantmentEffectExtender`). Not a gameplay crash; ask before attributing.
 - [ ] **Grabbing an NPC with HIGGS isn't visible** to the other player. Analysis:
     - A grabbed NPC is a ragdoll on the grabber's game only. The owner of that NPC keeps simulating it standing, and
       the grabber's copy is overwritten by the owner's position.
@@ -57,15 +68,12 @@ Stable, 45 fps on the host (`Perf last 30 s`: avg 22 ms, p99 23-32 ms, mod updat
     - What it needs: HIGGS's grab/pull/drop callbacks (its `IHiggsInterface001`, found through RTTI in
       `higgs_vr.dll`), an ownership transfer of the NPC to the grabbing player for the duration, and the ragdoll
       pose streamed like the VR pose (root plus the main bones) and applied at frame end on the other client.
-      The body sync rewrite is the base for that last part.
-- [ ] Many `Transferring ownership` (about 200) and `already spawned` (85) lines in 28 minutes: ownership
-      churn, see the upstream ownership rework below.
+- [ ] **Ownership churn.** Many `Transferring ownership` lines, some with position (0, 0, 0) for actors already
+      gone, and `already spawned` re-sends (those are benign: the server re-sends a player's spawn on every cell
+      crossing). See the upstream ownership rework below.
 
-**For every session from now on:** both players run `collect-logs.bat` and send the zip, and note the time of
-each problem (the logs are timestamped).
-
-**Still to check from the previous build:** VRIK menu only for the caster, killed NPCs stay dead, dragon and
-dialogue fixes, weapons at spawn, reconnect after a drop.
+**Still to check:** VRIK menu only for the caster, killed NPCs stay dead, dragon and dialogue fixes, weapons at
+spawn, reconnect after a drop, shouts (ported, untested), PvP sword hits (new, untested).
 
 ---
 
@@ -73,10 +81,18 @@ dialogue fixes, weapons at spawn, reconnect after a drop.
 
 - [x] **[untested] Body sync on one thread, at frame end** (done 2026-09-14, see section 0 and
       `KNOWN_ISSUES.md`).
-- [ ] **Shouts and powers reach the other player.** Our spell sync drops everything but concentration spells,
-      so a shout is never replayed. TiltedEvolutionVR fixed it (merged): read `SpellItem` spell type (the
-      `unk6C[3]` block is costOverride, flags, spellType) and replay POWER/LESSER_POWER/VOICE_POWER, resolving
-      voice casts from the sent form id. Check first whether shouts are missing for the other player.
+- [x] **[untested] Shouts and powers reach the other player.** Ported from TiltedEvolutionVR `20a62f9` on
+      2026-09-18: `SpellItem` spell type (the `unk6C[3]` block is costOverride, flags, spellType), POWER /
+      LESSER_POWER / VOICE_POWER pass the concentration filter, voice casts resolve from the sent form id.
+- [ ] **TiltedEvolutionVR `aaf5d83`, item and body drift.** A remote body is moved by teleporting, and a teleport
+      into a loose object makes havok fling it (their collision-layer table patch stops that); an NPC's capsule can
+      be shoved 54 units off its body by a player and stay there (they read the capsule and warp it back). 1200
+      lines, address-heavy; take it when under-the-ground or item drift is next.
+- [ ] **TiltedEvolutionVR `1660eb0`, ownership blacklists and former-owner updates.** Not read yet; it is the
+      bear-vanishes and follower tug-of-war class. Read it before starting the upstream rework.
+- [ ] **TiltedEvolutionVR `29f99ed`, two havok crash guards** (`SkyrimVR.exe+0AB1ABA` ragdoll add,
+      `+03AD7B1` shadow scene listener on a temporary with no 3D). None of our dumps have those addresses; port
+      them the day one does, they name the reference.
 - [ ] **[big] Upstream ownership rework** (versioned server grants, 8 commits, protocol change). Fixes
       former owners overwriting an NPC and ownership blacklists that never expire, the likely cause of the
       shared follower tug of war. A dry run conflicts in exactly our VR files (`Actor.cpp`, `CharacterService`,
@@ -154,9 +170,14 @@ What we know:
 - [ ] **Hits from VR weapons.** A VR sword hit lands on the attacker's copy of the NPC. Check that
       damage reaches the NPC's owner, and that the health change is sent back when the NPC is owned by
       the other player.
-- [ ] **Projectile details missing.** `Projectile::LaunchData` has the wrong layout on VR, so remote
-      arrows and spells don't carry the spell, weapon or ammo (effects and damage can be wrong).
-    - Fix: reverse the VR struct from the `Projectile::Launch` callers, like the EquipData fix.
+- [ ] **[untested] PvP sword fights** (added 2026-09-18). A VR player never plays an attack animation, so the
+      victim's game never sees the swing; with `bEnablePvp=true` (or `TogglePvp` in the server console) a hit on a
+      remote player is sent as a health change and applied on their side. Damage only: no stagger, and blades do
+      not clash (that needs PLANCK-style weapon physics).
+- [x] **Projectile details missing.** The `LaunchData` pointers were never read on VR, so the shooter id stayed
+      0 and no projectile was ever sent. Read since 2026-09-18 behind a check (readable memory, and the form table
+      maps the id back to the same pointer); arrows confirmed seen by the other player the same evening. The
+      first launches and every spell projectile are logged (`Projectile launch`).
 - [ ] **Dragons on the remote side.** The client grid check still passes `IsDragon = false` for
       remote entities.
     - Fix: add the dragon flag to the spawn data so remote copies get the wide range too. (Reading the race
@@ -164,7 +185,8 @@ What we know:
 - [ ] **Actor ownership warnings.** Look into `Actor for ownership transfer not found` and
       `OnNotifyActorTeleport: failed to retrieve actor` once the churn fix is confirmed.
 - [ ] **Shared follower loops** (the Lydia case). A follower owned by one player gets pulled by the
-      other player's game.
+      other player's game. The 2026-09-18 thrash (removed and re-assigned 11 times a second) was a different bug,
+      fixed in `DiscoveryService`; Lydia followed and fought fine afterwards. The tug of war itself is still open.
     - Decide the rule (the follower's owner = the player it follows), then apply it during
       ownership transfer.
 
@@ -178,8 +200,8 @@ What we know:
 
 - [ ] **Finger and grip pose.** Remote hands are always open. Add finger curl (a few bytes per hand)
       to `VRPose`.
-- [ ] **Bow aiming and spell casting in the hands.** Check that remote casting effects and the bow
-      draw show up. They are not driven by animations on VR.
+- [x] **Spell casting in the hands** confirmed 2026-09-18. **Bow:** arrows leave the bow, the nocked arrow and
+      the draw are not shown (no draw animation on VR players); see section 0.
 - [ ] **Legs when moving.** Check that smooth locomotion plays a walk or run on the remote copy,
       rather than sliding.
 - [ ] **Player height and scale** differences between VR players.
@@ -232,17 +254,20 @@ the headset off.
       retrying, refused (in plain words: wrong version with both builds, wrong password, plugins,
       uGridsToLoad), player joined (with the location) or left, party joined or left.
 - [x] **[untested] Reconnect automatically** after a drop: 5, 10, 20, 30, then every 60 s.
-- [x] **[untested] In-headset menu:** the normal Skyrim Together UI as a SteamVR dashboard tab
-      (`Systems/VRDashboard.cpp`).
+- [ ] **In-headset menu:** the normal Skyrim Together UI as a SteamVR dashboard tab
+      (`Systems/VRDashboard.cpp`). Renders for the friend, still blank for the host; top of section 0.
     - [ ] Adapt the page layout for the dashboard (large text, no empty full-screen areas).
     - [ ] A small always-visible overlay for chat and notifications while playing.
 
 ### 4.2 Versions and compatibility
 
-- [ ] **Version check follows the git tag only.** The server already refuses a different `BUILD_COMMIT` and
-      the HUD now names both builds, but the string comes from `git describe` at configure time
-      (`build/BuildInfo.h`), so it goes stale until xmake reconfigures. Add a protocol number that changes with
-      every message change.
+- [x] **Version string per build** (2026-09-18): `git describe` plus a hash of the uncommitted changes, written
+      by the root `xmake.lua` before_build hook, which also touches the sources that embed it. Known wart: xmake
+      only picks the touched sources up on the *next* build, so a version change needs two builds (or move the
+      version to a compile define set at target load). A client-only change still forces a server rebuild,
+      since the string must match; restart the server after every deploy.
+- [ ] Add a protocol number that changes with every message change, so unrelated client changes stop forcing
+      server restarts.
 - [x] **Build version** in the first log line and in the connected notification.
 - [x] **[untested] Mod list comparison on connect:** the server logs the plugins that differ between the new
       player and each player already there. Showing it on the joiner's HUD needs a new message.
@@ -298,6 +323,7 @@ the headset off.
 - [ ] **[big] A test bot client:** a small headless tool that connects to the server and replays
       movement, equips and attacks. Much of the sync could then be tested with one headset, without
       waiting for the friend.
-- [ ] Send the new client to the friend with every deploy, and remember the server needs updating
-      whenever the protocol changes.
+- [x] Every build goes straight into `E:\FUS\tools\Skyrim Together VR` (rename the old exe aside); the friend
+      gets the exe and pdb from there. The server must be rebuilt and restarted with every deploy for now (the
+      version string covers both).
 - [ ] No debugger attached by default (see 1.1).

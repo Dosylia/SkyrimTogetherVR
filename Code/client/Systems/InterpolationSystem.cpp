@@ -7,6 +7,9 @@
 #include <Misc/MiddleProcess.h>
 
 #include <Games/References.h>
+#include <Games/TES.h>
+#include <Forms/TESNPC.h>
+#include <PlayerCharacter.h>
 #include <World.h>
 
 #ifdef SKYRIMVR
@@ -31,6 +34,78 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
 
     const auto& first = *(movements.begin());
     const auto& second = *(++movements.begin());
+
+#ifdef SKYRIMVR
+    // TEMPORARY: both players lost sight of each other at 21:56 on 2026-09-18 with the actors alive and actions still
+    // arriving, and a reconnect cured it, which fits a clock that drifted past the buffered movement. Every 10 s:
+    // how far the newest buffered tick sits from the tick being played (negative means the actor has run out of
+    // future and holds its last point), and how many actors are in that state. Remove once understood.
+    {
+        static int64_t s_maxAhead = INT64_MIN;
+        static int64_t s_minAhead = INT64_MAX;
+        static uint32_t s_updates = 0;
+        static uint32_t s_starved = 0;
+        static TiltedPhoques::Map<uint32_t, int64_t> s_starvedActors; // form id -> most negative "ahead" seen
+        static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
+
+        const int64_t ahead = static_cast<int64_t>(movements.back().Tick) - static_cast<int64_t>(aTick);
+        s_maxAhead = std::max(s_maxAhead, ahead);
+        s_minAhead = std::min(s_minAhead, ahead);
+        ++s_updates;
+        if (ahead < 0)
+        {
+            ++s_starved;
+            if (apActor)
+            {
+                // Defaults to 0 on first sight, and ahead is negative here, so the first value always sticks.
+                int64_t& worstSeen = s_starvedActors[apActor->formID];
+                if (ahead < worstSeen)
+                    worstSeen = ahead;
+            }
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= s_nextLog)
+        {
+            s_nextLog = now + 10s;
+            spdlog::info("InterpDiag: {} updates, newest buffered tick {} to {} ms ahead of playback, {} updates had no future point", s_updates, s_minAhead, s_maxAhead, s_starved);
+
+            // The owner sends every actor it has every 100 ms, so an actor whose stream has stopped here is one the
+            // server chose not to forward (its range check against the centre grid this client reported) or one the
+            // owner no longer has. Distance in cells from this player tells which: a starved actor standing next to
+            // us is the server's decision. Measured 2026-09-19: the friend had a fifth of all updates starved by up
+            // to 30 s while fighting a bear the host owned.
+            if (!s_starvedActors.empty())
+            {
+                TiltedPhoques::Vector<std::pair<uint32_t, int64_t>> worst(s_starvedActors.begin(), s_starvedActors.end());
+                std::partial_sort(worst.begin(), worst.begin() + std::min<size_t>(4, worst.size()), worst.end(), [](const auto& acLhs, const auto& acRhs) { return acLhs.second < acRhs.second; });
+
+                const PlayerCharacter* pPlayer = PlayerCharacter::Get();
+                const TES* pTES = TES::Get();
+                std::string line;
+                for (size_t i = 0; i < worst.size() && i < 4; ++i)
+                {
+                    Actor* pStarved = Cast<Actor>(TESForm::GetById(worst[i].first));
+                    const TESNPC* pBase = pStarved ? Cast<TESNPC>(pStarved->baseForm) : nullptr;
+                    float cells = -1.f;
+                    if (pStarved && pPlayer)
+                        cells = glm::distance(glm::vec2{pStarved->position.x, pStarved->position.y}, glm::vec2{pPlayer->position.x, pPlayer->position.y}) / 4096.f;
+                    line += fmt::format("{:X} ({}) stale {} ms, {:.1f} cells away, has 3D {}; ", worst[i].first, pBase ? pBase->fullName.value.AsAscii() : "?", -worst[i].second, cells,
+                                        pStarved && pStarved->GetNiNode() != nullptr);
+                }
+                spdlog::info("InterpDiag starved: {} actors, worst: {}player at ({:.0f}, {:.0f}), reported centre grid ({}, {}), current grid ({}, {})", s_starvedActors.size(), line,
+                             pPlayer ? pPlayer->position.x : 0.f, pPlayer ? pPlayer->position.y : 0.f, pTES ? pTES->centerGridX : 0, pTES ? pTES->centerGridY : 0,
+                             pTES ? pTES->currentGridX : 0, pTES ? pTES->currentGridY : 0);
+                s_starvedActors.clear();
+            }
+
+            s_maxAhead = INT64_MIN;
+            s_minAhead = INT64_MAX;
+            s_updates = 0;
+            s_starved = 0;
+        }
+    }
+#endif
 
     // Calculate delta movement since last update
     auto delta = 0.0001f;

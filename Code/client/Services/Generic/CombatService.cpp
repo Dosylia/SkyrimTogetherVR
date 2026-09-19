@@ -161,6 +161,10 @@ void CombatService::OnNotifyProjectileLaunch(const NotifyProjectileLaunch& acMes
     BSPointerHandle<Projectile> result;
 
     Projectile::Launch(&result, launchData);
+
+    // Pairs with the sender's "Projectile launch" line: what this side actually launched for a remote shooter.
+    spdlog::info("Remote projectile launched: shooter {:X}, base {:X}, weapon {:X}, ammo {:X}, spell {:X}, handle {}", formIdComponent.Id, cProjectileBaseId, cFromWeaponId, cFromAmmoId,
+                 cSpellId, result.handle.iBits != 0);
 }
 
 void CombatService::OnHitEvent(const HitEvent& acEvent) const noexcept

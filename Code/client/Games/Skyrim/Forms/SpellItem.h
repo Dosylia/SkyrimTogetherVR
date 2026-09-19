@@ -25,7 +25,12 @@ struct SpellItem : MagicItem
     BGSEquipType equipType;
     BGSMenuDisplayObject menuDisplayObject;
     TESDescription description;
-    uint32_t unk6C[3];
+    // SpellData, in the game's own field order. Same size as the three unknowns it replaces. Confirmed at runtime
+    // on VR by TiltedEvolutionVR (2026-08-29): Flames reads costOverride 0xE with eSpellType SPELL, the Nord
+    // Battle Cry power reads costOverride 0 with eSpellType POWER.
+    int32_t iCostOverride;
+    int32_t iFlags;
+    MagicSystem::SpellType eSpellType;
     float castTime;
     MagicSystem::CastingType eCastingType;
     MagicSystem::Delivery eDelivery;

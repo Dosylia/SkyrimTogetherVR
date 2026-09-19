@@ -127,9 +127,11 @@ BSPointerHandle<Projectile>* TP_MAKE_THISCALL(HookLaunch, BSPointerHandle<Projec
     Event.ParentCellID = ValidFormId(arData.pParentCell);
     Event.SpellID = ValidFormId(arData.pSpell);
 
-    // TEMPORARY: says which of the six resolved on VR. Remove once the layout is settled.
+    // TEMPORARY: says which of the six resolved on VR. The first launches of any kind, and every launch that carries
+    // a spell (staff and spell projectiles are rare, and a staff of light was reported breaking things for the other
+    // player on 2026-09-18 after the ten arrows had used up this budget). Remove once the layout is settled.
     static uint32_t s_launchesLogged = 0;
-    if (s_launchesLogged < 10)
+    if (s_launchesLogged < 10 || Event.SpellID != 0)
     {
         ++s_launchesLogged;
         spdlog::info("Projectile launch: shooter {:X}, base {:X}, weapon {:X}, ammo {:X}, cell {:X}, spell {:X}", Event.ShooterID, Event.ProjectileBaseID,

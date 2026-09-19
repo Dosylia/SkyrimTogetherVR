@@ -1053,6 +1053,15 @@ bool TP_MAKE_THISCALL(HookDamageActor, Actor, float aDamage, Actor* apHitter, bo
     }
     else if (pExHittee->IsRemotePlayer())
     {
+        // A VR player never plays an attack animation, so the other player's game never sees the swing land and
+        // could not apply it; the only game that knows this sword hit that body is this one. With PvP on, the hit is
+        // sent as a health change, which the other side applies to its own player through the usual broadcast
+        // (health is floored at zero there, players are never killed). Sword fights between players, 2026-09-18.
+        if (World::Get().GetServerSettings().PvpEnabled && realDamage > 0.f)
+        {
+            spdlog::info("PvP: hit remote player {:X} for {:.0f}", apThis->formID, realDamage);
+            World::Get().GetRunner().Trigger(HealthChangeEvent(apThis->formID, -realDamage));
+        }
         return wouldKill;
     }
 

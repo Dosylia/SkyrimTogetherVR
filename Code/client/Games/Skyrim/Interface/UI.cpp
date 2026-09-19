@@ -117,7 +117,10 @@ static void* UI_AddToActiveQueue_Hook(UI* apSelf, IMenu* apMenu, void* apFoundIt
         if (auto* pMenu = apSelf->FindMenuByName(item))
         {
             if (pMenu == apMenu)
+            {
+                spdlog::info("Menu opened while connected: {} (runs unpaused)", item);
                 UnfreezeMenu(apMenu);
+            }
         }
     }
 

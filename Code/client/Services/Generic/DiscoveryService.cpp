@@ -175,6 +175,15 @@ void DiscoveryService::DetectGridCellChange(TESWorldSpace* aWorldSpace, bool aNe
 
     changeEvent.CenterCoords = m_centerGrid = {pTES->centerGridX, pTES->centerGridY};
 
+    // The server ranges every remote actor against this centre. If it disagrees with the grid the player actually
+    // stands in, actors next to the player are withheld (see RangeDiag on the server, InterpDiag on the client).
+    {
+        const auto& position = PlayerCharacter::Get()->position;
+        const auto standing = GridCellCoords::CalculateGridCellCoords(position.x, position.y);
+        spdlog::info("Grid change: reporting centre ({}, {}), game's current grid ({}, {}), standing in ({}, {}) at ({:.0f}, {:.0f}), {} cells sent", pTES->centerGridX, pTES->centerGridY,
+                     pTES->currentGridX, pTES->currentGridY, standing.X, standing.Y, position.x, position.y, changeEvent.Cells.size());
+    }
+
     m_dispatcher.trigger(changeEvent);
 
     m_worldSpaceId = worldSpaceId;

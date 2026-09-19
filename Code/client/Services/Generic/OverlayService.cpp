@@ -284,9 +284,17 @@ void OverlayService::PushUiState() noexcept
     if (!pClient || !pClient->IsReady())
         return;
 
+    static bool s_readyLogged = false;
+    if (!s_readyLogged)
+    {
+        s_readyLogged = true;
+        spdlog::info("Overlay page ready; in game {}, active {}", m_inGame, m_active);
+    }
+
     if (m_sentInGame != m_inGame)
     {
         m_sentInGame = m_inGame;
+        spdlog::info("Overlay: sending {}", m_inGame ? "enterGame" : "exitGame");
 
         if (m_inGame)
         {
@@ -302,6 +310,7 @@ void OverlayService::PushUiState() noexcept
     if (m_sentActive != m_active)
     {
         m_sentActive = m_active;
+        spdlog::info("Overlay: sending {}", m_active ? "activate" : "deactivate");
         m_pOverlay->ExecuteAsync(m_active ? "activate" : "deactivate");
     }
 }

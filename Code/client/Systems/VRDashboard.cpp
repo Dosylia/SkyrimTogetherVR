@@ -162,15 +162,42 @@ bool VRDashboard::InitializeOverlay() noexcept
     m_pOverlay->SetOverlayMouseScale(m_handle, &mouseScale);
     m_pOverlay->SetOverlayFlag(m_handle, vr::VROverlayFlags_SendVRSmoothScrollEvents, true);
 
-    // Tab icon: a small gold square, so the tab can be found even before the page has rendered.
-    constexpr uint32_t kIconSize = 32;
-    std::vector<uint8_t> icon(kIconSize * kIconSize * 4);
-    for (size_t i = 0; i < icon.size(); i += 4)
+    // Tab icon, drawn here so it needs no image file: a gold Skyrim-style diamond with a dark centre on a dark
+    // rounded square, readable at the dashboard's thumbnail size. The plain gold square it replaces was asked
+    // to become a proper icon on 2026-09-19.
+    constexpr int32_t kIconSize = 64;
+    std::vector<uint8_t> icon(static_cast<size_t>(kIconSize) * kIconSize * 4);
+    for (int32_t y = 0; y < kIconSize; ++y)
     {
-        icon[i] = 200;
-        icon[i + 1] = 169;
-        icon[i + 2] = 110;
-        icon[i + 3] = 255;
+        for (int32_t x = 0; x < kIconSize; ++x)
+        {
+            const float cx = static_cast<float>(x) - 31.5f;
+            const float cy = static_cast<float>(y) - 31.5f;
+            const float diamond = std::abs(cx) + std::abs(cy); // L1 distance from the centre
+            const float corner = std::max(std::abs(cx), std::abs(cy));
+
+            uint8_t r = 24, g = 21, b = 18, a = 255; // dark panel
+            if (corner > 30.f)
+                a = 0; // rounded off corners
+            if (diamond <= 26.f && diamond > 21.f)
+            {
+                r = 200; // gold ring
+                g = 169;
+                b = 110;
+            }
+            else if (diamond <= 13.f && diamond > 9.f)
+            {
+                r = 200; // inner ring
+                g = 169;
+                b = 110;
+            }
+
+            uint8_t* pPixel = icon.data() + (static_cast<size_t>(y) * kIconSize + x) * 4;
+            pPixel[0] = r;
+            pPixel[1] = g;
+            pPixel[2] = b;
+            pPixel[3] = a;
+        }
     }
     m_pOverlay->SetOverlayRaw(m_thumbnailHandle, icon.data(), kIconSize, kIconSize, 4);
 
@@ -214,6 +241,17 @@ void VRDashboard::Update(OverlayService& aOverlay) noexcept
         {
             m_browserHidden = !m_visible;
             pBrowser->GetHost()->WasHidden(m_browserHidden);
+
+            // The page is the flat-screen UI at 1600x900: on a 2.5 m panel its menu was a small box in one corner
+            // (2026-09-19). Chrome zoom scales everything on it; each level is x1.2, so 3 is about 173%.
+            static bool s_zoomed = false;
+            if (m_visible && !s_zoomed)
+            {
+                s_zoomed = true;
+                constexpr double kZoomLevel = 3.0;
+                pBrowser->GetHost()->SetZoomLevel(kZoomLevel);
+                spdlog::info("VRDashboard: page zoom level set to {}", kZoomLevel);
+            }
         }
     }
 
