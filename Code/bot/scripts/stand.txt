@@ -1,0 +1,6 @@
+# Stands where it spawned, next to the host, for ten minutes. For the Whiterun gate test: walk into the city and back
+# out while the bot stays outside; the server's STServerOut.log then shows "WorldDiag" lines for each decision, and
+# the host's tp_client.log shows "WorldDiag: server removed player copy" and the spawn that should follow.
+log standing still for ten minutes
+wait 600
+stop

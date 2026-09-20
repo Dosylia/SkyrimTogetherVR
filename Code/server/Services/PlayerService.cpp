@@ -73,6 +73,16 @@ void PlayerService::HandleGridCellShift(const PacketEvent<ShiftGridCellRequest>&
         // Use the same worldspace/position range as movement broadcasts, including dragon range.
         const bool isInRange = cell.IsInRange(characterCellComponent, characterComponent.IsDragon());
 
+        // TEMPORARY (2026-09-20): see WorldDiag in CharacterService. This is the path that gives a player back the
+        // copies it lost when it changed worldspace, so both outcomes are named for player characters.
+        if (characterComponent.IsPlayer())
+        {
+            Player* pOwner = ownedComponent.GetOwner();
+            spdlog::info("WorldDiag: '{}' shifted to worldspace {:X} grid ({}, {}); player '{}' ({:X}) in worldspace {:X} grid ({}, {}) is {}", pPlayer->GetUsername().c_str(), cell.WorldSpaceId.BaseId,
+                         cell.CenterCoords.X, cell.CenterCoords.Y, pOwner ? pOwner->GetUsername().c_str() : "?", World::ToInteger(character), characterCellComponent.WorldSpaceId.BaseId,
+                         characterCellComponent.CenterCoords.X, characterCellComponent.CenterCoords.Y, isInRange ? "sent" : "withheld");
+        }
+
         if (!isInRange)
         {
             continue;

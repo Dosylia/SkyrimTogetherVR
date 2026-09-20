@@ -234,17 +234,33 @@ void CharacterService::OnCharacterExteriorCellChange(const CharacterExteriorCell
     NotifyRemoveCharacter removeMessage;
     removeMessage.ServerId = World::ToInteger(acEvent.Entity);
 
+    // TEMPORARY (2026-09-20): a player "vanishing" with nobody hurt, around Whiterun's gate, may be this decision:
+    // inside the walls is another worldspace than the plains. Every remove or re-send of a player's copy is named.
+    const auto* pCharacter = m_world.try_get<CharacterComponent>(acEvent.Entity);
+    const bool isPlayerCharacter = pCharacter && pCharacter->IsPlayer();
+
     for (auto pPlayer : m_world.GetPlayerManager())
     {
         if (acEvent.Owner == pPlayer)
             continue;
 
-        if (pPlayer->GetCellComponent().WorldSpaceId != acEvent.WorldSpaceId || pPlayer->GetCellComponent().WorldSpaceId == acEvent.WorldSpaceId && !GridCellCoords::IsCellInGridCell(acEvent.CurrentCoords, pPlayer->GetCellComponent().CenterCoords, false))
+        const auto& viewer = pPlayer->GetCellComponent();
+        const bool sameWorld = viewer.WorldSpaceId == acEvent.WorldSpaceId;
+        const bool inGrid = GridCellCoords::IsCellInGridCell(acEvent.CurrentCoords, viewer.CenterCoords, false);
+
+        if (!sameWorld || !inGrid)
         {
+            if (isPlayerCharacter)
+                spdlog::info("WorldDiag: removed player '{}' ({:X}) from the view of '{}': moved to worldspace {:X} grid ({}, {}); viewer in worldspace {:X} grid ({}, {}) ({})",
+                             acEvent.Owner ? acEvent.Owner->GetUsername().c_str() : "?", removeMessage.ServerId, pPlayer->GetUsername().c_str(), acEvent.WorldSpaceId.BaseId, acEvent.CurrentCoords.X,
+                             acEvent.CurrentCoords.Y, viewer.WorldSpaceId.BaseId, viewer.CenterCoords.X, viewer.CenterCoords.Y, sameWorld ? "out of grid" : "other worldspace");
             pPlayer->Send(removeMessage);
         }
-        else if (pPlayer->GetCellComponent().WorldSpaceId == acEvent.WorldSpaceId && GridCellCoords::IsCellInGridCell(acEvent.CurrentCoords, pPlayer->GetCellComponent().CenterCoords, false))
+        else
         {
+            if (isPlayerCharacter)
+                spdlog::info("WorldDiag: sent player '{}' ({:X}) to '{}' again after a cell change in worldspace {:X} grid ({}, {})", acEvent.Owner ? acEvent.Owner->GetUsername().c_str() : "?",
+                             removeMessage.ServerId, pPlayer->GetUsername().c_str(), acEvent.WorldSpaceId.BaseId, acEvent.CurrentCoords.X, acEvent.CurrentCoords.Y);
             pPlayer->Send(spawnMessage);
         }
     }
@@ -263,7 +279,11 @@ void CharacterService::OnCharacterInteriorCellChange(const CharacterInteriorCell
         if (acEvent.Owner == pPlayer)
             continue;
 
-        if (acEvent.NewCell == pPlayer->GetCellComponent().Cell)
+        const bool sameCell = acEvent.NewCell == pPlayer->GetCellComponent().Cell;
+        if (const auto* pCharacter = m_world.try_get<CharacterComponent>(acEvent.Entity); pCharacter && pCharacter->IsPlayer())
+            spdlog::info("WorldDiag: player '{}' ({:X}) entered interior cell {:X}; {} for '{}' (viewer cell {:X})", acEvent.Owner ? acEvent.Owner->GetUsername().c_str() : "?", removeMessage.ServerId,
+                         acEvent.NewCell.BaseId, sameCell ? "sent again" : "removed", pPlayer->GetUsername().c_str(), pPlayer->GetCellComponent().Cell.BaseId);
+        if (sameCell)
             pPlayer->Send(spawnMessage);
         else
             pPlayer->Send(removeMessage);

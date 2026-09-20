@@ -5,6 +5,9 @@
 
 #include <Services/OverlayClient.h>
 #include <Services/TransportService.h>
+#ifdef SKYRIMVR
+#include <Services/VRConnectService.h>
+#endif
 
 #include <Messages/SendChatMessageRequest.h>
 #include <Messages/TeleportRequest.h>
@@ -105,7 +108,21 @@ void OverlayClient::ProcessConnectMessage(CefRefPtr<CefListValue> aEventArgs)
 
 void OverlayClient::ProcessDisconnectMessage()
 {
+#ifdef SKYRIMVR
+    // Closing the transport directly looked like a dropped line to the connect service, which dialled again five
+    // seconds later (2026-09-20 01:55). Toggle() marks the disconnect as chosen; it only closes when online.
+    World::Get().GetRunner().Queue(
+        []()
+        {
+            auto& connect = World::Get().ctx().at<VRConnectService>();
+            if (World::Get().GetTransport().IsConnected())
+                connect.Toggle();
+            else
+                World::Get().GetTransport().Close();
+        });
+#else
     World::Get().GetRunner().Queue([]() { World::Get().GetTransport().Close(); });
+#endif
 }
 
 void OverlayClient::ProcessRevealPlayersMessage()

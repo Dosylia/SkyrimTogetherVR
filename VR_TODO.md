@@ -83,9 +83,15 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       started sending it on the 20th and not on the 19th is not proven; the likely trigger is the VR controller
       state at those moments (asleep while the player was at the keyboard), which the VR layer reports through this
       box. The diagnostics stay in for now: `Probe` every 5 s, `Menu queued`, `UI message for MessageBoxMenu`.
-- [ ] **VR tab Disconnect reconnects by itself.** It closes the socket through the overlay client, which the
+- [x] **[untested] VR tab Disconnect reconnects by itself.** Now routed through `VRConnectService::Toggle`. Was: It closes the socket through the overlay client, which the
       auto-reconnect treats as a dropped line (`attempt 2` five seconds later, 01:55:37). Route it through
       `VRConnectService` so a chosen disconnect stays disconnected.
+- [ ] **[untested] Whiterun gate: is the second vanish cause the worldspace change?** Logging in place on both
+      sides (`WorldDiag` on the server for every remove and re-send of a player's copy on a cell or worldspace
+      change, and for every grid shift; `WorldDiag: server removed player copy` on the client with our worldspace
+      and cell). Test: run `STBot.exe scripts\stand.txt`, then walk through the Whiterun gate and back out. The
+      copy must go when you are inside and come back when you are out. If it does not come back, the server
+      log names the decision that withheld it.
 - [ ] **Pause menu: "weird things happen to both players".** No trace in either log. Needs a description.
 - [ ] **Nocked arrow not shown** on the other player's bow (the arrow leaves fine). The nocked arrow is an
       animation attachment and VR players never play the draw animation.

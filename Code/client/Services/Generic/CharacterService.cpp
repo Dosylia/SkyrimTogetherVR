@@ -940,6 +940,15 @@ void CharacterService::OnRemoveCharacter(const NotifyRemoveCharacter& acMessage)
 
     if (itor != std::end(view))
     {
+        // TEMPORARY (2026-09-20): a player copy the server takes away, with where we stand (see WorldDiag on the server).
+        if (m_world.all_of<PlayerComponent>(*itor))
+        {
+            auto* pPlayer = PlayerCharacter::Get();
+            const auto* pFormIdComponent = m_world.try_get<FormIdComponent>(*itor);
+            spdlog::info("WorldDiag: server removed player copy {:X} (actor {:X}) while we stand in worldspace {:X} cell {:X}", acMessage.ServerId, pFormIdComponent ? pFormIdComponent->Id : 0,
+                         pPlayer && pPlayer->GetWorldSpace() ? pPlayer->GetWorldSpace()->formID : 0, pPlayer && pPlayer->parentCell ? pPlayer->parentCell->formID : 0);
+        }
+
         if (auto* pFormIdComponent = m_world.try_get<FormIdComponent>(*itor))
             CharacterService::DeleteTempActor(pFormIdComponent->Id);
 
