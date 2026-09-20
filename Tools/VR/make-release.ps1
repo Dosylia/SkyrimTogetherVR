@@ -15,7 +15,11 @@ $versionFile = Join-Path $RepoRoot 'build\BuildVersion.txt'
 $version = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { 'unknown' }
 if (-not $version -or $version -like 'unknown*') { throw "No build version found in $versionFile; build first (xmake -y)." }
 
+# A release built from a clean, tagged tree is the standalone package anyone can install; "dirty" in the
+# version means uncommitted changes, and such a build must not be handed out.
+if ($version -like '*dirty*') { throw "The build is from an uncommitted tree ($version); commit and build again before releasing." }
 $name = "SkyrimTogetherVR-$version"
+$standaloneName = "SkyrimTogetherVR-standalone-$version"
 $staging = Join-Path $OutputFolder $name
 if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Force $staging | Out-Null
@@ -49,8 +53,11 @@ Copy-Item (Join-Path $RepoRoot 'GameFiles\Skyrim') (Join-Path $staging 'Skyrim T
 
 # Never VR_MULTIPLAYER_GUIDE.md: it carries the host's public IP, PC name and router settings.
 Copy-Item (Join-Path $PSScriptRoot 'README-release.md') (Join-Path $staging 'README.md')
+foreach ($readme in 'README-mod-manager.md', 'README-manual.md', 'README-host.md') {
+    Copy-Item (Join-Path $PSScriptRoot $readme) $staging
+}
 
-$zip = Join-Path $OutputFolder "$name.zip"
+$zip = Join-Path $OutputFolder "$standaloneName.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip
 
@@ -60,5 +67,11 @@ $updateZip = Join-Path $OutputFolder "$name-update.zip"
 if (Test-Path $updateZip) { Remove-Item $updateZip -Force }
 Compress-Archive -Path (Join-Path $buildFolder 'SkyrimTogetherVR.exe'), (Join-Path $buildFolder 'SkyrimTogetherVR.pdb') -DestinationPath $updateZip
 
-Write-Host ("Full install: {0} ({1:N0} MB)" -f $zip, ((Get-Item $zip).Length / 1MB))
-Write-Host ("Update only:  {0} ({1:N1} MB)" -f $updateZip, ((Get-Item $updateZip).Length / 1MB))
+# Server update pack, for whoever hosts: the three files that change, without the 165 MB full zip.
+$serverZip = Join-Path $OutputFolder "$name-server-update.zip"
+if (Test-Path $serverZip) { Remove-Item $serverZip -Force }
+Compress-Archive -Path (Join-Path $server '*') -DestinationPath $serverZip
+
+Write-Host ("Standalone:    {0} ({1:N0} MB)" -f $zip, ((Get-Item $zip).Length / 1MB))
+Write-Host ("Client update: {0} ({1:N1} MB)" -f $updateZip, ((Get-Item $updateZip).Length / 1MB))
+Write-Host ("Server update: {0} ({1:N1} MB)" -f $serverZip, ((Get-Item $serverZip).Length / 1MB))
