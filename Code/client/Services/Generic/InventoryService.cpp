@@ -30,6 +30,12 @@
 #include <PlayerCharacter.h>
 #include <Forms/MagicItem.h>
 
+namespace
+{
+// Defined with ApplyHandEquipment below: the record of what this side put in a remote player copy's hands.
+void NoteHandItem(Actor* apActor, TESForm* apItem, bool aLeft, bool aEquipped) noexcept;
+} // namespace
+
 InventoryService::InventoryService(World& aWorld, entt::dispatcher& aDispatcher, TransportService& aTransport) noexcept
     : m_world(aWorld)
     , m_dispatcher(aDispatcher)
@@ -221,6 +227,7 @@ void InventoryService::OnNotifyEquipmentChanges(const NotifyEquipmentChanges& ac
     if (acMessage.Unequip)
     {
         pEquipManager->UnEquip(pActor, pItem, nullptr, acMessage.Count, pEquipSlot, false, true, false, false, nullptr);
+        NoteHandItem(pActor, pItem, pEquipSlot == DefaultObjectManager::Get().leftEquipSlot, false);
     }
     else
     {
@@ -239,6 +246,7 @@ void InventoryService::OnNotifyEquipmentChanges(const NotifyEquipmentChanges& ac
         }
 
         pEquipManager->Equip(pActor, pItem, nullptr, acMessage.Count, pEquipSlot, false, true, false, false);
+        NoteHandItem(pActor, pItem, pEquipSlot == DefaultObjectManager::Get().leftEquipSlot, true);
 
         for (const auto& armor : wornArmor.Entries)
         {
@@ -389,19 +397,44 @@ void InventoryService::RunEquipmentSnapshotUpdates() noexcept
     m_lastEquipmentSnapshot = std::move(equipment);
 }
 
-void InventoryService::ApplyHandEquipment(Actor* apActor, const Inventory& acEquipment) noexcept
+namespace
+{
+struct HandItem
+{
+    TESForm* pForm;
+    bool Left;
+};
+
+bool ContainsHandItem(const Vector<HandItem>& acItems, TESForm* apForm, bool aLeft) noexcept
+{
+    return std::any_of(acItems.begin(), acItems.end(), [apForm, aLeft](const HandItem& aItem) { return aItem.pForm == apForm && aItem.Left == aLeft; });
+}
+
+// What this side has put in each remote player copy's hands since it appeared, by form id. The container's worn
+// flags cannot stand in for it: SetInventory equips the worn entries before the copy has its 3D, so the flags say
+// "held" while the hands stay empty. Every spawn of 2026-09-20 logged "1 hand items wanted, 1 held now" and the
+// weapon only showed once the owner re-equipped it ("we always spawn with empty hands").
+TiltedPhoques::Map<uint32_t, Vector<HandItem>> s_handsApplied;
+
+void NoteHandItem(Actor* apActor, TESForm* apItem, bool aLeft, bool aEquipped) noexcept
+{
+    constexpr uint8_t cLightFormType = 31;
+    if (!apActor || !apItem || (apItem->formType != FormType::Weapon && static_cast<uint8_t>(apItem->formType) != cLightFormType))
+        return;
+    Vector<HandItem>& held = s_handsApplied[apActor->formID];
+    held.erase(std::remove_if(held.begin(), held.end(), [apItem, aLeft](const HandItem& aItem) { return aItem.pForm == apItem && aItem.Left == aLeft; }), held.end());
+    if (aEquipped)
+        held.push_back({apItem, aLeft});
+}
+} // namespace
+
+void InventoryService::ApplyHandEquipment(Actor* apActor, const Inventory& acEquipment, bool aArrival) noexcept
 {
     constexpr uint8_t cLightFormType = 31;
 
     auto& modSystem = World::Get().GetModSystem();
     auto* pEquipManager = EquipManager::Get();
     auto& defaultObjects = DefaultObjectManager::Get();
-
-    struct HandItem
-    {
-        TESForm* pForm;
-        bool Left;
-    };
 
     const auto collectHandItems = [&modSystem](const Inventory& acInventory)
     {
@@ -427,35 +460,45 @@ void InventoryService::ApplyHandEquipment(Actor* apActor, const Inventory& acEqu
     { return std::any_of(acItems.begin(), acItems.end(), [&acItem](const HandItem& aItem) { return aItem.pForm == acItem.pForm && aItem.Left == acItem.Left; }); };
 
     const Vector<HandItem> desiredItems = collectHandItems(acEquipment);
-    const Vector<HandItem> currentItems = collectHandItems(apActor->GetEquipment());
+    Vector<HandItem>& heldItems = s_handsApplied[apActor->formID];
+    if (aArrival)
+        heldItems.clear(); // a fresh copy: SetInventory set the worn flags, the hands are empty
+    const Vector<HandItem> flaggedItems = collectHandItems(apActor->GetEquipment());
+    spdlog::info("Equipment sync: remote actor {:X} hands {}: {} hand items wanted ({} worn entries in all), {} put there by us, {} flagged worn, left spell {}, right spell {}", apActor->formID,
+                 aArrival ? "on arrival" : "on snapshot", desiredItems.size(), acEquipment.Entries.size(), heldItems.size(), flaggedItems.size(),
+                 acEquipment.CurrentMagicEquipment.LeftHandSpell ? "yes" : "no", acEquipment.CurrentMagicEquipment.RightHandSpell ? "yes" : "no");
 
-    for (const auto& item : currentItems)
+    // Off: what we put there and what the container flags as worn, when the owner no longer holds it.
+    Vector<HandItem> toUnequip = heldItems;
+    for (const auto& item : flaggedItems)
+        if (!ContainsHandItem(toUnequip, item.pForm, item.Left))
+            toUnequip.push_back(item);
+    for (const auto& item : toUnequip)
     {
         if (containsItem(desiredItems, item))
             continue;
-
         spdlog::info("Equipment sync: remote actor {:X} unequips {:X} ({} hand)", apActor->formID, item.pForm->formID, item.Left ? "left" : "right");
         pEquipManager->UnEquip(apActor, item.pForm, nullptr, 1, item.Left ? defaultObjects.leftEquipSlot : defaultObjects.rightEquipSlot, false, true, false, false, nullptr);
+        NoteHandItem(apActor, item.pForm, item.Left, false);
     }
 
+    // On: what the owner holds that we have not put there ourselves. A worn flag alone does not count.
     for (const auto& item : desiredItems)
     {
-        if (containsItem(currentItems, item))
+        if (ContainsHandItem(heldItems, item.pForm, item.Left))
             continue;
-
         auto* pObject = Cast<TESBoundObject>(item.pForm);
         if (!pObject)
             continue;
-
         // The remote copy may not have the item yet (picked up after it was spawned).
         if (apActor->GetItemCountInInventory(item.pForm) <= 0)
         {
             ScopedInventoryOverride _;
             apActor->AddObjectToContainer(pObject, nullptr, 1, nullptr);
         }
-
         spdlog::info("Equipment sync: remote actor {:X} equips {:X} ({} hand)", apActor->formID, item.pForm->formID, item.Left ? "left" : "right");
         pEquipManager->Equip(apActor, item.pForm, nullptr, 1, item.Left ? defaultObjects.leftEquipSlot : defaultObjects.rightEquipSlot, false, true, false, false);
+        NoteHandItem(apActor, item.pForm, item.Left, true);
     }
 
     const auto syncSpell = [&](const GameId& acDesiredSpell, uint32_t aHand)

@@ -20,6 +20,7 @@
 #include <Services/StringCacheService.h>
 #include <Services/PlayerService.h>
 #include <Services/CombatService.h>
+#include <Services/CharacterService.h>
 #include <Games/Skyrim/Interface/IMenu.h>
 #include <Games/Skyrim/Interface/UI.h>
 #include <Services/WeatherService.h>
@@ -166,8 +167,10 @@ void World::ReportPerformance(double aFrameMs, double aUpdateMs) noexcept
             }
             DWORD foregroundProcess = 0;
             GetWindowThreadProcessId(GetForegroundWindow(), &foregroundProcess);
-            spdlog::info("Probe{}: connected {}, pause counter {}, menus [{}], game window focused {}", changed ? " (pause counter changed)" : "", GetTransport().IsConnected() ? "yes" : "no",
-                         pauseCounter, menus, foregroundProcess == GetCurrentProcessId() ? "yes" : "no");
+            const auto lastMoveSentAt = CharacterService::LastMoveSentAt();
+            const int64_t moveAgeMs = lastMoveSentAt == std::chrono::steady_clock::time_point{} ? -1 : std::chrono::duration_cast<std::chrono::milliseconds>(now - lastMoveSentAt).count();
+            spdlog::info("Probe{}: connected {}, pause counter {}, menus [{}], game window focused {}, last move sent {} ms ago", changed ? " (pause counter changed)" : "",
+                         GetTransport().IsConnected() ? "yes" : "no", pauseCounter, menus, foregroundProcess == GetCurrentProcessId() ? "yes" : "no", moveAgeMs);
         }
     }
     if (now - m_perfIntervalStart < kInterval || m_perfFrameTimes.empty())

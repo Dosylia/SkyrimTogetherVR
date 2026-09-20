@@ -605,7 +605,7 @@ void CharacterService::OnAssignCharacter(const AssignCharacterResponse& acMessag
         pActor->SetActorValues(acMessage.AllActorValues);
         pActor->SetActorInventory(acMessage.CurrentInventory);
         if (pActor->GetExtension()->IsRemotePlayer())
-            InventoryService::ApplyHandEquipment(pActor, acMessage.CurrentInventory);
+            InventoryService::ApplyHandEquipment(pActor, acMessage.CurrentInventory, true);
 
         if (pActor->IsDead() != acMessage.IsDead)
             acMessage.IsDead ? pActor->Kill() : pActor->Respawn();
@@ -691,9 +691,23 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
 
         if (!pActor)
         {
-            spdlog::error("Failed to retrieve Actor {:X}, it will not be spawned, possibly missing mod", cActorId);
-            spdlog::error("\tForm : {:X}", pForm ? pForm->formID : 0);
-            return;
+            // The reference is not loaded on this side (its cell outside our grid, or a placed reference we lack), yet
+            // the owner drives it and it can walk up and hit us unseen: Novice Conjurer 10DE94 failed here five times
+            // between 14:49 and 14:51 on 2026-09-20 while "something invisible" attacked. A copy of the owner's base
+            // stands in, registered as a ghost so the local reference is disabled if it turns up later.
+            TESNPC* pOwnerBase = acMessage.BaseId != GameId{} ? Cast<TESNPC>(TESForm::GetById(World::Get().GetModSystem().GetGameId(acMessage.BaseId))) : nullptr;
+            Actor* pCopy = pOwnerBase ? Actor::Create(pOwnerBase) : nullptr;
+            if (!pCopy)
+            {
+                spdlog::error("Failed to retrieve Actor {:X}, it will not be spawned, possibly missing mod", cActorId);
+                spdlog::error("\tForm : {:X}", pForm ? pForm->formID : 0);
+                return;
+            }
+            s_ghosts[cActorId] = pCopy->formID;
+            spdlog::info("Stand-in: reference {:X} is not loaded here; copy {:X} of the owner's {} ({:X}) stands in for it", cActorId, pCopy->formID, pOwnerBase->fullName.value.AsAscii(),
+                         pOwnerBase->formID);
+            pActor = pCopy;
+            entity = m_world.create();
         }
 
         // Another kind of creature than the owner's: a copy of the owner's stands in, the local one becomes a ghost.
@@ -916,6 +930,23 @@ void CharacterService::OnOwnershipTransfer(const NotifyOwnershipTransfer& acMess
     if (itor != std::end(view))
     {
         auto& formIdComponent = view.get<FormIdComponent>(*itor);
+
+        // A reference that rolled as another creature here stands behind a ghost copy of the owner's kind. Taking it
+        // over would put our own roll in charge and flip the creature for everyone (a wolf on his side became a troll
+        // on hers after a hand-off, 2026-09-20 11:50). Refused: the server marks us invalid for it and keeps looking.
+        if (const auto ghost = s_ghosts.find(formIdComponent.Id); ghost != s_ghosts.end())
+        {
+            const auto* pLocal = Cast<Actor>(TESForm::GetById(formIdComponent.Id));
+            const auto* pCopy = Cast<Actor>(TESForm::GetById(ghost->second));
+            const auto* pLocalBase = pLocal ? Cast<TESNPC>(pLocal->baseForm) : nullptr;
+            const auto* pCopyBase = pCopy ? Cast<TESNPC>(pCopy->baseForm) : nullptr;
+            spdlog::info("Hand-off of {:X} (server id {:X}) declined: it rolled as {} here, the owner's kind is {}; taking it would flip it", formIdComponent.Id, acMessage.ServerId,
+                         pLocalBase ? pLocalBase->fullName.value.AsAscii() : "?", pCopyBase ? pCopyBase->fullName.value.AsAscii() : "?");
+            RequestOwnershipTransfer request{};
+            request.ServerId = acMessage.ServerId;
+            m_transport.Send(request);
+            return;
+        }
 
         if (TakeOwnership(formIdComponent.Id, acMessage.ServerId, *itor))
         {
@@ -1399,9 +1430,17 @@ void CharacterService::ProcessNewEntity(entt::entity aEntity) const noexcept
         return;
     }
 
-    // A ghost: a copy of the owner's creature is bound to the server in its place (see s_ghosts).
+    // A ghost: a copy of the owner's creature is bound to the server in its place (see s_ghosts). One that was not
+    // loaded when the copy was made turns up here enabled once its cell loads; it goes dark like the others.
     if (s_ghosts.find(formIdComponent.Id) != s_ghosts.end())
+    {
+        if (pActor && !pActor->IsDisabled() && !IsProcessExiting())
+        {
+            pActor->Disable();
+            spdlog::info("Ghost: reference {:X} loaded after its stand-in; disabled", formIdComponent.Id);
+        }
         return;
+    }
 
     if (auto* pRemoteComponent = m_world.try_get<RemoteComponent>(aEntity); pRemoteComponent)
     {
@@ -1737,6 +1776,10 @@ ActorData CharacterService::BuildActorData(Actor* apActor) const noexcept
     return actorData;
 }
 
+// TEMPORARY (2026-09-20): when this side last told the server where its actors are. The world probe prints its age,
+// to see whether a player in a menu or a loading screen goes silent for the 3 s after which the server hands their
+// actors away.
+static std::chrono::steady_clock::time_point s_lastMoveSentAt;
 void CharacterService::RunLocalUpdates() const noexcept
 {
     // The local player is sent at ~30 Hz for smooth VR head and hand movement, other actors at 10 Hz.
@@ -1773,7 +1816,15 @@ void CharacterService::RunLocalUpdates() const noexcept
     }
 
     if (fullSnapshot || !message.Updates.empty())
+    {
         m_transport.Send(message);
+        s_lastMoveSentAt = std::chrono::steady_clock::now();
+    }
+}
+
+std::chrono::steady_clock::time_point CharacterService::LastMoveSentAt() noexcept
+{
+    return s_lastMoveSentAt;
 }
 
 void CharacterService::RunRemoteUpdates() noexcept
@@ -1850,7 +1901,7 @@ void CharacterService::RunRemoteUpdates() noexcept
         // they only showed up after the owner switched. Apply the hands the same way a later equipment change does.
         // Players only: an NPC's server inventory can predate its AI drawing a weapon.
         if (pActor->GetExtension()->IsRemotePlayer())
-            InventoryService::ApplyHandEquipment(pActor, waitingFor3D.SpawnRequest.InventoryContent);
+            InventoryService::ApplyHandEquipment(pActor, waitingFor3D.SpawnRequest.InventoryContent, true);
         pActor->SetFactions(waitingFor3D.SpawnRequest.FactionsContent);
 
         if (!waitingFor3D.SpawnRequest.ActionsToReplay.Actions.empty())

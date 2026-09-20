@@ -102,6 +102,11 @@ private:
     ActorData BuildActorData(Actor* apActor) const noexcept;
 
     void RunLocalUpdates() const noexcept;
+
+public:
+    static std::chrono::steady_clock::time_point LastMoveSentAt() noexcept;
+
+private:
     void RunRemoteUpdates() noexcept;
     void RunFactionsUpdates() const noexcept;
     void RunSpawnUpdates() const noexcept;

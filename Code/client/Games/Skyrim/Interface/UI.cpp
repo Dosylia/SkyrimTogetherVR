@@ -250,8 +250,22 @@ void UIMessageQueue__AddMessage(void* a1, const BSFixedString* a2, UIMessage::UI
         // Only the one caller that opened the phantom at the main menu and at the end of every load (SkyrimVR 1.4.15
         // at +0x168507) is dropped. Other data-less shows are real: the level-up choice panel is one (from +0x8d8683,
         // the game fills it afterwards), and dropping it left the player stuck in the level-up menu (2026-09-20 07:58).
+        // +0x168507 turned out to be a shared helper: it also queued a real box 35 s after a level-up, and dropping that
+        // one crashed the game 92 ms later (2026-09-20 11:47). The phantom only ever appears while the main menu or a
+        // loading screen is up, so the drop is limited to those moments.
         const uintptr_t callerOffset = reinterpret_cast<uintptr_t>(_ReturnAddress()) - 0x140000000ull;
-        const bool phantom = a3 == UIMessage::kShow && a4 == nullptr && callerOffset == 0x168507ull;
+        bool loadingOrMainMenu = false;
+        if (UI* pUi = UI::Get())
+        {
+            for (uint32_t i = 0; i < pUi->menuStack.length; ++i)
+            {
+                IMenu* pMenu = pUi->menuStack[i];
+                const BSFixedString* pName = pMenu ? pUi->LookupMenuNameByInstance(pMenu) : nullptr;
+                if (pName && pName->AsAscii() && (strcmp(pName->AsAscii(), "Loading Menu") == 0 || strcmp(pName->AsAscii(), "Main Menu") == 0))
+                    loadingOrMainMenu = true;
+            }
+        }
+        const bool phantom = a3 == UIMessage::kShow && a4 == nullptr && callerOffset == 0x168507ull && loadingOrMainMenu;
         spdlog::info("UI message for MessageBoxMenu: type {}, data {}, text '{}', from {}{}", static_cast<int>(a3), a4 ? "yes" : "no", text, caller,
                      phantom ? "; dropped, the empty box that paused the world at load" : "");
         if (phantom)

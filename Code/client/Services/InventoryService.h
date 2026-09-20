@@ -56,7 +56,7 @@ struct InventoryService
     /**
      * Makes a remote actor's hand items (weapons, torches, spells) match an equipment snapshot.
      */
-    static void ApplyHandEquipment(Actor* apActor, const Inventory& acEquipment) noexcept;
+    static void ApplyHandEquipment(Actor* apActor, const Inventory& acEquipment, bool aArrival = false) noexcept;
 
 private:
     /**

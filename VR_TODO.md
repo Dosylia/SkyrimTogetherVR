@@ -100,6 +100,50 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       and cell). Test: run `STBot.exe scripts\stand.txt`, then walk through the Whiterun gate and back out. The
       copy must go when you are inside and come back when you are out. If it does not come back, the server
       log names the decision that withheld it.
+- [x] **[untested] Invisible attacker (2026-09-20 14:50).** A reference the owner drives but this game cannot find
+      (`Failed to retrieve Actor 10DE94`, a Novice Conjurer, five times while "something" attacked) was simply
+      not spawned. Now a copy of the owner's base stands in (`Stand-in: reference ...`), registered as a ghost;
+      if the local reference loads later it is disabled (`Ghost: reference ... loaded after its stand-in`).
+- [x] **[untested] Hand-off flips a creature's kind (troll on one side, wolf on the other, 14:50).** A client
+      refuses a hand-off for a reference that has a ghost here (`Hand-off ... declined`).
+- [ ] **Level-up and death end at the main menu, connected only (07:58, 11:46, 11:55, 14:42 x2, 15:08).** Solo
+      the level-up is fine (15:35 test): the attribute box closes from the level-up code itself
+      (`SkyrimVR.exe+0x8d93d2`) and play goes on. Connected, the box is closed by `SkyrimVR.exe+0xf207f7`
+      ("type 3, data yes") and a save load starts 6 ms later (Loading Menu, Mist Menu), which ends at the Main
+      Menu. The death case is the same: "respawning player" -> the box from `SkyrimVR.exe+0x168507` (the same
+      helper that shows one after every save load) -> closed by `0xf207f7` -> load -> Main Menu. So one game
+      routine at `0xf207f7` answers a message box with a save load whenever we are connected. Neither address is
+      in the address library and the exe on disk is Steam-encrypted, so it cannot be read offline.
+      `SaveLoad: load requested` (deployed 15:17, not yet hit) names the file and the caller at the next
+      occurrence; that is the missing piece. Candidates: the box runs unpaused when connected (UnfreezeMenu)
+      and gets `kUpdateUsesCursor`; both are ours.
+- [ ] **Distant dragon vanishes (15:03).** Read again with positions: the dragon hovered at (62387, 48916,
+      z 7287) while the player stood at (55309, 56470), about two cells away diagonally, on the edge of the
+      5x5 loaded grid. Both engines unloaded it at that edge (`Actor removed 2034EDC` / `3034EDC`), which is
+      the game, not the sync: no ownership rule can draw an actor the engine has unloaded. What the sync adds
+      is churn: each unload sends a transfer, the other side is told to take it while it is unloaded there too
+      (`Actor for ownership transfer not found`), the server destroys the entity and the next load registers
+      it under a new id (200087 -> 300087), and the party leader claims it back each time. A rule to keep the
+      last owner would only cut the churn, not the vanish, so nothing was changed. Worth a solo check: does a
+      dragon circling that far away pop out the same way without the mod.
+- [ ] **Paused player goes silent (11:51).** Not confirmed. The world probe keeps running while the pause
+      counter is 1 (02:05 and 15:35 logs), the local update sender has no pause gate, and connected menus run
+      unpaused anyway, so a player in a menu should keep sending. Every hand-off seen on 2026-09-20 afternoon
+      happened with the pause counter at 0 (range hand-offs), except one on Seen's side in the Journal Menu
+      (14:58:45 -> 14:58:48). A loading screen is the one time nothing is sent. The probe line now ends with
+      `last move sent N ms ago`; a value over 3000 on a paused player would confirm the silence. Also needed:
+      the server log from the host (`Handoff: ... silent` vs `out of its range`), which lives in the host's
+      Server folder.
+- [x] **[untested] Empty hands at spawn ("spawn weapon not displayed", "we always spawn with empty hands").**
+      The copy's hands were compared by the container's worn flags, and SetInventory sets those (it equips worn
+      entries before the copy has its 3D), so every arrival logged "1 hand items wanted, 1 held now" and skipped
+      the equip; the weapon only showed once the owner re-equipped it and a real equip event arrived. The client
+      now keeps its own record of what it put in each copy's hands (empty on arrival) and equips from that
+      (`hands on arrival: ... put there by us`). Real equip events update the record. Spells unchanged.
+- [ ] **Quest dialogue heard twice (15:05).** Upstream syncs the other player's dialogue lines and subtitles; with
+      both in the same conversation each hears both. Decide: only the speaker's own conversation.
+- [ ] **Grey hills (15:01).** Missing distant terrain textures; a screenshot exists. Likely the game's LOD stream
+      under memory pressure, not sync. Check once with the game alone.
 - [ ] **Pause menu: "weird things happen to both players".** No trace in either log. Needs a description.
 - [ ] **Nocked arrow not shown** on the other player's bow (the arrow leaves fine). The nocked arrow is an
       animation attachment and VR players never play the draw animation.
