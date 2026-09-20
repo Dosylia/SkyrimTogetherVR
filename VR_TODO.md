@@ -62,9 +62,17 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       instead was tried on 2026-09-18 and gave each player private bandits; never again. What remains is
       ownership: the bear the friend was fighting vanished when the host walked out of range and dropped it
       (see the ownership rework below). Levels differ between variants; cosmetic.
-- [ ] **Sliding instead of walking.** `AnimDiag` readings from 2026-09-18 were polluted by a respawn loop (Lydia
-      removed and re-assigned 11 times a second, fixed in `DiscoveryService`: remote actors get the grace period
-      unless their 3D is gone). `AnimDiag busiest actors` now names loops. Re-read after the next session.
+- [x] **[untested] Sliding instead of walking: wrong function skipped on VR.** `MotionDiag` settled it on 2026-09-20:
+      every moving remote NPC copy on the receiving side had bones that never changed (201 of 201 samples at
+      07:58), so the animation graph was not advancing. Cause: the remote-actor skip (`HookActorProcess`) hooks
+      SE id 37356, the actor's AI step; TiltedEvolutionVR's VR table mapped that id to `0x5e0e20`, which the
+      public VR database identifies as SE 36365, the actor's whole per-frame update. Skipping it froze the graph.
+      The override now points at `0x6226a0`, the database's address for 37356 (it sits 0x40 after 37354 exactly
+      as in SE). Watch for: remote NPC copies fighting their network position (AI now runs on them locally, as
+      on SE upstream where the interpolation wins), and ragdolls of remote corpses.
+- [x] **Stuck in the level-up menu (2026-09-20 07:58).** The empty-box drop caught the VR level-up choice panel,
+      which the game opens data-less and fills afterwards. The drop is now limited to the one caller of the load
+      phantom (`SkyrimVR.exe+0x168507`).
 - [ ] **NPC under the ground for one player only** (Durak, a rabbit). `SinkDiag` measures how far the game moves a
       remote actor down between placements; it only ever named an Ice Wraith at a wolf's ground position. Next
       diagnostic: read the havok capsule with TiltedEvolutionVR's VR offsets (`aaf5d83`: controller at

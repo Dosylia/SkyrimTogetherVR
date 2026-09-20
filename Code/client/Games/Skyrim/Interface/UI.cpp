@@ -163,9 +163,13 @@ static void* (*UI_AddToActiveQueue)(UI*, IMenu*, void*);
 
 static void* UI_AddToActiveQueue_Hook(UI* apSelf, IMenu* apMenu, void* apFoundItem /*In reality a reference*/)
 {
-    // TEMPORARY (2026-09-20): every menu the game queues, connected or not, for the frozen-world timeline.
+    // TEMPORARY (2026-09-20): every menu the game queues, connected or not, for the frozen-world timeline. The VR
+    // HUD widgets (WS*) are queued every frame and are left out.
     if (apMenu)
     {
+        const BSFixedString* pQueuedName = apSelf->LookupMenuNameByInstance(apMenu);
+        if (pQueuedName && pQueuedName->AsAscii() && strncmp(pQueuedName->AsAscii(), "WS", 2) == 0)
+            return UI_AddToActiveQueue(apSelf, apMenu, apFoundItem);
         const BSFixedString* pName = apSelf->LookupMenuNameByInstance(apMenu);
         spdlog::info("Menu queued: {}{} (connected {})", pName ? pName->AsAscii() : "?", apMenu->PausesGame() ? " [pauses]" : "", World::Get().GetTransport().IsConnected() ? "yes" : "no");
         if (pName && strcmp(pName->AsAscii(), "MessageBoxMenu") == 0)
@@ -243,10 +247,14 @@ void UIMessageQueue__AddMessage(void* a1, const BSFixedString* a2, UIMessage::UI
                 text = PrintableTextAt(*reinterpret_cast<const char* const*>(pBody));
         }
 
-        const bool empty = a3 == UIMessage::kShow && a4 == nullptr;
+        // Only the one caller that opened the phantom at the main menu and at the end of every load (SkyrimVR 1.4.15
+        // at +0x168507) is dropped. Other data-less shows are real: the level-up choice panel is one (from +0x8d8683,
+        // the game fills it afterwards), and dropping it left the player stuck in the level-up menu (2026-09-20 07:58).
+        const uintptr_t callerOffset = reinterpret_cast<uintptr_t>(_ReturnAddress()) - 0x140000000ull;
+        const bool phantom = a3 == UIMessage::kShow && a4 == nullptr && callerOffset == 0x168507ull;
         spdlog::info("UI message for MessageBoxMenu: type {}, data {}, text '{}', from {}{}", static_cast<int>(a3), a4 ? "yes" : "no", text, caller,
-                     empty ? "; dropped, a box with no content can only pause the world" : "");
-        if (empty)
+                     phantom ? "; dropped, the empty box that paused the world at load" : "");
+        if (phantom)
             return;
     }
     UIMessageQueue__AddMessage_Real(a1, a2, a3, a4);

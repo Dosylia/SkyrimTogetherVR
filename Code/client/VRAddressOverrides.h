@@ -102,7 +102,11 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 36741u, 0x0604f30u }, // SE 36741 Actor::GetDetectionState, unchecked (from TiltedEvolutionVR)
     { 37147u, 0x05d5120u }, // SE 36174 animation helper, unchecked (from TiltedEvolutionVR)
     { 37175u, 0x05d63a0u }, // SE 36196 Character dtor, unchecked (from TiltedEvolutionVR)
-    { 37356u, 0x05e0e20u }, // SE 36365 Actor process (AI) update, unchecked (from TiltedEvolutionVR)
+    // Upstream skips SE 37356 (0x619ab0) for remote actors: their AI. TiltedEvolutionVR mapped it to SE 36365's VR
+    // address (0x5e0e20), the actor's whole per-frame update, so on VR a remote actor's animation graph never
+    // advanced: every moving NPC copy slid with frozen bones (MotionDiag, 2026-09-19/20). 0x6226a0 is the VR
+    // address the public database gives for 37356, and it sits 0x40 after 37354 exactly as in SE.
+    { 37356u, 0x06226a0u }, // SE 37356 Actor::Process (AI), from the VR address database
     { 37511u, 0x05ee4f0u }, // SE 36511 TESObjectREFR::PayGoldToContainer, unchecked
     { 37521u, 0x05eeca0u }, // SE 36521 Actor::PickUpObject, unchecked (from TiltedEvolutionVR)
     { 37542u, 0x05f0e20u }, // SE 36541 Actor speak sound, checked (from TiltedEvolutionVR)
