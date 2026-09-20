@@ -6,11 +6,13 @@
 
 using TiltedPhoques::Buffer;
 
-//! Upper-body pose of a VR player, synced alongside Movement.
+//! Pose of a VR player, synced alongside Movement: the upper body always, the legs when trackers drive them.
 //!
 //! Each bone rotation is relative to the actor's 3D root, read from the skeleton VRIK drives. The
 //! receiver applies the same rotations, so no headset or controller calibration is needed.
-//! HasData is false (and nothing else is written) for non-VR actors.
+//! HasData is false (and nothing else is written) for non-VR actors. HasLegs is true only for a player
+//! whose hips and feet are driven by body trackers (SkyrimVR FBT); everyone else leaves the legs to the
+//! walk animation on both sides, and the receiver needs nothing installed to show tracked legs.
 struct VRPose
 {
     //! Bone order is parent-before-child; see VRBodySync.cpp for the node names.
@@ -28,6 +30,15 @@ struct VRPose
         kRightUpperArm,
         kRightForearm,
         kRightHand,
+        kUpperBoneCount,
+        // Lower body, present only when HasLegs.
+        kPelvis = kUpperBoneCount,
+        kLeftThigh,
+        kLeftCalf,
+        kLeftFoot,
+        kRightThigh,
+        kRightCalf,
+        kRightFoot,
         kBoneCount
     };
 
@@ -41,5 +52,6 @@ struct VRPose
     void Deserialize(Buffer::Reader& aReader) noexcept;
 
     bool HasData{false};
+    bool HasLegs{false}; // the entries from kPelvis on are valid
     std::array<Quaternion_NetQuantize, kBoneCount> Bones{};
 };

@@ -136,7 +136,7 @@ disassembly when a crash points near one.
 | 36741 | `0x604f30` | Actor::GetDetectionState | 36741 |
 | 36174 | `0x5d5120` | animation helper | 37147 |
 | 36196 | `0x5d63a0` | Character dtor | 37175 |
-| 36365 | `0x5e0e20` | Actor process (AI) update | 37356 |
+| 36365 | `0x6226a0` | Actor::Process, the AI step skipped for remote actors (public database; 0x5e0e20 was the whole actor update and froze animations, 2026-09-20) | 37356 |
 | 36511 | `0x5ee4f0` | TESObjectREFR::PayGoldToContainer | 37511 |
 | 36521 | `0x5eeca0` | Actor::PickUpObject | 37521 |
 | 36575 | `0x5f5280` | Actor::IsFleeing | 37577 |

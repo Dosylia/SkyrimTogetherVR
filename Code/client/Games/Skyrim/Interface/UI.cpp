@@ -266,8 +266,34 @@ void UIMessageQueue__AddMessage(void* a1, const BSFixedString* a2, UIMessage::UI
             }
         }
         const bool phantom = a3 == UIMessage::kShow && a4 == nullptr && callerOffset == 0x168507ull && loadingOrMainMenu;
-        spdlog::info("UI message for MessageBoxMenu: type {}, data {}, text '{}', from {}{}", static_cast<int>(a3), a4 ? "yes" : "no", text, caller,
-                     phantom ? "; dropped, the empty box that paused the world at load" : "");
+        // TEMPORARY (2026-09-20): the direct caller sits in generic UI code (+0xf207f7 is in the UIMessageQueue region,
+        // +0x168507 in a shared TES helper), so the frames above it are what name the feature that closes the level-up
+        // box with a save load while connected, and the one that shows the box after a respawn. The data's first
+        // words are printed too: a vtable pointer there identifies the message data or callback type.
+        std::string frames;
+        {
+            void* stack[12] = {};
+            const USHORT count = RtlCaptureStackBackTrace(1, 12, stack, nullptr);
+            for (USHORT i = 0; i < count; ++i)
+            {
+                char frame[160];
+                DescribeCaller(stack[i], frame, sizeof(frame));
+                frames += fmt::format("{}{}", i == 0 ? "" : " < ", frame);
+            }
+        }
+        std::string dataWords;
+        if (a4 && ReadableBytes(a4, 32))
+        {
+            const uint64_t* pWords = static_cast<const uint64_t*>(a4);
+            for (int i = 0; i < 4; ++i)
+            {
+                char word[160];
+                DescribeCaller(reinterpret_cast<void*>(static_cast<uintptr_t>(pWords[i])), word, sizeof(word));
+                dataWords += fmt::format("{}{}", i == 0 ? "" : ", ", word);
+            }
+        }
+        spdlog::info("UI message for MessageBoxMenu: type {}, data {}, text '{}', from {}{}; stack [{}]; data words [{}]", static_cast<int>(a3), a4 ? "yes" : "no", text, caller,
+                     phantom ? "; dropped, the empty box that paused the world at load" : "", frames, dataWords);
         if (phantom)
             return;
     }

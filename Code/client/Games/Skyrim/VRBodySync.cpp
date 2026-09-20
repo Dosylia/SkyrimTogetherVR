@@ -14,6 +14,8 @@
 
 #include <mutex>
 #include <shared_mutex>
+#include <tlhelp32.h>
+#include <cwctype>
 #include <unordered_map>
 #include <vector>
 
@@ -52,10 +54,13 @@ constexpr std::array<const char*, VRPose::kBoneCount> kBoneNames{
     "NPC Spine1 [Spn1]",   "NPC Spine2 [Spn2]",   "NPC Neck [Neck]",       "NPC Head [Head]",
     "NPC L Clavicle [LClv]", "NPC L UpperArm [LUar]", "NPC L Forearm [LLar]", "NPC L Hand [LHnd]",
     "NPC R Clavicle [RClv]", "NPC R UpperArm [RUar]", "NPC R Forearm [RLar]", "NPC R Hand [RHnd]",
+    // Lower body (VRPose::HasLegs). The pelvis hangs off NPC COM, beside the spine, so it is searched from the root.
+    "NPC Pelvis [Pelv]",   "NPC L Thigh [LThg]",  "NPC L Calf [LClf]",     "NPC L Foot [Lft ]",
+    "NPC R Thigh [RThg]",  "NPC R Calf [RClf]",   "NPC R Foot [Rft ]",
 };
 
 // Parent bone index for each entry of kBoneNames (-1: searched under "NPC Root [Root]").
-constexpr std::array<int8_t, VRPose::kBoneCount> kBoneParents{-1, 0, 1, 2, 1, 4, 5, 6, 1, 8, 9, 10};
+constexpr std::array<int8_t, VRPose::kBoneCount> kBoneParents{-1, 0, 1, 2, 1, 4, 5, 6, 1, 8, 9, 10, -1, 12, 13, 14, 12, 16, 17};
 
 using BoneNodes = std::array<void*, VRPose::kBoneCount>;
 
@@ -151,7 +156,8 @@ void* FindByRtti(void* apStart, const char* acpRttiName, uint32_t aDepth = 0) no
     return nullptr;
 }
 
-bool FindBones(void* apRoot, BoneNodes& aNodes) noexcept
+// The upper body is required; the legs are optional (a skeleton without them is posed above the waist only).
+bool FindBones(void* apRoot, BoneNodes& aNodes, bool* apLegsFound = nullptr) noexcept
 {
     aNodes.fill(nullptr);
 
@@ -159,15 +165,71 @@ bool FindBones(void* apRoot, BoneNodes& aNodes) noexcept
     if (!pSkeletonRoot)
         pSkeletonRoot = apRoot;
 
+    bool legsFound = true;
     // Each bone is searched inside the bone found for its parent, so only the real chain matches.
     for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
     {
         void* pSearchFrom = kBoneParents[i] < 0 ? pSkeletonRoot : aNodes[kBoneParents[i]];
-        aNodes[i] = FindShallowest(pSearchFrom, kBoneNames[i]);
-        if (!aNodes[i])
+        aNodes[i] = pSearchFrom ? FindShallowest(pSearchFrom, kBoneNames[i]) : nullptr;
+        if (aNodes[i])
+            continue;
+        if (i < VRPose::kUpperBoneCount)
             return false;
+        legsFound = false;
     }
+    if (apLegsFound)
+        *apLegsFound = legsFound;
     return true;
+}
+
+// SkyrimVR FBT (Nexus 185070) drives the hips and feet from SteamVR body trackers through its SKSE plugin. The legs
+// are only sent while that plugin is loaded here: without it they follow the walk animation on both sides anyway,
+// and sending them would pin the other side's copy to this side's animation frame. The plugin is SkyrimVR-FBT.dll
+// (1.0.3, checked 2026-09-20); "fbt" or "fullbody" anywhere in a module name also counts, and the match is logged.
+bool FullBodyTrackingActive() noexcept
+{
+    static std::chrono::steady_clock::time_point s_nextCheck;
+    static bool s_active = false;
+    static std::string s_module;
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_nextCheck)
+        return s_active;
+    s_nextCheck = now + std::chrono::seconds(5);
+
+    bool active = false;
+    std::string matched;
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
+    if (hSnapshot != INVALID_HANDLE_VALUE)
+    {
+        MODULEENTRY32W entry{};
+        entry.dwSize = sizeof(entry);
+        for (BOOL ok = Module32FirstW(hSnapshot, &entry); ok && !active; ok = Module32NextW(hSnapshot, &entry))
+        {
+            std::string name;
+            for (const wchar_t* p = entry.szModule; *p; ++p)
+                name += *p < 128 ? static_cast<char>(std::towlower(*p)) : '?';
+            if (name.rfind("skyrimtogether", 0) == 0)
+                continue;
+            if (name.find("fbt") != std::string::npos || name.find("fullbody") != std::string::npos)
+            {
+                active = true;
+                matched = name;
+            }
+        }
+        CloseHandle(hSnapshot);
+    }
+
+    if (active != s_active)
+    {
+        if (active)
+            spdlog::info("VRBodySync: full body tracking plugin '{}' is loaded, the legs are sent with the pose", matched);
+        else
+            spdlog::info("VRBodySync: full body tracking plugin '{}' is gone, the legs are no longer sent", s_module);
+    }
+    s_active = active;
+    if (active)
+        s_module = matched;
+    return active;
 }
 
 // NiMatrix3 is row-major (data[row][col]), glm is column-major.
@@ -205,6 +267,7 @@ NiPoint3 FromGlm(const glm::vec3& acPoint) noexcept
 
 struct RemotePose
 {
+    bool HasLegs = false;
     std::array<glm::quat, VRPose::kBoneCount> Bones{};
 };
 
@@ -423,6 +486,8 @@ bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
     for (uint32_t bone = 0; bone < VRPose::kBoneCount; ++bone)
     {
         aRig.Bones[bone] = MakeRigBone(nodes[bone], entryFor(nodes[bone]));
+        if (!nodes[bone])
+            continue; // a leg bone this skeleton lacks; never posed
 
         // Nodes hung below the bone (weapon, shield, magic node, the next bones)...
         std::vector<RigBone>& descendants = aRig.Descendants[bone];
@@ -547,6 +612,11 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose) noexcept
     for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
     {
         const RigBone& bone = acRig.Bones[i];
+        // Legs only when the sender's trackers drive them; otherwise the walk animation keeps them.
+        if (i >= VRPose::kUpperBoneCount && !acPose.HasLegs)
+            continue;
+        if (!bone.pNode && !bone.pEntry)
+            continue;
         const NiTransform current = bone.World();
         const glm::mat3 currentRotation = ToGlm(current.rotate);
         const glm::mat3 wantedRotation = rootRotation * glm::mat3_cast(acPose.Bones[i]);
@@ -649,17 +719,21 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
         return false;
 
     BoneNodes nodes;
-    if (!FindBones(pRoot, nodes))
+    bool legsFound = false;
+    if (!FindBones(pRoot, nodes, &legsFound))
         return false;
+    const bool cLegs = legsFound && FullBodyTrackingActive();
 
     const glm::mat3 inverseRoot = glm::transpose(ToGlm(At<NiTransform>(pRoot, kWorldOffset).rotate));
 
-    for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
+    const uint32_t boneCount = cLegs ? VRPose::kBoneCount : VRPose::kUpperBoneCount;
+    for (uint32_t i = 0; i < boneCount; ++i)
     {
         const glm::mat3 boneWorld = ToGlm(At<NiTransform>(nodes[i], kWorldOffset).rotate);
         aOutPose.Bones[i] = glm::normalize(glm::quat_cast(inverseRoot * boneWorld));
     }
 
+    aOutPose.HasLegs = cLegs;
     aOutPose.HasData = true;
     return true;
 }
@@ -691,7 +765,8 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
     }
 
     RemotePose pose;
-    for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
+    pose.HasLegs = acPose.HasLegs;
+    for (uint32_t i = 0; i < (acPose.HasLegs ? VRPose::kBoneCount : VRPose::kUpperBoneCount); ++i)
         pose.Bones[i] = acPose.Bones[i];
 
     std::unique_lock lock(s_posesLock);

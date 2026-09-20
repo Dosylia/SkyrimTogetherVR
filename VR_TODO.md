@@ -116,7 +116,27 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       in the address library and the exe on disk is Steam-encrypted, so it cannot be read offline.
       `SaveLoad: load requested` (deployed 15:17, not yet hit) names the file and the caller at the next
       occurrence; that is the missing piece. Candidates: the box runs unpaused when connected (UnfreezeMenu)
-      and gets `kUpdateUsesCursor`; both are ours.
+      and gets `kUpdateUsesCursor`; both are ours. Since 16:17 every MessageBoxMenu message also logs the
+      12 frames above the caller (`stack [...]`) and the first four words of the message data (`data words`):
+      +0xf207f7 lies in the UIMessageQueue region (between ids 80061 and 80077) and +0x168507 in the TES helper
+      `sub_1401575D0` (id 13213), both generic, so the frames above them name the feature. A one-off read of
+      the two code regions from the running game (no debugger; scratch script `dump_live.py`) can be
+      disassembled with capstone once the game sits at the main menu; the exe on disk is Steam-encrypted.
+      Friend's reading (2026-09-20): the caller is a 0xC1-byte function, SE 0x140EC3C80 = VR 0xF20750 (RET at
+      VR 0xF20810), whose last call is AddMessage at VR 0xF207F2. Too small to be the feature: a send-message
+      wrapper; its callers (xrefs) are the next thing to read. Timing says the "load" is a quit to the main
+      menu, not a save load: hide -> Mist Menu -> Main Menu took 1.2 s at 14:42 (twice) and 15:08, 31 s once
+      at 11:46. Same shape as the game's own "return to main menu" (Loading, Mist, Fader, LoadWaitSpinner, HUD,
+      the TES box, Main Menu).
+      Seenfront's second reading (17:21): a queued request of type 0xD0000010, built by the constructor at
+      SkyrimVR+0x594D80, can reach the hide through 5910D0 -> 5924A0 -> 584910 -> 591E80 -> 168160 -> F1BF10 ->
+      F1D0E0 -> F20750 -> AddMessage (return RVAs to look for in the hide's stack, inner to outer: F207F7,
+      F1D1D8, F1BF61, 168242, 591F69, 584A58, 592763, 591390). Two producers build it: the save-warning dialog
+      callback at +0x595B60 (response 1 queues it, calling the constructor from +0x595BCF) and another result
+      handler (from +0x591964). Also +0x168507 belongs to FUN_140168160, not to the function at +0x168020. The
+      client now logs the constructor (`SaveLoad: request built`, with caller, stack, raw arguments and the
+      object's first words) and the callback's response byte (`SaveLoad: warning callback`). A mechanism is
+      verified, its involvement is not; the runtime stacks decide.
 - [ ] **Distant dragon vanishes (15:03).** Read again with positions: the dragon hovered at (62387, 48916,
       z 7287) while the player stood at (55309, 56470), about two cells away diagonally, on the edge of the
       5x5 loaded grid. Both engines unloaded it at that edge (`Actor removed 2034EDC` / `3034EDC`), which is
@@ -140,6 +160,16 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       the equip; the weapon only showed once the owner re-equipped it and a real equip event arrived. The client
       now keeps its own record of what it put in each copy's hands (empty on arrival) and equips from that
       (`hands on arrival: ... put there by us`). Real equip events update the record. Spells unchanged.
+- [x] **[untested] Full body tracking (SkyrimVR FBT, Nexus 185070) shown to the other player.** The pose now
+      carries seven lower-body bones (pelvis, thighs, calves, feet) behind a HasLegs bit. They are captured only
+      while the FBT plugin is loaded on the sender (module name containing "fbt" or "fullbody", logged as
+      `VRBodySync: full body tracking plugin ... is loaded`); everyone else sends the upper body as before and the
+      copy's legs stay on the walk animation. The receiver needs nothing installed. Rotations only: a crouch that
+      lowers the pelvis shows as bent legs on a body that does not sink. Encoding change, so client and server
+      both change. Not tested: nobody here has trackers yet. The plugin is `SkyrimVR-FBT.dll` (1.0.3 download
+      checked). Its fbt.ini also moves the pelvis (WaistMode 1, position + rotation) and bends the lower spine
+      (SpineBridge); neither position is sent, so a tracked crouch shows as bent legs on a body that does not
+      sink. The mod's kick damage on an NPC the other player owns is a separate test.
 - [ ] **Quest dialogue heard twice (15:05).** Upstream syncs the other player's dialogue lines and subtitles; with
       both in the same conversation each hears both. Decide: only the speaker's own conversation.
 - [ ] **Grey hills (15:01).** Missing distant terrain textures; a screenshot exists. Likely the game's LOD stream

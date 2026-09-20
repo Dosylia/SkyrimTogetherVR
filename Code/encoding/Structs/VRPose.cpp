@@ -1,4 +1,5 @@
 #include <Structs/VRPose.h>
+#include <algorithm>
 
 bool VRPose::operator==(const VRPose& acRhs) const noexcept
 {
@@ -8,7 +9,10 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
     if (!HasData)
         return true;
 
-    return Bones == acRhs.Bones;
+    if (HasLegs != acRhs.HasLegs)
+        return false;
+    const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
+    return std::equal(Bones.begin(), Bones.begin() + count, acRhs.Bones.begin());
 }
 
 bool VRPose::operator!=(const VRPose& acRhs) const noexcept
@@ -23,8 +27,10 @@ void VRPose::Serialize(TiltedPhoques::Buffer::Writer& aWriter) const noexcept
     if (!HasData)
         return;
 
-    for (const auto& bone : Bones)
-        bone.Serialize(aWriter);
+    aWriter.WriteBits(HasLegs ? 1 : 0, 1);
+    const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
+    for (size_t i = 0; i < count; ++i)
+        Bones[i].Serialize(aWriter);
 }
 
 void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
@@ -36,6 +42,10 @@ void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
     if (!HasData)
         return;
 
-    for (auto& bone : Bones)
-        bone.Deserialize(aReader);
+    uint64_t hasLegs = 0;
+    aReader.ReadBits(hasLegs, 1);
+    HasLegs = hasLegs != 0;
+    const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
+    for (size_t i = 0; i < count; ++i)
+        Bones[i].Deserialize(aReader);
 }

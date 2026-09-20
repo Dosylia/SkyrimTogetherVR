@@ -125,6 +125,7 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     // out of sync.
     auto& vrPose = aInterpolationComponent.InterpolatedVRPose;
     vrPose.HasData = false;
+    vrPose.HasLegs = false;
     {
         const uint64_t poseTick = aPoseTick ? aPoseTick : aTick;
         const InterpolationComponent::TimePoint* pBefore = nullptr;
@@ -153,7 +154,10 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
                 poseDelta = TiltedPhoques::Min(static_cast<float>(poseTick - TiltedPhoques::Min(poseTick, pBefore->Tick)) / static_cast<float>(pAfter->Tick - pBefore->Tick), 1.0f);
 
             vrPose.HasData = true;
-            for (size_t i = 0; i < VRPose::kBoneCount; ++i)
+            // Legs only between two points that both carry them (the sender's trackers can come and go).
+            vrPose.HasLegs = pBefore->VRPoseData.HasLegs && pAfter->VRPoseData.HasLegs;
+            const size_t boneCount = vrPose.HasLegs ? VRPose::kBoneCount : VRPose::kUpperBoneCount;
+            for (size_t i = 0; i < boneCount; ++i)
                 vrPose.Bones[i] = glm::slerp(static_cast<glm::quat>(pBefore->VRPoseData.Bones[i]), static_cast<glm::quat>(pAfter->VRPoseData.Bones[i]), poseDelta);
         }
     }

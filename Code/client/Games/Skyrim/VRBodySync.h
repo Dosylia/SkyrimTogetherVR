@@ -5,7 +5,8 @@
 struct Actor;
 struct PlayerCharacter;
 
-//! Syncs the upper-body pose of VR players (spine, head, arms, hands).
+//! Syncs the pose of VR players: spine, head, arms and hands always; hips, thighs, calves and feet when the
+//! sender runs a body-tracking plugin (SkyrimVR FBT). The receiver needs nothing installed for either.
 //!
 //! Local side: reads the root-relative bone rotations of the player's skeleton (driven by VRIK from
 //! the headset and controllers). Remote side: once per frame, at the renderer's frame end, the remote
