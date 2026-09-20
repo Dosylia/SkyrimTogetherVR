@@ -19,13 +19,8 @@ and pdb from there. Both players run `collect-logs.bat` after each session and n
 hand; spell casting and the held spell in the hands; arrows seen leaving the other player's bow; Lydia follows,
 fights, and attacks the other player; sync of same-kind levelled bandits.
 
-- [ ] **VR menu tab (in-headset menu) is still blank for the host. Priority: a menu that exists must work.**
-      The friend's tab rendered (`100% of the page has content`, 20:38); the host's reported `0%` on every open
-      (20:40, 20:42, 20:56, old build) and was not opened once in the session that carried the fix. The fix holds
-      `enterGame`/`activate` until the page has loaded (`OverlayService::PushUiState`); CEF dropped them before,
-      so the page stayed on its start-up view. Next session: open the tab on the host, then read
-      `VRDashboard: 2 s after opening` and `logs\dashboard_frame.bmp`. If still blank with the page loaded, the
-      page is not the problem and the upload is.
+- [x] **VR menu tab (in-headset menu) blank for the host.** Fixed by holding `enterGame`/`activate` until the
+      page has loaded (`OverlayService::PushUiState`); confirmed working by the host on 2026-09-20.
 - [x] **Skills and level up screens black** while connected. The cause was the unpaused-menu patch itself:
       it worked in solo (hook inactive) and never while connected. On VR `StatsMenu` is out of the unpause
       allow-list and pauses like vanilla. Confirmed 2026-09-18. The other player sees you standing still in there.
@@ -73,12 +68,19 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
 - [x] **Stuck in the level-up menu (2026-09-20 07:58).** The empty-box drop caught the VR level-up choice panel,
       which the game opens data-less and fills afterwards. The drop is now limited to the one caller of the load
       phantom (`SkyrimVR.exe+0x168507`).
-- [ ] **NPC under the ground for one player only** (Durak, a rabbit). `SinkDiag` measures how far the game moves a
-      remote actor down between placements; it only ever named an Ice Wraith at a wolf's ground position. Next
-      diagnostic: read the havok capsule with TiltedEvolutionVR's VR offsets (`aaf5d83`: controller at
-      `MiddleProcess+0x250`, `+0x360` bhkRigidBody, `+0x10` hkpRigidBody, position `+0x1A0`, filter `+0x4C`).
+- [ ] **NPC under the ground for one player only** (Durak, a rabbit; last seen 2026-09-19). Not seen since, and
+      nothing was changed for it on purpose. Two changes since then could have taken it away by accident: the AI
+      step fix (remote actors' animation graphs advance again, so their ground snap runs) and the health clamp on
+      player copies. `SinkDiag` stays in; if it names nothing for another two sessions, close this. The havok
+      capsule read (TiltedEvolutionVR `aaf5d83`: controller at `MiddleProcess+0x250`, `+0x360` bhkRigidBody,
+      `+0x10` hkpRigidBody, position `+0x1A0`, filter `+0x4C`) is only worth doing if it comes back.
 - [ ] **Dropped items not visible** to the other player. Sender logs `drop: true`, receiver logs
-      `Remote actor ... drops item`. Check both on the next drop.
+      `Remote actor ... drops item`. Check both on the next drop. Reported with it (2026-09-20): when he drops
+      something, his copy's body stays in place but "all his bones try to violently leave it". That is the VR
+      pose fighting an animation: the drop plays a throw or ragdoll-style animation on the copy while the
+      pose keeps writing the sender's bone rotations over it, so every bone jerks between the two each frame.
+      Worth checking against `VRBodySync` whether the copy is in a hit, ragdoll or "drop" animation state during
+      those frames and skipping the pose then, as it already does for dead and bleeding-out bodies.
 - [x] **World frozen at load (2026-09-20, 01:34 to 02:36).** Music on, nothing moving, still rendering, no menu
       visible. Not the connection, the bot or the copy fix: a probe of the game's pause counter and menu stack showed
       a `MessageBoxMenu` with the pause flag sitting in the stack from the end of every save load (and one at the
@@ -174,7 +176,6 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       both in the same conversation each hears both. Decide: only the speaker's own conversation.
 - [ ] **Grey hills (15:01).** Missing distant terrain textures; a screenshot exists. Likely the game's LOD stream
       under memory pressure, not sync. Check once with the game alone.
-- [ ] **Pause menu: "weird things happen to both players".** No trace in either log. Needs a description.
 - [ ] **Nocked arrow not shown** on the other player's bow (the arrow leaves fine). The nocked arrow is an
       animation attachment and VR players never play the draw animation.
 - [x] **[untested] Bandits naked.** `Actor::IsWearingBodyPiece` answers from the container entries on VR (a worn
@@ -328,10 +329,13 @@ What we know:
 
 ### 2.3 VR body
 
-- [ ] **Finger and grip pose.** Remote hands are always open. Add finger curl (a few bytes per hand)
-      to `VRPose`.
-- [x] **Spell casting in the hands** confirmed 2026-09-18. **Bow:** arrows leave the bow, the nocked arrow and
-      the draw are not shown (no draw animation on VR players); see section 0.
+- [x] **[untested] Finger and grip pose.** Since 2026-09-20 the pose carries the 30 finger bones (five fingers of
+      three bones per hand) as rotations relative to the parent bone, sent only when they change or once a second
+      (HasFingers); the receiver keeps the last set and writes them below the posed hand. Finger bones are
+      flattened (no node), so they are found by shape in the flat bone array: a chain of three entries under the
+      hand, five per hand, in array order. Both sides log whether that shape was found (`local finger bones
+      found` / `finger bones not found by shape`). If a skeleton mod hangs other three-deep chains off the hand,
+      the search gives up and the hands stay on the animation. Encoding change: client and server.
 - [ ] **Legs when moving.** Check that smooth locomotion plays a walk or run on the remote copy,
       rather than sliding.
 - [ ] **Player height and scale** differences between VR players.
@@ -355,9 +359,9 @@ What we know:
 
 ## 3. Stability
 
-- [ ] **14 VR addresses still missing** (`VR_POINTERS_TODO.md` sections 1-3), mostly byte patches.
-    - Work through them in batches, ordered by the features above; each batch is one session.
-    - Method: size-sequence alignment, then check the code in `code.bin` with capstone.
+- [ ] **Missing VR addresses that matter** (`VR_POINTERS_TODO.md` section 2): five left after the placeholders
+      and no-ops were struck on 2026-09-20. Only two gate anything a player sees (the combat target hook and the
+      naked-NPC fix, which has a workaround). Do one when a bug points at it, not as a batch.
 - [ ] **About 100 addresses never confirmed against VR code** (`VR_POINTERS_TODO.md` section 5). Most
       were matched independently by two methods; confirm them in the disassembly when a crash points near one.
 - [ ] **CEF crash guard audit.** Before the VR menu is created, any overlay call is a hard crash. Check
@@ -434,7 +438,16 @@ the headset off.
 
 ## 5. Polish
 
-- [ ] Remote player name above the head, or at least a HUD message with the name when near.
+- [ ] **Friend's name above their head, using the game's own enemy meter.** Decided 2026-09-20: no floating label
+      of our own and no menu switch; the world-space health bar with the name that NPCs get (WSEnemyMeters,
+      built into Skyrim VR) is shown for the other player's copy while they are near. Unknown: which message
+      tells the meter whom to show and which game function sends it on a hit. Since 2026-09-20 18:33 the client
+      logs every message to WSEnemyMeters and every non-update HUD Menu message (`MeterProbe: ...`, with the
+      data's first words and the caller stack). Next session: hit one enemy, look at the meter, send the log.
+      Then: call that function for the copy and keep it alive while near. Seenfront can read the same from
+      EnemyHealth::Update (id 50776, VR 0x8afe70: where it reads its target actor and who writes it) and
+      HUDMenu::ProcessMessage (id 50718, VR 0x8aa8b0). Also check whether pointing the hand at the other player
+      already shows their name in the activate text.
 - [ ] Clean remote spawn: fade in instead of popping or falling. Place on the ground if the
       interpolated Z is invalid ("mammoth fell from the sky").
 - [ ] Death and bleedout: HUD message "X is down", and optionally revive by activating the downed

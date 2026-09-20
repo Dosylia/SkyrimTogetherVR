@@ -54,4 +54,13 @@ struct VRPose
     bool HasData{false};
     bool HasLegs{false}; // the entries from kPelvis on are valid
     std::array<Quaternion_NetQuantize, kBoneCount> Bones{};
+
+    //! Finger bones, left hand then right, five fingers of three bones each from the thumb, as rotations relative to
+    //! the parent bone (the hand for the first of each finger). Sent only when they change or once a second
+    //! (HasFingers); the receiver keeps the last set it got.
+    static constexpr size_t kFingersPerHand = 5;
+    static constexpr size_t kBonesPerFinger = 3;
+    static constexpr size_t kFingerBoneCount = 2 * kFingersPerHand * kBonesPerFinger;
+    bool HasFingers{false};
+    std::array<Quaternion_NetQuantize, kFingerBoneCount> Fingers{};
 };

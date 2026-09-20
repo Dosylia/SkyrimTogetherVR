@@ -43,31 +43,25 @@ Sources used below, most to least trusted: the official VR Address Library CSV, 
 4. Check the candidate in the disassembly (callers, arguments), then add it to
    `VRAddressOverrides.h` as `SE <id> <name>, checked`.
 
-## 1. Sync features still off
+## 2. No VR address: what is actually off
 
-Most sync hooks got their VR address from the TiltedEvolutionVR fork's table (see `VRAddressOverrides.h`).
+Placeholder and pass-through hooks, the renderer init hook and the input-focus patch were struck on
+2026-09-20: they do nothing on any platform or are off on purpose, so finding them buys nothing.
+What is left:
 
-| SE id | SE 1.5.97 address | Used as | What is off on VR | VR candidate | Neighbour below | Neighbour above | AE id in the source |
-| --- | --- | --- | --- | --- | --- | --- | --- |
+| SE id | Used as | What is off on VR |
+| --- | --- | --- |
+| 33236 (AE) | `s_updateTarget` (CombatController.cpp) | Combat target hook, disabled with `#if 0` even on SE. Remote NPCs pick their own targets. Only worth an address if target sync is ever turned on. |
+| 21600 (AE) | `isFirstPerson` (PlayerCamera.cpp) | VR is always first person; the VR build returns false before the lookup. Nothing lost. |
+| 63591 (AE) | `InternalSendEvent` (AnimationExperiments.cpp) | Commented out on every platform. Nothing lost. |
+| 105220 (AE) | `s_compareVariables` (BSScript.cpp) | Commented out on every platform. Nothing lost. |
 
-## 2. No VR address: patches and plumbing that are off
+Still listed from before (one conditional):
+
 
 | SE id | SE 1.5.97 address | Used as | What is off on VR | VR candidate | Neighbour below | Neighbour above | AE id in the source |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 51638 | 0x1408BF360 | `ProcessMessage` (SkillsMenu.cpp) | Skills menu fix, only needed if the skills menu is unpaused on VR again (unpaused without it, it was black). Confirmed 2026-09-16. Of its three NOPs, the freeze-frame one is located on VR: AE +0xA10 = **VR +0xBB6** (`or dword ptr [rsi+0x1c], 0x20`, 4 bytes, sets kFreezeFrameBackground). The other two (AE +0x84E, 6 bytes, "menu not appearing"; AE +0x1040, 2 bytes, "keep the menu updated") are Skyrim Together's own and have no VR offset yet. The control patch AE 52518 is `StatsMenu::CanProcess` +0x46 (6 bytes), VR address unknown. | 0x8ec3e0 (confirmed) | SE 51618 = VR 0x8ead70 | SE 51755 = VR 0x8fa0a0 | 52510 @ 0x1408EE960 |
-| 75445 | 0x140D68DD0 | `initWindowLoc` / `renderInit` (BSGraphicsRenderer.cpp) | Renderer init hook (with AE 68781). Not needed: the VR menu is a SteamVR dashboard overlay, and the frame end call it came with is resolved (SE 75461, VR 0xdbbdd0, now used by the body sync). | **0xdba850** (confirmed 2026-09-16: SE size 0x350, VR 0x34a, and it chains exactly onto SE 75446 then SE 75447 at 0xdbabc0). The VR Address Library says 0x5be850 for this id, which is wrong. | SE 75076 = VR 0xda4be0 | SE 75447 = VR 0xdbabc0 | 77226 @ 0x140DA3850 |
-| 67315 | 0x140C150B0 | `pollInputDevices` (BSInputDeviceManager.cpp) | **Stays off on purpose.** It skips input polling while the game window is not focused, which in a headset is most of the time (the desktop mirror). Address confirmed 2026-09-16. | 0xc519e0 (confirmed) | SE 67253 = VR 0xc4e900 | SE 67316 = VR 0xc51ac0 | 68617 @ 0x140C3B360 |
-| ? | ? | `unsignedInt` (BSRandom.cpp) | **Nothing calls this helper**, on any platform, so the missing address costs nothing. | - | SE 66988 = VR 0xc42730 | SE 67151 = VR 0xc485e0 | 68276 @ 0x140C2D180 |
-| ? | ? | `threadInit` (BSThread.cpp) | Thread names for debugging. Its companion AE 69554 is SE 68203 @ 0x140C39950 (CommonLib pair), which is not in the VR library. | - | SE 66988 = VR 0xc42730 | SE 67151 = VR 0xc485e0 | 68261 @ 0x140C2CD40 |
-
-## 3. No VR address: low priority
-
-| SE id | SE 1.5.97 address | Used as | What is off on VR | VR candidate | Neighbour below | Neighbour above | AE id in the source |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 35565 | 0x1405B2FF0 | `cMainLoop` (SkyrimVM64.cpp) | Empty placeholder hook, so nothing is lost by leaving it off. | 0x5bab10 (in the VR library as SE 35565) | SE 35492 = VR 0x5b1710 | SE 51246 = VR 0x8d0500 | 36564 @ 0x1405D9F50 |
-| 39341 | 0x140699DF0 | `cVMDestructor` (SkyrimVM64.cpp) | Empty placeholder hook, so nothing is lost by leaving it off. | 0x6a3a30 (confirmed 2026-09-16: follows the constructor as on SE, and starts by writing vtable pointers) | SE 39340 = VR 0x6a26a0 | SE 39343 = VR 0x6bae40 | 40412 @ 0x1406C19F0 |
-| 36323 | 0x1405D4090 | `s_ForceState` (Actor.cpp) | Placeholder hook. | - (SE 36323 is not in the VR library) | SE 36286 = VR 0x5daae0 | SE 36344 = VR 0x5de910 | 37313 @ 0x1405F8860 |
-| ? | ? | `s_signaturesMatch` (BSScript.cpp) | Pass-through hook. | - | SE 97536 = VR 0x12708c0 | SE 97692 = VR 0x12a0c50 | 104359 @ 0x141366590 |
 
 ## 4. Worked around, address still wanted
 

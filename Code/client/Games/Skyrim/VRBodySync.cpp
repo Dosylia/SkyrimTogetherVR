@@ -265,10 +265,145 @@ NiPoint3 FromGlm(const glm::vec3& acPoint) noexcept
     return result;
 }
 
+// Defined further down, with the rig.
+uint8_t* GetBoneArray(void* apTree, uint32_t& aOutCount) noexcept;
+uint8_t* FindEntry(uint8_t* apArray, uint32_t aCount, void* apNode) noexcept;
+
+// The flattened bone array of a skeleton and which of an entry's four indices is its parent.
+struct BoneArrayInfo
+{
+    uint8_t* pArray = nullptr;
+    uint32_t Count = 0;
+    int ParentField = -1;
+};
+
+int16_t ReadEntryIndex(const uint8_t* apEntry, int aField) noexcept
+{
+    return *reinterpret_cast<const int16_t*>(apEntry + kBoneEntryIndices + aField * sizeof(int16_t));
+}
+
+BoneArrayInfo ResolveBoneArray(void* apRoot, const BoneNodes& acNodes, bool aLog) noexcept
+{
+    BoneArrayInfo info;
+    info.pArray = GetBoneArray(FindByRtti(apRoot, "BSFlattenedBoneTree"), info.Count);
+
+    // Which of the four indices is the parent: the one that maps the left forearm to the upper arm, and the hand to the
+    // forearm.
+    const uint8_t* pUpper = FindEntry(info.pArray, info.Count, acNodes[VRPose::kLeftUpperArm]);
+    const uint8_t* pFore = FindEntry(info.pArray, info.Count, acNodes[VRPose::kLeftForearm]);
+    const uint8_t* pHand = FindEntry(info.pArray, info.Count, acNodes[VRPose::kLeftHand]);
+    if (pUpper && pFore && pHand)
+    {
+        const auto indexOf = [&info](const uint8_t* apEntry) { return static_cast<int16_t>((apEntry - info.pArray) / kBoneEntrySize); };
+        for (int field = 0; field < 4 && info.ParentField < 0; ++field)
+            if (ReadEntryIndex(pFore, field) == indexOf(pUpper) && ReadEntryIndex(pHand, field) == indexOf(pFore))
+                info.ParentField = field;
+    }
+
+    if (!info.pArray || info.ParentField < 0)
+    {
+        // Nodes alone still pose the body and anything attached; flattened bones (fingers, face) then lag behind.
+        if (aLog)
+            spdlog::warn("VRBodySync: no usable flattened bone array under root {} (count {}, parent field {})", apRoot, info.Count, info.ParentField);
+        info = BoneArrayInfo{};
+    }
+    return info;
+}
+
+// The finger bones of one hand: five chains of three flattened entries (Finger00 > 01 > 02), thumb first in the
+// vanilla skeleton, in array order. Flattened entries carry no name here, so they are found by shape: an entry under
+// the hand with a child that has a child. Weapon, shield and magic nodes hang off the hand as single entries.
+using FingerEntries = std::array<uint8_t*, VRPose::kFingersPerHand * VRPose::kBonesPerFinger>;
+
+bool FindFingers(const BoneArrayInfo& acInfo, const uint8_t* apHandEntry, FingerEntries& aOut) noexcept
+{
+    aOut.fill(nullptr);
+    if (!acInfo.pArray || !apHandEntry || acInfo.ParentField < 0)
+        return false;
+    const auto entryAt = [&acInfo](uint32_t aIndex) { return acInfo.pArray + aIndex * kBoneEntrySize; };
+    const auto parentOf = [&](uint32_t aIndex) { return ReadEntryIndex(entryAt(aIndex), acInfo.ParentField); };
+    const auto firstChildOf = [&](int16_t aParent) -> int16_t
+    {
+        for (uint32_t i = 0; i < acInfo.Count; ++i)
+            if (parentOf(i) == aParent)
+                return static_cast<int16_t>(i);
+        return -1;
+    };
+    const int16_t handIndex = static_cast<int16_t>((apHandEntry - acInfo.pArray) / kBoneEntrySize);
+
+    uint32_t found = 0;
+    for (uint32_t i = 0; i < acInfo.Count; ++i)
+    {
+        if (parentOf(i) != handIndex)
+            continue;
+        const int16_t second = firstChildOf(static_cast<int16_t>(i));
+        const int16_t third = second >= 0 ? firstChildOf(second) : -1;
+        if (second < 0 || third < 0)
+            continue;
+        if (found == VRPose::kFingersPerHand)
+        {
+            found = 0; // a sixth chain: not the shape expected, give up rather than guess
+            break;
+        }
+        aOut[found * VRPose::kBonesPerFinger + 0] = entryAt(i);
+        aOut[found * VRPose::kBonesPerFinger + 1] = entryAt(static_cast<uint32_t>(second));
+        aOut[found * VRPose::kBonesPerFinger + 2] = entryAt(static_cast<uint32_t>(third));
+        ++found;
+    }
+    if (found != VRPose::kFingersPerHand)
+    {
+        aOut.fill(nullptr);
+        return false;
+    }
+    return true;
+}
+
+// Finger rotations relative to the parent bone, read from the rendered (world) transforms: the hand node for the
+// first bone of each finger, the previous entry for the others.
+void ReadFingerRotations(const FingerEntries& acFingers, const glm::mat3& acHandWorld, glm::quat* apOut) noexcept
+{
+    for (size_t f = 0; f < VRPose::kFingersPerHand; ++f)
+    {
+        glm::mat3 parent = acHandWorld;
+        for (size_t k = 0; k < VRPose::kBonesPerFinger; ++k)
+        {
+            const uint8_t* pEntry = acFingers[f * VRPose::kBonesPerFinger + k];
+            const glm::mat3 world = ToGlm(reinterpret_cast<const NiTransform*>(pEntry + kBoneEntryWorld)->rotate);
+            apOut[f * VRPose::kBonesPerFinger + k] = glm::normalize(glm::quat_cast(glm::transpose(parent) * world));
+            parent = world;
+        }
+    }
+}
+
+// Writes finger rotations below an already posed hand: each entry's world follows its parent, keeping the entry's
+// own local offset and the world scale it had.
+void WriteFingerRotations(const FingerEntries& acFingers, const NiTransform& acHandWorld, const glm::quat* apRotations) noexcept
+{
+    for (size_t f = 0; f < VRPose::kFingersPerHand; ++f)
+    {
+        NiTransform parent = acHandWorld;
+        for (size_t k = 0; k < VRPose::kBonesPerFinger; ++k)
+        {
+            uint8_t* pEntry = acFingers[f * VRPose::kBonesPerFinger + k];
+            NiTransform& local = *reinterpret_cast<NiTransform*>(pEntry + kBoneEntryLocal);
+            NiTransform& world = *reinterpret_cast<NiTransform*>(pEntry + kBoneEntryWorld);
+            const glm::mat3 parentRotation = ToGlm(parent.rotate);
+            const glm::mat3 localRotation = glm::mat3_cast(apRotations[f * VRPose::kBonesPerFinger + k]);
+            local.rotate = FromGlm(localRotation);
+            world.rotate = FromGlm(parentRotation * localRotation);
+            world.translate = FromGlm(ToGlm(parent.translate) + parentRotation * (ToGlm(local.translate) * parent.scale));
+            parent = world;
+        }
+    }
+}
+
 struct RemotePose
 {
     bool HasLegs = false;
     std::array<glm::quat, VRPose::kBoneCount> Bones{};
+    // Kept from the last update that carried them (see VRPose::HasFingers).
+    bool HasFingers = false;
+    std::array<glm::quat, VRPose::kFingerBoneCount> Fingers{};
 };
 
 std::shared_mutex s_posesLock;
@@ -367,6 +502,9 @@ struct Rig
     std::array<RigBone, VRPose::kBoneCount> Bones{};
     // Everything below each posed bone (nodes and flattened bones), the posed bones further down the chain included.
     std::array<std::vector<RigBone>, VRPose::kBoneCount> Descendants{};
+    // Finger entries below each hand (left, right); found only when the flattened array is usable.
+    std::array<FingerEntries, 2> Fingers{};
+    std::array<bool, 2> FingersFound{};
     std::chrono::steady_clock::time_point RetryAt{};
     // Re-resolving because something attached is rate limited: an effect that attaches and detaches every frame would
     // otherwise rebuild the whole skeleton every frame.
@@ -445,32 +583,11 @@ bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
     if (!FindBones(apRoot, nodes))
         return false;
 
-    uint32_t count = 0;
-    uint8_t* pArray = GetBoneArray(FindByRtti(apRoot, "BSFlattenedBoneTree"), count);
-
-    const auto readIndex = [](const uint8_t* apEntry, int aField) { return *reinterpret_cast<const int16_t*>(apEntry + kBoneEntryIndices + aField * sizeof(int16_t)); };
-
-    // Which of the four indices is the parent: the one that maps the left forearm to the upper arm, and the hand to the
-    // forearm.
-    int parentField = -1;
-    const uint8_t* pUpper = FindEntry(pArray, count, nodes[VRPose::kLeftUpperArm]);
-    const uint8_t* pFore = FindEntry(pArray, count, nodes[VRPose::kLeftForearm]);
-    const uint8_t* pHand = FindEntry(pArray, count, nodes[VRPose::kLeftHand]);
-    if (pUpper && pFore && pHand)
-    {
-        const auto indexOf = [pArray](const uint8_t* apEntry) { return static_cast<int16_t>((apEntry - pArray) / kBoneEntrySize); };
-        for (int field = 0; field < 4 && parentField < 0; ++field)
-            if (readIndex(pFore, field) == indexOf(pUpper) && readIndex(pHand, field) == indexOf(pFore))
-                parentField = field;
-    }
-
-    if (!pArray || parentField < 0)
-    {
-        // Nodes alone still pose the body and anything attached; flattened bones (fingers, face) then lag behind.
-        spdlog::warn("VRBodySync: no usable flattened bone array under root {} (count {}, parent field {})", apRoot, count, parentField);
-        pArray = nullptr;
-        count = 0;
-    }
+    const BoneArrayInfo arrayInfo = ResolveBoneArray(apRoot, nodes, aLog);
+    uint8_t* pArray = arrayInfo.pArray;
+    const uint32_t count = arrayInfo.Count;
+    const int parentField = arrayInfo.ParentField;
+    const auto readIndex = [](const uint8_t* apEntry, int aField) { return ReadEntryIndex(apEntry, aField); };
 
     std::unordered_map<void*, uint8_t*> entryByNode;
     for (uint32_t i = 0; i < count; ++i)
@@ -525,6 +642,10 @@ bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
         }
     }
 
+    aRig.FingersFound[0] = FindFingers(arrayInfo, aRig.Bones[VRPose::kLeftHand].pEntry, aRig.Fingers[0]);
+    aRig.FingersFound[1] = FindFingers(arrayInfo, aRig.Bones[VRPose::kRightHand].pEntry, aRig.Fingers[1]);
+    if (aLog && (!aRig.FingersFound[0] || !aRig.FingersFound[1]))
+        spdlog::warn("VRBodySync: finger bones not found by shape under root {} (left {}, right {}); the hands stay on the animation pose", apRoot, aRig.FingersFound[0], aRig.FingersFound[1]);
     aRig.Valid = true;
     // Quiet when this is only picking up a node that was attached below a bone, which happens on every equip.
     if (aLog)
@@ -643,6 +764,15 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose) noexcept
             child.WriteWorld(world);
         }
     }
+
+    if (acPose.HasFingers)
+    {
+        constexpr size_t cPerHand = VRPose::kFingersPerHand * VRPose::kBonesPerFinger;
+        if (acRig.FingersFound[0])
+            WriteFingerRotations(acRig.Fingers[0], acRig.Bones[VRPose::kLeftHand].World(), acPose.Fingers.data());
+        if (acRig.FingersFound[1])
+            WriteFingerRotations(acRig.Fingers[1], acRig.Bones[VRPose::kRightHand].World(), acPose.Fingers.data() + cPerHand);
+    }
 }
 
 } // namespace
@@ -727,6 +857,8 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
         BoneNodes Nodes{};
         std::array<void*, VRPose::kBoneCount> VTables{};
         bool LegsFound = false;
+        std::array<FingerEntries, 2> Fingers{};
+        std::array<bool, 2> FingersFound{};
         std::chrono::steady_clock::time_point RefreshAt{};
     } s_local;
     const auto now = std::chrono::steady_clock::now();
@@ -746,6 +878,18 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
         s_local.pRoot = pRoot;
         s_local.Nodes = nodes;
         s_local.LegsFound = legsFound;
+        const BoneArrayInfo arrayInfo = ResolveBoneArray(pRoot, nodes, false);
+        const uint8_t* pLeftHand = FindEntry(arrayInfo.pArray, arrayInfo.Count, nodes[VRPose::kLeftHand]);
+        const uint8_t* pRightHand = FindEntry(arrayInfo.pArray, arrayInfo.Count, nodes[VRPose::kRightHand]);
+        s_local.FingersFound[0] = FindFingers(arrayInfo, pLeftHand, s_local.Fingers[0]);
+        s_local.FingersFound[1] = FindFingers(arrayInfo, pRightHand, s_local.Fingers[1]);
+        static bool s_fingersNoted = false;
+        if (!s_fingersNoted)
+        {
+            s_fingersNoted = true;
+            spdlog::info("VRBodySync: local finger bones {} (left {}, right {}); {} flattened bones", s_local.FingersFound[0] && s_local.FingersFound[1] ? "found" : "not found by shape",
+                         s_local.FingersFound[0], s_local.FingersFound[1], arrayInfo.Count);
+        }
         for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
             s_local.VTables[i] = nodes[i] ? *static_cast<void**>(nodes[i]) : nullptr;
         s_local.RefreshAt = now + std::chrono::seconds(5);
@@ -764,6 +908,30 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
     }
 
     aOutPose.HasLegs = cLegs;
+
+    // Fingers: only when both hands' bones are known, and only when they changed since the last send or a second has
+    // passed (so a player who arrives later still gets them).
+    aOutPose.HasFingers = false;
+    if (s_local.FingersFound[0] && s_local.FingersFound[1])
+    {
+        static std::array<Quaternion_NetQuantize, VRPose::kFingerBoneCount> s_lastSent{};
+        static std::chrono::steady_clock::time_point s_lastSentAt{};
+        constexpr size_t cPerHand = VRPose::kFingersPerHand * VRPose::kBonesPerFinger;
+        std::array<glm::quat, VRPose::kFingerBoneCount> rotations{};
+        ReadFingerRotations(s_local.Fingers[0], ToGlm(At<NiTransform>(nodes[VRPose::kLeftHand], kWorldOffset).rotate), rotations.data());
+        ReadFingerRotations(s_local.Fingers[1], ToGlm(At<NiTransform>(nodes[VRPose::kRightHand], kWorldOffset).rotate), rotations.data() + cPerHand);
+        std::array<Quaternion_NetQuantize, VRPose::kFingerBoneCount> quantized{};
+        for (size_t i = 0; i < VRPose::kFingerBoneCount; ++i)
+            quantized[i] = rotations[i];
+        if (quantized != s_lastSent || now - s_lastSentAt >= std::chrono::seconds(1))
+        {
+            s_lastSent = quantized;
+            s_lastSentAt = now;
+            aOutPose.HasFingers = true;
+            aOutPose.Fingers = quantized;
+        }
+    }
+
     aOutPose.HasData = true;
     return true;
 }
@@ -794,13 +962,17 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
         return;
     }
 
-    RemotePose pose;
+    std::unique_lock lock(s_posesLock);
+    RemotePose& pose = s_poses[apActor->formID];
     pose.HasLegs = acPose.HasLegs;
     for (uint32_t i = 0; i < (acPose.HasLegs ? VRPose::kBoneCount : VRPose::kUpperBoneCount); ++i)
         pose.Bones[i] = acPose.Bones[i];
-
-    std::unique_lock lock(s_posesLock);
-    s_poses[apActor->formID] = pose;
+    if (acPose.HasFingers)
+    {
+        pose.HasFingers = true;
+        for (size_t i = 0; i < VRPose::kFingerBoneCount; ++i)
+            pose.Fingers[i] = acPose.Fingers[i];
+    }
 }
 
 void LogCastOrigin(Actor* apActor, uint32_t aCastingSource) noexcept

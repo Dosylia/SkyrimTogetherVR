@@ -126,6 +126,7 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     auto& vrPose = aInterpolationComponent.InterpolatedVRPose;
     vrPose.HasData = false;
     vrPose.HasLegs = false;
+    vrPose.HasFingers = false;
     {
         const uint64_t poseTick = aPoseTick ? aPoseTick : aTick;
         const InterpolationComponent::TimePoint* pBefore = nullptr;
@@ -159,6 +160,14 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
             const size_t boneCount = vrPose.HasLegs ? VRPose::kBoneCount : VRPose::kUpperBoneCount;
             for (size_t i = 0; i < boneCount; ++i)
                 vrPose.Bones[i] = glm::slerp(static_cast<glm::quat>(pBefore->VRPoseData.Bones[i]), static_cast<glm::quat>(pAfter->VRPoseData.Bones[i]), poseDelta);
+            // Fingers travel only when they change, so most points carry none; the newest set around the pose tick
+            // is passed on and the body sync keeps the last one it received. No blending: a grip is a step.
+            const VRPose& fingerSource = pAfter->VRPoseData.HasFingers ? pAfter->VRPoseData : pBefore->VRPoseData;
+            if (fingerSource.HasFingers)
+            {
+                vrPose.HasFingers = true;
+                vrPose.Fingers = fingerSource.Fingers;
+            }
         }
     }
 

@@ -297,6 +297,48 @@ void UIMessageQueue__AddMessage(void* a1, const BSFixedString* a2, UIMessage::UI
         if (phantom)
             return;
     }
+    // TEMPORARY (2026-09-20): the friend's name above their head is to come from the game's own world-space enemy
+    // meter (WSEnemyMeters, built into Skyrim VR), the one NPCs get. Which message tells it whom to show, and who
+    // sends it when the player hits an enemy, is unknown, so every message aimed at it is logged with the data's
+    // first words (a vtable there names the HUDData type) and the caller stack. HUD Menu messages other than the
+    // per-frame update are logged too, since the meter may listen to those. At most 20 lines a second.
+    if (a2 && a2->AsAscii() && (strcmp(a2->AsAscii(), "WSEnemyMeters") == 0 || (strcmp(a2->AsAscii(), "HUD Menu") == 0 && a3 != UIMessage::kUpdate)))
+    {
+        static std::chrono::steady_clock::time_point s_windowStart;
+        static int s_linesThisWindow = 0;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - s_windowStart >= std::chrono::seconds(1))
+        {
+            s_windowStart = now;
+            s_linesThisWindow = 0;
+        }
+        if (s_linesThisWindow++ < 20)
+        {
+            char caller[160];
+            DescribeCaller(_ReturnAddress(), caller, sizeof(caller));
+            std::string dataWords;
+            if (a4 && ReadableBytes(a4, 64))
+            {
+                const uint64_t* pWords = static_cast<const uint64_t*>(a4);
+                for (int i = 0; i < 8; ++i)
+                {
+                    char word[160];
+                    DescribeCaller(reinterpret_cast<void*>(static_cast<uintptr_t>(pWords[i])), word, sizeof(word));
+                    dataWords += fmt::format("{}{}", i == 0 ? "" : ", ", word);
+                }
+            }
+            std::string frames;
+            void* stack[10] = {};
+            const USHORT count = RtlCaptureStackBackTrace(1, 10, stack, nullptr);
+            for (USHORT i = 0; i < count; ++i)
+            {
+                char frame[160];
+                DescribeCaller(stack[i], frame, sizeof(frame));
+                frames += fmt::format("{}{}", i == 0 ? "" : " < ", frame);
+            }
+            spdlog::info("MeterProbe: {} message type {}, data {}, from {}; data words [{}]; stack [{}]", a2->AsAscii(), static_cast<int>(a3), a4 ? "yes" : "no", caller, dataWords, frames);
+        }
+    }
     UIMessageQueue__AddMessage_Real(a1, a2, a3, a4);
 }
 
