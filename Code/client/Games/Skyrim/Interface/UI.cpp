@@ -231,6 +231,9 @@ static void DescribeCaller(void* apAddress, char* apOut, const size_t aOutSize) 
         _snprintf_s(apOut, aOutSize, _TRUNCATE, "<0x%llx>", static_cast<unsigned long long>(address));
 }
 
+static bool s_sendingEnemyMeter = false;
+static std::chrono::steady_clock::time_point s_lastGameEnemyMeterTargetAt{};
+
 void UIMessageQueue__AddMessage(void* a1, const BSFixedString* a2, UIMessage::UI_MESSAGE_TYPE a3, void* a4)
 {
     if (a2 && a2->AsAscii() && strcmp(a2->AsAscii(), "MessageBoxMenu") == 0)
@@ -302,7 +305,13 @@ void UIMessageQueue__AddMessage(void* a1, const BSFixedString* a2, UIMessage::UI
     // sends it when the player hits an enemy, is unknown, so every message aimed at it is logged with the data's
     // first words (a vtable there names the HUDData type) and the caller stack. HUD Menu messages other than the
     // per-frame update are logged too, since the meter may listen to those. At most 20 lines a second.
-    if (a2 && a2->AsAscii() && (strcmp(a2->AsAscii(), "WSEnemyMeters") == 0 || (strcmp(a2->AsAscii(), "HUD Menu") == 0 && a3 != UIMessage::kUpdate)))
+    // The game pointing its enemy meter at someone: HUDData type 0xB with a non-zero actor handle at +0x28 (read from
+    // the game's own sends on 2026-09-20). Remembered so the friend's meter never steals a real enemy's.
+    if (a2 && a2->AsAscii() && strcmp(a2->AsAscii(), "WSEnemyMeters") == 0 && a3 == UIMessage::kUpdate && a4 && !s_sendingEnemyMeter && ReadableBytes(a4, 0x30) &&
+        *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(a4) + 0x10) == 0xB && *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(a4) + 0x28) != 0)
+        s_lastGameEnemyMeterTargetAt = std::chrono::steady_clock::now();
+
+    if (a2 && a2->AsAscii() && !s_sendingEnemyMeter && (strcmp(a2->AsAscii(), "WSEnemyMeters") == 0 || (strcmp(a2->AsAscii(), "HUD Menu") == 0 && a3 != UIMessage::kUpdate)))
     {
         static std::chrono::steady_clock::time_point s_windowStart;
         static int s_linesThisWindow = 0;
@@ -340,6 +349,41 @@ void UIMessageQueue__AddMessage(void* a1, const BSFixedString* a2, UIMessage::UI
         }
     }
     UIMessageQueue__AddMessage_Real(a1, a2, a3, a4);
+}
+
+void UI::SetEnemyMeterTarget(uint32_t aHandle, uint16_t aLevel)
+{
+#ifdef SKYRIMVR
+    // The message the game sends from its hit handling (SE 0x1408D5130+0x284, VR +0x902ed4): a HUDData from the
+    // queue's factory, type 0xB at +0x10, the actor's level at +0x20, two flag bytes 1,1 at +0x22, the actor handle
+    // at +0x28 (0 to clear), queued as an update for WSEnemyMeters. EnemyHealth::Update then shows the meter itself.
+    POINTER_SKYRIMSE(void*, s_queue, 400445, 400445);
+    TP_THIS_FUNCTION(TCreateUIMessageData, void*, void, const BSFixedString*);
+    POINTER_SKYRIMSE(TCreateUIMessageData, s_createData, 80061, 80061);
+    void* pQueue = s_queue.Get() ? *s_queue.Get() : nullptr;
+    if (!pQueue || !s_createData.Get() || !UIMessageQueue__AddMessage_Real)
+        return;
+
+    BSFixedString dataName("HUDData");
+    void* pData = TiltedPhoques::ThisCall(s_createData, pQueue, &dataName);
+    if (!pData)
+        return;
+    auto* pBytes = static_cast<uint8_t*>(pData);
+    *reinterpret_cast<uint32_t*>(pBytes + 0x10) = 0xB;
+    *reinterpret_cast<uint16_t*>(pBytes + 0x20) = aLevel;
+    *reinterpret_cast<uint16_t*>(pBytes + 0x22) = 0x0101;
+    *reinterpret_cast<uint32_t*>(pBytes + 0x28) = aHandle;
+
+    BSFixedString menuName("WSEnemyMeters");
+    s_sendingEnemyMeter = true;
+    UIMessageQueue__AddMessage_Real(pQueue, &menuName, UIMessage::kUpdate, pData);
+    s_sendingEnemyMeter = false;
+#endif
+}
+
+std::chrono::steady_clock::time_point UI::LastGameEnemyMeterTargetAt()
+{
+    return s_lastGameEnemyMeterTargetAt;
 }
 
 static TiltedPhoques::Initializer s_s(

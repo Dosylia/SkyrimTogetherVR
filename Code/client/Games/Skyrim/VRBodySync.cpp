@@ -865,6 +865,20 @@ void OnFrameEnd() noexcept
     }
 }
 
+std::string DescribeBody(Actor* apActor) noexcept
+{
+    void* pRoot = apActor ? apActor->GetNiNode() : nullptr;
+    if (!pRoot)
+        return "no 3D";
+    void* pSkeletonRoot = FindSkeletonRoot(pRoot);
+    const uint32_t fingerprint = ChildFingerprintOf(AsNode(pRoot));
+    const NiTransform& rootWorld = At<NiTransform>(pRoot, kWorldOffset);
+    const NiTransform& skeletonWorld = At<NiTransform>(pSkeletonRoot, kWorldOffset);
+    return fmt::format("3D root {} with {} of {} child slots filled, root world scale {:.3f} at ({:.0f}, {:.0f}, {:.0f}), skeleton root {} world scale {:.3f}", pRoot,
+                       fingerprint & 0xFFFF, fingerprint >> 16, rootWorld.scale, rootWorld.translate.x, rootWorld.translate.y, rootWorld.translate.z,
+                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale);
+}
+
 bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
 {
     aOutPose.HasData = false;

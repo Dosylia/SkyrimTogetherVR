@@ -30,4 +30,7 @@ void LogCastOrigin(Actor* apActor, uint32_t aCastingSource) noexcept;
 //! frames on a body that is moving mean its animation graph is not advancing (the walk cycle would change them).
 //! 0 when the actor has no 3D.
 uint64_t SkeletonMotionFingerprint(Actor* apActor) noexcept;
+//! TEMPORARY: one line about an actor's 3D for the invisible-copy diagnosis: root, its children, the skeleton root's
+//! world scale and position.
+std::string DescribeBody(Actor* apActor) noexcept;
 } // namespace VRBodySync

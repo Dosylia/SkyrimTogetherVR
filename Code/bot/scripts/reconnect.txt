@@ -1,0 +1,28 @@
+# The bug of 2026-09-20 evening: a player whose client dropped and reconnected comes back as a copy the other side
+# can hit but not see (19:09 Seen for the host, 19:17 the host for Seen). Nothing in the spawn lines differs from a
+# visible spawn, so the host watches the bot on screen after each reconnect and reads the "CopyDiag:" lines in
+# tp_client.log (one per remote player copy every 5 s) for the visible copy against the invisible one.
+#
+# Run:  STBot.exe scripts\reconnect.txt --server 127.0.0.1:10578 --password <sPassword>
+# The bot spawns 200 units from the host, cloned from the host's look and outfit.
+
+log standing next to the host for 10 s; look at me, I should be visible
+wait 10
+
+log dropping the connection and coming back 2 s later; am I still visible?
+disconnect
+wait 2
+reconnect
+wait 15
+
+log second drop, 5 s away this time
+disconnect
+wait 5
+reconnect
+wait 15
+
+log walking a small square so the copy can be told apart from a stale one
+walk rel 200 0 100
+walk rel -200 0 100
+wait 10
+stop

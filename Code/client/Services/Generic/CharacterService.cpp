@@ -72,6 +72,7 @@
 #include <Games/TES.h>
 #ifdef SKYRIMVR
 #include <Games/Skyrim/VRBodySync.h>
+#include <Games/Skyrim/Interface/UI.h>
 
 #endif
 
@@ -419,6 +420,14 @@ void CharacterService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
     {
         PerfScope perfScope("CharacterService::RunLocalUpdates");
         RunLocalUpdates();
+    }
+    {
+        PerfScope perfScope("CharacterService::RunEnemyMeterUpdates");
+        RunEnemyMeterUpdates();
+    }
+    {
+        PerfScope perfScope("CharacterService::RunRemotePlayerDiag");
+        RunRemotePlayerDiag();
     }
     {
         PerfScope perfScope("CharacterService::RunFactionsUpdates");
@@ -1825,6 +1834,108 @@ void CharacterService::RunLocalUpdates() const noexcept
 std::chrono::steady_clock::time_point CharacterService::LastMoveSentAt() noexcept
 {
     return s_lastMoveSentAt;
+}
+
+// The other player's name and health above their head, using the game's own enemy meter (decided 2026-09-20: the
+// world-space bar NPCs get, nothing of ours). The nearest living remote player within 1500 units is pointed at every
+// half second, which is how the game itself keeps the meter up during a fight; the game's own target (a real enemy
+// hit in the last 8 s) always wins, and the meter is cleared once when no player is near any more.
+void CharacterService::RunEnemyMeterUpdates() noexcept
+{
+#ifdef SKYRIMVR
+    static std::chrono::steady_clock::time_point s_next;
+    static uint32_t s_shownHandle = 0;
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_next)
+        return;
+    s_next = now + 500ms;
+
+    const auto clear = [&]()
+    {
+        if (s_shownHandle)
+        {
+            UI::SetEnemyMeterTarget(0, 0);
+            s_shownHandle = 0;
+        }
+    };
+
+    if (!m_transport.IsConnected())
+    {
+        clear();
+        return;
+    }
+    if (now - UI::LastGameEnemyMeterTargetAt() < 8s)
+    {
+        s_shownHandle = 0; // the game owns the meter for now
+        return;
+    }
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer)
+        return;
+
+    Actor* pNearest = nullptr;
+    float nearestSq = 1500.f * 1500.f;
+    auto view = m_world.view<PlayerComponent, FormIdComponent, RemoteComponent>();
+    for (auto entity : view)
+    {
+        Actor* pActor = Cast<Actor>(TESForm::GetById(view.get<FormIdComponent>(entity).Id));
+        if (!pActor || !pActor->GetNiNode() || pActor->actorState.IsDeadOrDying())
+            continue;
+        const float dx = pActor->position.x - pPlayer->position.x;
+        const float dy = pActor->position.y - pPlayer->position.y;
+        const float dz = pActor->position.z - pPlayer->position.z;
+        const float distSq = dx * dx + dy * dy + dz * dz;
+        if (distSq < nearestSq)
+        {
+            nearestSq = distSq;
+            pNearest = pActor;
+        }
+    }
+    if (!pNearest)
+    {
+        clear();
+        return;
+    }
+    const uint32_t handle = pNearest->GetHandle().handle.iBits;
+    if (!handle)
+        return;
+    if (handle != s_shownHandle)
+        spdlog::info("Enemy meter: showing remote player {:X} (level {}) at {:.0f} units", pNearest->formID, pNearest->GetLevel(), std::sqrt(nearestSq));
+    UI::SetEnemyMeterTarget(handle, pNearest->GetLevel());
+    s_shownHandle = handle;
+#endif
+}
+
+// TEMPORARY (2026-09-20): a player's copy that appears after that player's client dropped and reconnected can be hit
+// but not seen (19:09 Seen for Emma, 19:17 Emma for Seen; nothing in the spawn lines differs from a visible spawn).
+// Every 5 s, what the game holds for each remote player's copy: distance and height difference to us, form flags
+// (0x800 disabled, 0x20 deleted), 3D and its root, health and state, body scale. Compare a visible copy against an
+// invisible one.
+void CharacterService::RunRemotePlayerDiag() noexcept
+{
+    static std::chrono::steady_clock::time_point s_next;
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_next)
+        return;
+    s_next = now + 5s;
+    if (!m_transport.IsConnected())
+        return;
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer)
+        return;
+    auto view = m_world.view<PlayerComponent, FormIdComponent, RemoteComponent>();
+    for (auto entity : view)
+    {
+        Actor* pActor = Cast<Actor>(TESForm::GetById(view.get<FormIdComponent>(entity).Id));
+        if (!pActor)
+            continue;
+        const float dx = pActor->position.x - pPlayer->position.x;
+        const float dy = pActor->position.y - pPlayer->position.y;
+        const float dz = pActor->position.z - pPlayer->position.z;
+        spdlog::info("CopyDiag: player copy {:X} '{}' {:.0f} units away, dz {:.0f}, form flags {:X}, health {:.0f}, dead {}, bleedout {}, state1 {:X}, {}", pActor->formID,
+                     pActor->baseForm ? Cast<TESNPC>(pActor->baseForm)->fullName.value.AsAscii() : "?", std::sqrt(dx * dx + dy * dy + dz * dz), dz, pActor->flags,
+                     pActor->GetActorValue(24), pActor->IsDead(), pActor->actorState.IsBleedingOut(), pActor->actorState.flags1, VRBodySync::DescribeBody(pActor));
+    }
 }
 
 void CharacterService::RunRemoteUpdates() noexcept

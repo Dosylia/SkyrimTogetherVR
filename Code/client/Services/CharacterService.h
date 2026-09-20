@@ -102,6 +102,8 @@ private:
     ActorData BuildActorData(Actor* apActor) const noexcept;
 
     void RunLocalUpdates() const noexcept;
+    void RunEnemyMeterUpdates() noexcept;
+    void RunRemotePlayerDiag() noexcept;
 
 public:
     static std::chrono::steady_clock::time_point LastMoveSentAt() noexcept;

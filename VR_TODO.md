@@ -74,6 +74,15 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       player copies. `SinkDiag` stays in; if it names nothing for another two sessions, close this. The havok
       capsule read (TiltedEvolutionVR `aaf5d83`: controller at `MiddleProcess+0x250`, `+0x360` bhkRigidBody,
       `+0x10` hkpRigidBody, position `+0x1A0`, filter `+0x4C`) is only worth doing if it comes back.
+- [ ] **Invisible copy after the other player's client reconnects (19:09 and 19:17 on 2026-09-20).** Seen's
+      client dropped twice ("Disconnected from server 4" = aborted; the host's server log shows the connection
+      ending and a new one 2 s later) and auto-reconnected. Each time the copy the other side then built was there
+      (hit for 2 damage at 19:10:37, animating, skeleton resolved, hands and scale applied) but not drawn. The spawn
+      lines are identical to the visible first spawn of the session, so the logs cannot say why. Two things for
+      next time: `CopyDiag:` (every 5 s per remote player copy: distance, height difference, form flags, health,
+      state, 3D root and its children, scales) and a bot script that reproduces a reconnect on demand
+      (`STBot.exe scriptseconnect.txt`): watch the bot after each reconnect. Also the desync itself was not
+      hand-offs (zero on the server, a handful of transfers on the clients); each "unsync" lines up with a drop.
 - [ ] **Dropped items not visible** to the other player. Sender logs `drop: true`, receiver logs
       `Remote actor ... drops item`. Check both on the next drop. Reported with it (2026-09-20): when he drops
       something, his copy's body stays in place but "all his bones try to violently leave it". That is the VR
@@ -443,16 +452,14 @@ the headset off.
 
 ## 5. Polish
 
-- [ ] **Friend's name above their head, using the game's own enemy meter.** Decided 2026-09-20: no floating label
-      of our own and no menu switch; the world-space health bar with the name that NPCs get (WSEnemyMeters,
-      built into Skyrim VR) is shown for the other player's copy while they are near. Unknown: which message
-      tells the meter whom to show and which game function sends it on a hit. Since 2026-09-20 18:33 the client
-      logs every message to WSEnemyMeters and every non-update HUD Menu message (`MeterProbe: ...`, with the
-      data's first words and the caller stack). Next session: hit one enemy, look at the meter, send the log.
-      Then: call that function for the copy and keep it alive while near. Seenfront can read the same from
-      EnemyHealth::Update (id 50776, VR 0x8afe70: where it reads its target actor and who writes it) and
-      HUDMenu::ProcessMessage (id 50718, VR 0x8aa8b0). Also check whether pointing the hand at the other player
-      already shows their name in the activate text.
+- [x] **[untested] Friend's name and health above their head, using the game's own enemy meter.** The probe of
+      2026-09-20 18:56 read the message the game sends on a hit: an update for WSEnemyMeters carrying a HUDData with
+      type 0xB, the actor's level at +0x20, two flag bytes 1,1 at +0x22 and the actor handle at +0x28 (0 clears),
+      sent from SE 0x1408D5130+0x284 (id 51900, misnamed in the public database); EnemyHealth::Update then shows the
+      meter. The client now points the meter at the nearest living remote player within 1500 units every half
+      second (`Enemy meter: showing remote player ...`), clears it once when nobody is near, and stays off for 8 s
+      after the game pointed it at a real enemy. First session with it: 19:xx build showed nothing because the
+      driver did not exist yet, only the probe.
 - [ ] Clean remote spawn: fade in instead of popping or falling. Place on the ground if the
       interpolated Z is invalid ("mammoth fell from the sky").
 - [ ] Death and bleedout: HUD message "X is down", and optionally revive by activating the downed
