@@ -5,7 +5,8 @@ Co-op for Skyrim VR, a port of Skyrim Together Reborn.
 Pick the file for your situation:
 
 - **`README-mod-manager.md`**: you use Mod Organizer 2 or a Wabbajack list (FUS, and the like).
-- **`README-manual.md`**: no mod manager, or Vortex.
+- **`README-vortex.md`**: you use Vortex.
+- **`README-manual.md`**: no mod manager at all.
 - **`README-host.md`**: you are the one running the server.
 
 Everyone needs Skyrim VR 1.4.15, SKSE VR and the VR Address Library for SKSEVR, and the same build as

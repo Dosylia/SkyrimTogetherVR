@@ -1,8 +1,9 @@
-# Skyrim Together VR without a mod manager, or with Vortex
+# Skyrim Together VR without a mod manager
+
+Vortex users: see `README-vortex.md` instead.
 
 1. Open the folder `Skyrim Together mod` and copy everything in it into `Skyrim VR\Data`, next to
-   `Skyrim.esm`. Vortex users: zip that folder and install it as a mod instead. Enable
-   `SkyrimTogether.esp` in your plugin list (the Mods screen in the game, or Vortex's plugins tab).
+   `Skyrim.esm`. Enable `SkyrimTogether.esp` in your plugin list (the Mods screen in the game).
 2. Put the folder `Skyrim Together VR` anywhere, for example inside `Skyrim VR`.
 3. Start the game with `SkyrimTogetherVR.exe` from that folder, not with SKSE. The first start asks
    where Skyrim VR is installed.

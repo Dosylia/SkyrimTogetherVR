@@ -3013,4 +3013,6 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 400445u, 0x1f850f8u }, // SE 514285 UIMessageQueue singleton, checked against the database
     { 34819u, 0x058e920u }, // SE 34819 BGSSaveLoadManager::Load, from the VR address database (status 3)
     { 33236u, 0x050e7a0u }, // SE 32489 CombatController update-target hook (s_updateTarget), read from the VR binary by Seenfront 2026-09-20, checked; the hook itself is still #if 0 on every platform
+    { 21600u, 0x03067f0u }, // SE 21600 PlayerCamera::IsFirstPerson helper (SE 0x1402F52B0), read from the VR binary by Seenfront 2026-09-20, checked; the VR build answers first person before the lookup
+    { 63591u, 0x0b5f9a0u }, // SE 63591 BShkbAnimationGraph internal send event (SE 0x140B24BC0), read from the VR binary by Seenfront 2026-09-20, checked; the call in AnimationExperiments.cpp is commented out on every platform
 };

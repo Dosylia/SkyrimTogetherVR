@@ -52,8 +52,8 @@ What is left:
 | SE id | Used as | What is off on VR |
 | --- | --- | --- |
 | 33236 (AE) | `s_updateTarget` (CombatController.cpp) | Address found: SE 32489 = 0x1404FE300, VR 0x14050E7A0 (Seenfront, 2026-09-20), now in the override table. CombatController::SetTarget SE 32488 = VR 0x14050E480 confirmed the table's entry. The hook stays `#if 0` on every platform; turning target sync on is a separate decision. |
-| 21600 (AE) | `isFirstPerson` (PlayerCamera.cpp) | VR is always first person; the VR build returns false before the lookup. Nothing lost. |
-| 63591 (AE) | `InternalSendEvent` (AnimationExperiments.cpp) | Commented out on every platform. Nothing lost. |
+| 21600 (AE) | `isFirstPerson` (PlayerCamera.cpp) | Address found: SE 0x1402F52B0, VR 0x1403067F0 (Seenfront, 2026-09-20), in the override table. The VR build still answers before the lookup, since VR is always first person. |
+| 63591 (AE) | `InternalSendEvent` (AnimationExperiments.cpp) | Address found: SE 0x140B24BC0, VR 0x140B5F9A0 (Seenfront, 2026-09-20), in the override table. The call is still commented out on every platform. |
 | 105220 (AE) | `s_compareVariables` (BSScript.cpp) | Commented out on every platform. Nothing lost. |
 
 Still listed from before (one conditional):
@@ -69,6 +69,31 @@ Still listed from before (one conditional):
 | --- | --- | --- | --- | --- |
 | 98065 | 0x141258CB0 | RegisterPapyrusFunction | Hooked from the VM vtable instead (VR 0x1278410 is known, but hooking both would conflict). SE 98065 is not in the VR library. | 104788 |
 | 15873 | 0x1401E7570 | InventoryChanges::GetArmorInSlot | Not a function on VR (CommonLibVR reimplements it); the naked-NPC fix is off. SE 15873 is not in the VR library either. | 16113 |
+
+## Worth a reverse engineer's time, in order (2026-09-20)
+
+Everything in sections 2 and 4 is off or worked around, so finding it changes nothing. What pays is section 5:
+addresses the client calls with real arguments every session that were only ever matched by neighbours and sizes.
+A wrong one is a crash on a rare path. Confirm these first, each against the SE function of the same id:
+
+| SE id | VR address | Function | Why it matters |
+| --- | --- | --- | --- |
+| 19418 | `0x2ad090` | TESObjectREFR::GetHandle | Now used every half second to point the enemy meter at the friend. |
+| 11466 | `0x11e470` | ExtraDataList::SetWorn | Every worn item of every copy's inventory rebuild. |
+| 19282 | `0x29fdb0` | TESObjectREFR::AddObjectToContainer | Every item of every inventory rebuild, and hand items on arrival. |
+| 19263 | `0x29f110` | TESObjectREFR::RemoveItem | Every inventory rebuild starts by removing everything. |
+| 33623 | `0x550540` | MagicCaster::CastSpell | Every spell the other player casts. |
+| 18606 | `0x27a4c0` | TESObjectCELL::GetCOCPlacementInfo | Where a respawning player is put. |
+| 13620 | `0x17c4e0` | ModManager::GetCellFromCoordinates | Same respawn path, outdoors. |
+| 33728 | `0x557070` | MagicTarget::DispelAllSpells | Respawn. |
+| 37943 | `0x640f30` | ActorEquipManager::UnequipAll | Inventory rebuilds. |
+| 34444 | `0x574bf0` | MenuTopicManager::PlayDialogueOption | Dialogue sync; the "heard twice" bug lives near it. |
+| 26454, 69335 | `0x3eada0`, `0xcaef60` | FaceGen tints and texture | "Face looks off" on copies. |
+| 32139 | `0x500890` | RevertAnimationGraphManager | Animation graph swaps on copies. |
+
+Not an address but the most valuable single read: the call at SE Actor::StealAlarm+0x12D9 (0x1405DEA49, VR
+0x5e7099) that ran with a null this on 2026-09-20 17:59 (Seen's crash, RSI = Frea, a remotely driven follower).
+Which field of a follower is null when its AI is not run locally?
 
 ## 5. Has an address, never confirmed
 

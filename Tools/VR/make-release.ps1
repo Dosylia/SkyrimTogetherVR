@@ -54,7 +54,7 @@ Copy-Item (Join-Path $RepoRoot 'GameFiles\Skyrim') (Join-Path $staging 'Skyrim T
 
 # Never VR_MULTIPLAYER_GUIDE.md: it carries the host's public IP, PC name and router settings.
 Copy-Item (Join-Path $PSScriptRoot 'README-release.md') (Join-Path $staging 'README.md')
-foreach ($readme in 'README-mod-manager.md', 'README-manual.md', 'README-host.md') {
+foreach ($readme in 'README-mod-manager.md', 'README-vortex.md', 'README-manual.md', 'README-host.md') {
     Copy-Item (Join-Path $PSScriptRoot $readme) $staging
 }
 
