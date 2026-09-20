@@ -460,14 +460,16 @@ the headset off.
 
 ## 5. Polish
 
-- [x] **[untested] Friend's name and health above their head, using the game's own enemy meter.** The probe of
-      2026-09-20 18:56 read the message the game sends on a hit: an update for WSEnemyMeters carrying a HUDData with
-      type 0xB, the actor's level at +0x20, two flag bytes 1,1 at +0x22 and the actor handle at +0x28 (0 clears),
-      sent from SE 0x1408D5130+0x284 (id 51900, misnamed in the public database); EnemyHealth::Update then shows the
-      meter. The client now points the meter at the nearest living remote player within 1500 units every half
-      second (`Enemy meter: showing remote player ...`), clears it once when nobody is near, and stays off for 8 s
-      after the game pointed it at a real enemy. First session with it: 19:xx build showed nothing because the
-      driver did not exist yet, only the probe.
+- [x] **[untested] Friend's name and health above their head, on the game's own enemy meter.** The message was
+      read off the game's own sends on 2026-09-20 18:56: an update for WSEnemyMeters carrying a HUDData with type
+      0xB, the actor's level at +0x20, two flag bytes 1,1 at +0x22 and the actor handle at +0x28 (0 clears), sent
+      from SE 0x1408D5130+0x284; EnemyHealth::Update then draws it. Proven in play that evening (Seen saw Emma's
+      bar once), but rarely: the first rules held off for 8 s after any target the game set, and the game
+      re-points on every hit, so in a dungeon it almost never got a turn. Since 21:5x the friend's bar comes up
+      when you look at them (18 degrees to acquire, 32 to hold, out to 3000 units) or whenever they are under 60%
+      health however you are facing, the hold-off after the game's own target is 2 s, and it refreshes four times
+      a second so it does not fade. One line per change of target says which rule brought it up and how far off
+      centre they were.
 - [ ] Clean remote spawn: fade in instead of popping or falling. Place on the ground if the
       interpolated Z is invalid ("mammoth fell from the sky").
 - [ ] Death and bleedout: HUD message "X is down", and optionally revive by activating the downed

@@ -702,15 +702,13 @@ bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
 // Posing an actor the renderer has culled tore its skin into black strips in TiltedEvolutionVR, so only actors in
 // front of the headset are posed. A sphere around the chest is tested against a 50 degree cone, widened by the angle
 // the sphere covers, so an actor close by counts as visible whatever the angle.
-bool IsInView(const glm::vec3& acChest) noexcept
+// The headset's world transform, or null when this build's PlayerCharacter does not carry it where we look.
+const NiTransform* HeadsetTransform() noexcept
 {
-    constexpr float cHalfAngle = 50.f * glm::pi<float>() / 180.f;
-    constexpr float cBodyRadius = 100.f;
-
     static int s_hmdState = 0; // 0 unchecked, 1 valid, -1 not the headset node on this build
     PlayerCharacter* pPlayer = PlayerCharacter::Get();
     if (!pPlayer || s_hmdState < 0)
-        return true;
+        return nullptr;
 
     void* pHmd = At<void*>(pPlayer, kHmdNodeOffset);
     if (s_hmdState == 0)
@@ -720,13 +718,23 @@ bool IsInView(const glm::vec3& acChest) noexcept
         if (s_hmdState < 0)
         {
             spdlog::warn("VRBodySync: PlayerCharacter+0x{:X} isn't the headset node, remote players are posed even out of view", kHmdNodeOffset);
-            return true;
+            return nullptr;
         }
     }
     if (!pHmd)
-        return true;
+        return nullptr;
+    return &At<NiTransform>(pHmd, kWorldOffset);
+}
 
-    const auto& hmd = At<NiTransform>(pHmd, kWorldOffset);
+bool IsInView(const glm::vec3& acChest) noexcept
+{
+    constexpr float cHalfAngle = 50.f * glm::pi<float>() / 180.f;
+    constexpr float cBodyRadius = 100.f;
+
+    const NiTransform* pHmdTransform = HeadsetTransform();
+    if (!pHmdTransform)
+        return true;
+    const NiTransform& hmd = *pHmdTransform;
     const glm::vec3 toChest = acChest - ToGlm(hmd.translate);
     const float distance = glm::length(toChest);
     if (distance <= cBodyRadius)
@@ -863,6 +871,22 @@ void OnFrameEnd() noexcept
 
         PoseActor(rig, pose);
     }
+}
+
+float HeadsetAngleTo(const NiPoint3& acPosition) noexcept
+{
+    const NiTransform* pHmdTransform = HeadsetTransform();
+    if (!pHmdTransform)
+        return -1.f;
+
+    const glm::vec3 toTarget = ToGlm(acPosition) - ToGlm(pHmdTransform->translate);
+    const float distance = glm::length(toTarget);
+    if (distance < 1.f)
+        return 0.f;
+
+    const glm::vec3 forward = ToGlm(pHmdTransform->rotate)[1]; // Skyrim: X right, Y forward, Z up
+    const float offAxis = std::acos(glm::clamp(glm::dot(forward, toTarget / distance), -1.f, 1.f));
+    return offAxis * 180.f / glm::pi<float>();
 }
 
 std::string DescribeBody(Actor* apActor) noexcept

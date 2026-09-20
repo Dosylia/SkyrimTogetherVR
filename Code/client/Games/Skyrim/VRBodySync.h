@@ -30,6 +30,10 @@ void LogCastOrigin(Actor* apActor, uint32_t aCastingSource) noexcept;
 //! frames on a body that is moving mean its animation graph is not advancing (the walk cycle would change them).
 //! 0 when the actor has no 3D.
 uint64_t SkeletonMotionFingerprint(Actor* apActor) noexcept;
+//! Angle in degrees between where the headset points and a world position: 0 is dead centre, -1 when the headset
+//! node cannot be read on this build. Tells whether the player is looking at something.
+float HeadsetAngleTo(const NiPoint3& acPosition) noexcept;
+
 //! TEMPORARY: one line about an actor's 3D for the invisible-copy diagnosis: root, its children, the skeleton root's
 //! world scale and position.
 std::string DescribeBody(Actor* apActor) noexcept;

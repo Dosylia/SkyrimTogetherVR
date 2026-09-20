@@ -1855,19 +1855,26 @@ std::chrono::steady_clock::time_point CharacterService::LastMoveSentAt() noexcep
     return s_lastMoveSentAt;
 }
 
-// The other player's name and health above their head, using the game's own enemy meter (decided 2026-09-20: the
-// world-space bar NPCs get, nothing of ours). The nearest living remote player within 1500 units is pointed at every
-// half second, which is how the game itself keeps the meter up during a fight; the game's own target (a real enemy
-// hit in the last 8 s) always wins, and the meter is cleared once when no player is near any more.
+// The other player's name and health above their head, on the game's own world-space meter (the bar and name an
+// NPC gets, WSEnemyMeters). There is one such meter and the game wants it too, so the rules keep it out of a real
+// fight: the game's own target wins while it is fresh, and the friend's bar comes up when you look at them, or
+// whenever they are hurt however you are facing. The first try held off for 8 s after any game target, which in a
+// dungeon meant it almost never got a turn ("the healthbars don't seem to be consistent", 2026-09-20 21:15).
 void CharacterService::RunEnemyMeterUpdates() noexcept
 {
 #ifdef SKYRIMVR
+    constexpr float cRange = 3000.f;      // about 40 m
+    constexpr float cAcquireAngle = 18.f; // degrees off the centre of your gaze to bring the bar up
+    constexpr float cHoldAngle = 32.f;    // wider once it is up, so a glance aside does not drop it
+    constexpr float cHurtFraction = 0.6f; // below this, show them wherever you are looking
+    constexpr float cBlindRange = 1500.f; // fallback when the headset node cannot be read
+
     static std::chrono::steady_clock::time_point s_next;
     static uint32_t s_shownHandle = 0;
     const auto now = std::chrono::steady_clock::now();
     if (now < s_next)
         return;
-    s_next = now + 500ms;
+    s_next = now + 250ms; // the meter fades if it is not told again, so this is a refresh as much as a decision
 
     const auto clear = [&]()
     {
@@ -1883,44 +1890,74 @@ void CharacterService::RunEnemyMeterUpdates() noexcept
         clear();
         return;
     }
-    if (now - UI::LastGameEnemyMeterTargetAt() < 8s)
+    // The game pointed the meter at something of its own (a hit on an enemy). Leave it alone, but only briefly:
+    // it re-points on every hit, so a long hold-off means the friend's bar never appears in a fight.
+    if (now - UI::LastGameEnemyMeterTargetAt() < 2s)
     {
-        s_shownHandle = 0; // the game owns the meter for now
+        s_shownHandle = 0;
         return;
     }
     PlayerCharacter* pPlayer = PlayerCharacter::Get();
     if (!pPlayer)
         return;
 
-    Actor* pNearest = nullptr;
-    float nearestSq = 1500.f * 1500.f;
+    Actor* pBest = nullptr;
+    float bestScore = 0.f, bestDistance = 0.f, bestAngle = -1.f;
+    const char* pReason = "";
+
     auto view = m_world.view<PlayerComponent, FormIdComponent, RemoteComponent>();
     for (auto entity : view)
     {
         Actor* pActor = Cast<Actor>(TESForm::GetById(view.get<FormIdComponent>(entity).Id));
         if (!pActor || !pActor->GetNiNode() || pActor->actorState.IsDeadOrDying())
             continue;
+
         const float dx = pActor->position.x - pPlayer->position.x;
         const float dy = pActor->position.y - pPlayer->position.y;
         const float dz = pActor->position.z - pPlayer->position.z;
-        const float distSq = dx * dx + dy * dy + dz * dz;
-        if (distSq < nearestSq)
+        const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (distance > cRange)
+            continue;
+
+        NiPoint3 chest = pActor->position;
+        chest.z += 100.f; // the head and chest, not the feet: that is what you look at
+        const float angle = VRBodySync::HeadsetAngleTo(chest);
+
+        const uint32_t handle = pActor->GetHandle().handle.iBits;
+        const bool held = handle != 0 && handle == s_shownHandle;
+        const bool looking = angle < 0.f ? distance < cBlindRange : angle <= (held ? cHoldAngle : cAcquireAngle);
+
+        const float maxHealth = pActor->GetActorPermanentValue(ActorValueInfo::kHealth);
+        const float fraction = maxHealth > 0.f ? pActor->GetActorValue(ActorValueInfo::kHealth) / maxHealth : 1.f;
+        const bool hurt = fraction < cHurtFraction;
+
+        if (!looking && !hurt)
+            continue;
+
+        // Looking at someone beats a scratch across the room; the worse they are hurt, the more it counts.
+        const float score = (looking ? 100.f - std::max(angle, 0.f) : 0.f) + (hurt ? (1.f - fraction) * 60.f : 0.f);
+        if (score > bestScore)
         {
-            nearestSq = distSq;
-            pNearest = pActor;
+            bestScore = score;
+            bestDistance = distance;
+            bestAngle = angle;
+            pBest = pActor;
+            pReason = looking ? (hurt ? "looked at, and hurt" : "looked at") : "hurt";
         }
     }
-    if (!pNearest)
+
+    if (!pBest)
     {
         clear();
         return;
     }
-    const uint32_t handle = pNearest->GetHandle().handle.iBits;
+    const uint32_t handle = pBest->GetHandle().handle.iBits;
     if (!handle)
         return;
     if (handle != s_shownHandle)
-        spdlog::info("Enemy meter: showing remote player {:X} (level {}) at {:.0f} units", pNearest->formID, pNearest->GetLevel(), std::sqrt(nearestSq));
-    UI::SetEnemyMeterTarget(handle, pNearest->GetLevel());
+        spdlog::info("Enemy meter: showing remote player {:X} ({}), {:.0f} units away, {:.0f} degrees off centre, level {}", pBest->formID, pReason, bestDistance, bestAngle,
+                     pBest->GetLevel());
+    UI::SetEnemyMeterTarget(handle, pBest->GetLevel());
     s_shownHandle = handle;
 #endif
 }
