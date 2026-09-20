@@ -352,6 +352,17 @@ void ActorValueService::OnActorValueChanges(const NotifyActorValueChanges& acMes
         if (key == ActorValueInfo::kDragonSouls)
             continue;
 
+        // Every actor value is copied to a player's copy, and invisibility is one of them (54). A copy with it above
+        // zero is exactly the bug of 2026-09-20 21:12, 21:20 and 21:27: standing there, hittable, animating, full
+        // health, 3D intact, not drawn, cured only by a reconnect that rebuilds the copy from a fresh snapshot.
+        // The other player must always see the body; whatever hides the owner on his own screen stays there.
+        if (isRemotePlayer && key == ActorValueInfo::kInvisibility)
+        {
+            if (value != 0.f)
+                spdlog::info("Remote player {:X} copy refused invisibility {:.2f} from its owner; a copy is always drawn", pActor->formID, value);
+            continue;
+        }
+
         // Health used to be skipped for everyone. A remote player's copy then only ever lost health (the damage
         // deltas arrive, the healing never did), and the copy is essential with no bleedout recovery, so once that
         // stale health hit zero the copy lay down in the grass for good: "his body is gone, I can still see his spell

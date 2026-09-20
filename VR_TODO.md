@@ -74,17 +74,21 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       player copies. `SinkDiag` stays in; if it names nothing for another two sessions, close this. The havok
       capsule read (TiltedEvolutionVR `aaf5d83`: controller at `MiddleProcess+0x250`, `+0x360` bhkRigidBody,
       `+0x10` hkpRigidBody, position `+0x1A0`, filter `+0x4C`) is only worth doing if it comes back.
-- [x] **[untested] Copy hittable but not seen after a death (19:07 Seen for the host, 19:10 the host for Seen,
-      2026-09-20; the reconnects were the cure, not the trigger).** Both copies were rebuilt after their owner's
-      death from the server's stored health (-30, -11), started at 1 by the earlier clamp, and were corrected to the
-      real value a second later. Both were then animating and hittable (hit for 2 at 19:10:37) but never drawn;
-      the copies that started healthy were fine. At 1 health one landing or one hit puts the essential copy down,
-      and with no bleedout recovery it stays down, undrawn, for the session. Since 2026-09-20 19:4x: a copy is
-      never given less than a quarter of its maximum health (25 at least) at spawn or by any update, and copies
-      may recover from bleedout, so a restored health stands them up. `CopyDiag:` (every 5 s per remote player
-      copy: distance, height, form flags, health, dead and bleedout state, 3D root and children, scales) stays in
-      to confirm the mechanism, and `STBot.exe scriptseconnect.txt` reproduces a drop and reconnect if that is
-      ever needed again. Hand-offs were not involved (zero on the server all session).
+- [x] **[untested] Copy hittable but not seen (EMERGENCY, 2026-09-20 21:12, 21:20, 21:27 and many more; every
+      reconnect that evening was a cure for it).** The copy-state probe settled what it is not: at the moment the
+      other player could not be seen, the copy stood 65 units away with full health, not dead, not bleeding out,
+      not disabled, its 3D root intact with all children, scales normal. So neither the health floor (the evening's
+      first guess) nor the body scale. What it is, from the code: every one of the 164 actor values is copied from
+      the owner to the copy on every change, and value 54 is invisibility. A copy with it above zero is exactly
+      the symptom: present, hittable, animating, not drawn; a reconnect rebuilds the copy from a fresh snapshot,
+      which is why it cured it every time. Upstream had already met this once and left a hook on the effect's
+      Finish "because the actor value does not update in time". Since 2026-09-20 21:5x: a player's copy refuses
+      invisibility from its owner on update (`refused invisibility`) and at spawn (`spawned visible instead`),
+      and a sweep every 5 s clears any that got through by another road, a magic effect the copy ran itself for
+      instance (`copy was invisible ...; cleared`). The other player must always see the body; whatever hides the
+      owner on his own screen stays there. If a copy is ever invisible with that value at zero, `CopyDiag` now
+      also prints whether the 3D root has a parent and the raw words after the node bounds (flags and fade live
+      there), to be compared visible against invisible.
 
 - [ ] **Followers turning on the other player can crash him (2026-09-20 17:59).** Emma's Lydia and Frea
       attacked Seen; he ran and the game died in `Actor::StealAlarm` (the crime alarm), reading through a null

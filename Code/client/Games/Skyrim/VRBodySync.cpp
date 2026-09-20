@@ -874,9 +874,16 @@ std::string DescribeBody(Actor* apActor) noexcept
     const uint32_t fingerprint = ChildFingerprintOf(AsNode(pRoot));
     const NiTransform& rootWorld = At<NiTransform>(pRoot, kWorldOffset);
     const NiTransform& skeletonWorld = At<NiTransform>(pSkeletonRoot, kWorldOffset);
-    return fmt::format("3D root {} with {} of {} child slots filled, root world scale {:.3f} at ({:.0f}, {:.0f}, {:.0f}), skeleton root {} world scale {:.3f}", pRoot,
-                       fingerprint & 0xFFFF, fingerprint >> 16, rootWorld.scale, rootWorld.translate.x, rootWorld.translate.y, rootWorld.translate.z,
-                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale);
+    // If invisibility is not it, the next suspects live on the root node itself: no parent (the 3D is not in the
+    // scene), or the flag and fade words after the bounds. Their exact VR offsets are not measured, so the words from
+    // +0xE4 to +0x11C are printed raw; a visible copy against an invisible one shows which word it is.
+    void* pParent = At<void*>(pRoot, kParentOffset);
+    std::string words;
+    for (uint32_t offset = 0xE4; offset < 0x120; offset += 4)
+        words += fmt::format("{}{:x}", offset == 0xE4 ? "" : " ", At<uint32_t>(pRoot, offset));
+    return fmt::format("3D root {} (parent {}) with {} of {} child slots filled, root world scale {:.3f} at ({:.0f}, {:.0f}, {:.0f}), skeleton root {} world scale {:.3f}, node words [{}]", pRoot,
+                       pParent ? "yes" : "NONE", fingerprint & 0xFFFF, fingerprint >> 16, rootWorld.scale, rootWorld.translate.x, rootWorld.translate.y, rootWorld.translate.z,
+                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale, words);
 }
 
 bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept

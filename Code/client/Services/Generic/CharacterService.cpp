@@ -229,6 +229,13 @@ void ReleaseAllGhosts() noexcept
 ActorValues StandingValues(const ActorValues& acValues, const uint32_t aFormId) noexcept
 {
     ActorValues values = acValues;
+    // Invisibility (54) travels with every other value. A copy born invisible stays invisible until a reconnect
+    // rebuilds it (2026-09-20 evening, "can be hit but not seen", many times). Never on a copy.
+    if (auto inv = values.ActorValuesList.find(ActorValueInfo::kInvisibility); inv != values.ActorValuesList.end() && inv->second != 0.f)
+    {
+        spdlog::info("Remote player {:X} copy would have spawned invisible ({:.2f}); spawned visible instead", aFormId, inv->second);
+        inv.value() = 0.f;
+    }
     auto it = values.ActorValuesList.find(ActorValueInfo::kHealth);
     if (it == values.ActorValuesList.end())
         return values;
@@ -1944,9 +1951,17 @@ void CharacterService::RunRemotePlayerDiag() noexcept
         const float dx = pActor->position.x - pPlayer->position.x;
         const float dy = pActor->position.y - pPlayer->position.y;
         const float dz = pActor->position.z - pPlayer->position.z;
-        spdlog::info("CopyDiag: player copy {:X} '{}' {:.0f} units away, dz {:.0f}, form flags {:X}, health {:.0f}, dead {}, bleedout {}, state1 {:X}, {}", pActor->formID,
+        // The sweep: whatever put invisibility on the copy (a synced value, a magic effect the copy itself ran), it is
+        // taken off again within 5 s, and the log says so. Belt and braces to the refusals at spawn and on update.
+        const float invisibility = pActor->GetActorValue(ActorValueInfo::kInvisibility);
+        if (invisibility != 0.f)
+        {
+            spdlog::info("Remote player {:X} copy was invisible ({:.2f}); cleared", pActor->formID, invisibility);
+            pActor->SetActorValue(ActorValueInfo::kInvisibility, 0.f);
+        }
+        spdlog::info("CopyDiag: player copy {:X} '{}' {:.0f} units away, dz {:.0f}, form flags {:X}, health {:.0f}, dead {}, bleedout {}, state1 {:X}, invisibility {:.2f}, {}", pActor->formID,
                      pActor->baseForm ? Cast<TESNPC>(pActor->baseForm)->fullName.value.AsAscii() : "?", std::sqrt(dx * dx + dy * dy + dz * dz), dz, pActor->flags,
-                     pActor->GetActorValue(24), pActor->IsDead(), pActor->actorState.IsBleedingOut(), pActor->actorState.flags1, VRBodySync::DescribeBody(pActor));
+                     pActor->GetActorValue(24), pActor->IsDead(), pActor->actorState.IsBleedingOut(), pActor->actorState.flags1, invisibility, VRBodySync::DescribeBody(pActor));
     }
 }
 
