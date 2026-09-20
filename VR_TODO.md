@@ -2,7 +2,7 @@
 
 Plan for getting from "co-op works" to "smooth, and easy for other people to set up".
 Items are ordered by priority inside each section. Details on existing bugs are in
-`KNOWN_ISSUES.md`, and missing VR addresses are in `VR_POINTERS_TODO.md`.
+`KNOWN_ISSUES.md`.
 
 Status tags: **[untested]** built but never checked in game · **[measure]** needs numbers
 before any change · **[big]** several sessions of work.
@@ -86,6 +86,12 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       to confirm the mechanism, and `STBot.exe scriptseconnect.txt` reproduces a drop and reconnect if that is
       ever needed again. Hand-offs were not involved (zero on the server all session).
 
+- [ ] **Followers turning on the other player can crash him (2026-09-20 17:59).** Emma's Lydia and Frea
+      attacked Seen; he ran and the game died in `Actor::StealAlarm` (the crime alarm), reading through a null
+      pointer. Stack: SE `0x1405DEA49` / VR `SkyrimVR.exe+0x5e7099`, with Frea (Dragonborn.esm 0x03017A0D) in
+      RSI, a follower driven from the other side. The two frames above it were outside every module, which is
+      what a hook trampoline looks like. Open question: which field of a follower is null when its AI is not run
+      locally. Until that is known, expect a crash whenever one player's follower turns hostile to the other.
 - [ ] **Dropped items not visible** to the other player. Sender logs `drop: true`, receiver logs
       `Remote actor ... drops item`. Check both on the next drop. Reported with it (2026-09-20): when he drops
       something, his copy's body stays in place but "all his bones try to violently leave it". That is the VR
@@ -376,11 +382,6 @@ What we know:
 
 ## 3. Stability
 
-- [ ] **Missing VR addresses that matter** (`VR_POINTERS_TODO.md` section 2): five left after the placeholders
-      and no-ops were struck on 2026-09-20. Only two gate anything a player sees (the combat target hook and the
-      naked-NPC fix, which has a workaround). Do one when a bug points at it, not as a batch.
-- [ ] **About 100 addresses never confirmed against VR code** (`VR_POINTERS_TODO.md` section 5). Most
-      were matched independently by two methods; confirm them in the disassembly when a crash points near one.
 - [ ] **CEF crash guard audit.** Before the VR menu is created, any overlay call is a hard crash. Check
       that every `OverlayService` / `ExecuteAsync` / `CefListValue` path is guarded.
 - [ ] **Intermittent crash:** a script event sent to a freed temporary reference during cell attach

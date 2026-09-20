@@ -2,7 +2,6 @@
 
 What is different, missing or fragile in the Skyrim VR (1.4.15) port, and why. Related files:
 - `VR_TODO.md`: the roadmap.
-- `VR_POINTERS_TODO.md`: game addresses still missing or unconfirmed on VR.
 - `VR_MULTIPLAYER_GUIDE.md`: how to install and play.
 - `github.com/cmpayc/TiltedEvolutionVR`: an independent VR port; its address table and fixes were used here.
 
@@ -179,8 +178,6 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   local actor.
 - **Intermittent crash:** a script event sent to a freed temporary form during cell attach, seen once.
   EngineFixesVR form caching is a suspect. A heap dump is needed if it repeats.
-- **Unconfirmed addresses** (`VR_POINTERS_TODO.md` section 5): suspect these first when a crash lands
-  near one.
 
 ## 7. Debugging
 
