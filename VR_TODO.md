@@ -71,6 +71,21 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       `MiddleProcess+0x250`, `+0x360` bhkRigidBody, `+0x10` hkpRigidBody, position `+0x1A0`, filter `+0x4C`).
 - [ ] **Dropped items not visible** to the other player. Sender logs `drop: true`, receiver logs
       `Remote actor ... drops item`. Check both on the next drop.
+- [x] **World frozen at load (2026-09-20, 01:34 to 02:36).** Music on, nothing moving, still rendering, no menu
+      visible. Not the connection, the bot or the copy fix: a probe of the game's pause counter and menu stack showed
+      a `MessageBoxMenu` with the pause flag sitting in the stack from the end of every save load (and one at the
+      main menu), with no text and no buttons. A hook on `UIMessageQueue::AddMessage` (VR address from the public
+      VR address database, id 13631 = SE 13530) named the sender: `SkyrimVR.exe+0x168507`, the game itself, a show
+      request with no data. Such a box displays nothing and cannot be dismissed; when it opened before the
+      connection it paused the world, when it opened after, our menu hook unpaused it but it swallowed the first
+      controller press (which sent the game to the main menu). The client now drops a MessageBoxMenu show that
+      carries no data (`UI.cpp`, logged as `dropped, a box with no content can only pause the world`). Why the game
+      started sending it on the 20th and not on the 19th is not proven; the likely trigger is the VR controller
+      state at those moments (asleep while the player was at the keyboard), which the VR layer reports through this
+      box. The diagnostics stay in for now: `Probe` every 5 s, `Menu queued`, `UI message for MessageBoxMenu`.
+- [ ] **VR tab Disconnect reconnects by itself.** It closes the socket through the overlay client, which the
+      auto-reconnect treats as a dropped line (`attempt 2` five seconds later, 01:55:37). Route it through
+      `VRConnectService` so a chosen disconnect stays disconnected.
 - [ ] **Pause menu: "weird things happen to both players".** No trace in either log. Needs a description.
 - [ ] **Nocked arrow not shown** on the other player's bow (the arrow leaves fine). The nocked arrow is an
       animation attachment and VR players never play the draw animation.
@@ -355,3 +370,39 @@ the headset off.
       gets the exe and pdb from there. The server must be rebuilt and restarted with every deploy for now (the
       version string covers both).
 - [ ] No debugger attached by default (see 1.1).
+
+### 6.1 Test bot: a second player without a second headset (planned 2026-09-20)
+
+A console program, target `STBot` under `Code/bot`, built from the same tree (same version string), that connects
+to a server exactly like a client and drives one player character from a script. Phase 1 changes no client or
+server code; it only links `SkyrimEncoding` and `TiltedConnect`. Built 2026-09-20 01:20; the handshake, the mod
+list, the host position from the host's log and the scouting were checked against the local server. The spawn,
+movement, death and respawn paths are **[untested]** until a headset is in the game.
+
+**Run it** (server, then the game joined to it, then the bot, from `build\windowsdelease`):
+`STBot.exe ..\..\..\..\Codeot\scripts\copy-respawn.txt` (defaults: `--server 127.0.0.1:10578`, the
+password from `config\STServer.ini` via `--password`, `--hostlog` the host's `tp_client.log`, `--spacing 200`).
+Its log is `logsot.log` next to the exe. The clone carries the host's face, outfit and in-game name.
+
+- [x] **Handshake:** `AuthenticationRequest` with the tree's `BUILD_COMMIT`, the password, a name, `Skyrim.esm` as
+      the mod list (form ids below come from it), level, time. The server's mod policy is off for us.
+- [ ] **[untested] Character:** wait for the host's own `CharacterSpawnRequest`, reuse its `AppearanceBuffer` and `ChangeFlags`
+      (the bot is a clone of the host, so the receiving client builds the face from data it already accepts), then
+      `AssignCharacterRequest` 200 units from the host with the same worldspace and cell, Nord race, iron sword and
+      Flames in the inventory, health 100. Then `EnterExteriorCellRequest` from the host's grid.
+- [x] **Never own anything:** the server makes the first player party leader, so the bot leaves any party it is
+      asked to lead and stays as a plain member otherwise. Any (the leader claims every actor). Any
+      `NotifyOwnershipTransfer` the server hands the bot is sent straight back (`RequestOwnershipTransfer`), otherwise
+      the NPCs it would own freeze on the host's screen.
+- [x] **Script primitives** (a text file, one line each): `log`, `wait s`, `walk x y [speed]`, `walk rel dx dy [speed]`,
+      `follow distance seconds`, `equip hexid [left|both] [spell]`, `unequip hexid`, `health n`, `damage n`, `die`,
+      `respawn` (`PlayerRespawnRequest`, health restored 500 ms later, like the client), `disconnect`, `reconnect`,
+      `loop`, `stop`, `start x y`. Not yet: `cast`, interiors. Movement is `ClientReferencesMoveRequest` at 20 Hz with
+      positions only: the copy slides, which is enough for spawn, range, hand-off, death and health tests.
+- [ ] **[untested] First scenario, the bug of 2026-09-19** (`Code/bot/scripts/copy-respawn.txt`): spawn, walk past the host, take damage to -4, respawn, keep walking.
+      Pass: the host's log shows `copy would have spawned with the owner's health -4 ... started at 1` and the copy
+      stays visible after the respawn.
+- [ ] **Phase 2, real animation:** record the host's own outgoing packets into `logs\session.stpcap` (a log like
+      `tp_client.log`, capped and rotated, not a toggle) and let the bot replay a recording with its server ids
+      remapped, so the copy walks, fights and casts like a real player.
+- [ ] **Where it runs:** on the host's PC against the local server. Never on the friend's server during play.

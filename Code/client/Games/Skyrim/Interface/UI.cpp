@@ -81,6 +81,69 @@ static void UnfreezeMenu(IMenu* apEntry)
         apEntry->ClearFlag(IMenu::kFreezeFramePause);
 }
 
+// TEMPORARY (2026-09-20): a message box opens at the end of every save load and, when it opens before the connection,
+// pauses the world for good. Nothing names it, so the strings reachable from the menu object are dumped: the box's
+// data hangs off the menu, and its body text and button labels are plain C strings. Every read is checked against
+// the page tables first, so a wrong guess prints nothing instead of crashing. Remove once the box is identified.
+namespace
+{
+bool ReadableBytes(const void* apAddress, const size_t aBytes) noexcept
+{
+    if (!apAddress)
+        return false;
+    MEMORY_BASIC_INFORMATION info{};
+    if (!VirtualQuery(apAddress, &info, sizeof(info)))
+        return false;
+    if (info.State != MEM_COMMIT || (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+        return false;
+    return reinterpret_cast<uintptr_t>(apAddress) + aBytes <= reinterpret_cast<uintptr_t>(info.BaseAddress) + info.RegionSize;
+}
+
+std::string PrintableTextAt(const char* apText) noexcept
+{
+    std::string text;
+    for (size_t i = 0; i < 200; ++i)
+    {
+        if (!ReadableBytes(apText + i, 1))
+            return {};
+        const char c = apText[i];
+        if (c == 0)
+            break;
+        if (c == '\n' || c == '\r' || c == '\t')
+        {
+            text += ' ';
+            continue;
+        }
+        if (c < 0x20 || c > 0x7E)
+            return {};
+        text += c;
+    }
+    return text.size() >= 4 ? text : std::string{};
+}
+
+void CollectStrings(const void* apObject, const size_t aBytes, const int aDepth, std::string& aOut) noexcept
+{
+    if (!ReadableBytes(apObject, aBytes))
+        return;
+    for (size_t offset = 0; offset < aBytes; offset += sizeof(void*))
+    {
+        const char* pCandidate = *reinterpret_cast<const char* const*>(static_cast<const uint8_t*>(apObject) + offset);
+        const std::string text = PrintableTextAt(pCandidate);
+        if (!text.empty())
+            aOut += fmt::format(" [+{:X}] \"{}\"", offset, text);
+        else if (aDepth > 0)
+            CollectStrings(pCandidate, 0x80, aDepth - 1, aOut);
+        if (aOut.size() > 1500)
+            return;
+    }
+}
+} // namespace
+
+void UI::CollectReadableStrings(const void* apObject, const size_t aBytes, const int aDepth, std::string& aOut) noexcept
+{
+    CollectStrings(apObject, aBytes, aDepth, aOut);
+}
+
 static constexpr const char* kAllowList[] = {
     "TweenMenu",     "MagicMenu",     "InventoryMenu",
 #ifndef SKYRIMVR
@@ -100,6 +163,19 @@ static void* (*UI_AddToActiveQueue)(UI*, IMenu*, void*);
 
 static void* UI_AddToActiveQueue_Hook(UI* apSelf, IMenu* apMenu, void* apFoundItem /*In reality a reference*/)
 {
+    // TEMPORARY (2026-09-20): every menu the game queues, connected or not, for the frozen-world timeline.
+    if (apMenu)
+    {
+        const BSFixedString* pName = apSelf->LookupMenuNameByInstance(apMenu);
+        spdlog::info("Menu queued: {}{} (connected {})", pName ? pName->AsAscii() : "?", apMenu->PausesGame() ? " [pauses]" : "", World::Get().GetTransport().IsConnected() ? "yes" : "no");
+        if (pName && strcmp(pName->AsAscii(), "MessageBoxMenu") == 0)
+        {
+            std::string strings;
+            CollectStrings(apMenu, 0xC0, 2, strings);
+            spdlog::info("MessageBoxMenu strings:{}", strings.empty() ? " (none readable)" : strings.c_str());
+        }
+    }
+
     // if the menu is empty we let the real function handle it.
     if (!apMenu || !World::Get().GetTransport().IsConnected() || stubs::g_IsSoulsREActive)
         return UI_AddToActiveQueue(apSelf, apMenu, apFoundItem);
@@ -130,10 +206,49 @@ static void* UI_AddToActiveQueue_Hook(UI* apSelf, IMenu* apMenu, void* apFoundIt
 using TCallback = void(void*, const BSFixedString*, uint32_t, void*);
 static TCallback* UIMessageQueue__AddMessage_Real;
 
-// Useful for debugging UI related issues.
+// TEMPORARY (2026-09-20): a message box with nothing in it opened at the main menu and at the end of every save load
+// and paused the world for good. Every message aimed at MessageBoxMenu is logged with its caller and its text, and a
+// show request that carries no data at all is dropped: it cannot display anything, it can only hold the pause.
+static void DescribeCaller(void* apAddress, char* apOut, const size_t aOutSize) noexcept
+{
+    HMODULE hModule = nullptr;
+    char name[MAX_PATH] = {};
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, static_cast<LPCSTR>(apAddress), &hModule) && hModule &&
+        GetModuleFileNameA(hModule, name, sizeof(name)))
+    {
+        const char* pBase = strrchr(name, 92);
+        _snprintf_s(apOut, aOutSize, _TRUNCATE, "%s+0x%llx", pBase ? pBase + 1 : name, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(apAddress) - reinterpret_cast<uintptr_t>(hModule)));
+        return;
+    }
+    const uintptr_t address = reinterpret_cast<uintptr_t>(apAddress);
+    if (address >= 0x140000000ull && address < 0x140000000ull + 0x8000000ull)
+        _snprintf_s(apOut, aOutSize, _TRUNCATE, "SkyrimVR.exe+0x%llx", static_cast<unsigned long long>(address - 0x140000000ull));
+    else
+        _snprintf_s(apOut, aOutSize, _TRUNCATE, "<0x%llx>", static_cast<unsigned long long>(address));
+}
+
 void UIMessageQueue__AddMessage(void* a1, const BSFixedString* a2, UIMessage::UI_MESSAGE_TYPE a3, void* a4)
 {
-    spdlog::info("Adding Message {} with prio {} from {}", a2->AsAscii(), a3, fmt::ptr(_ReturnAddress()));
+    if (a2 && a2->AsAscii() && strcmp(a2->AsAscii(), "MessageBoxMenu") == 0)
+    {
+        char caller[160];
+        DescribeCaller(_ReturnAddress(), caller, sizeof(caller));
+
+        std::string text;
+        if (a4)
+        {
+            // MessageBoxData (CommonLibVR): BSString bodyText at +0x10, whose first field is the char pointer.
+            const uint8_t* pBody = static_cast<const uint8_t*>(a4) + 0x10;
+            if (ReadableBytes(pBody, 16))
+                text = PrintableTextAt(*reinterpret_cast<const char* const*>(pBody));
+        }
+
+        const bool empty = a3 == UIMessage::kShow && a4 == nullptr;
+        spdlog::info("UI message for MessageBoxMenu: type {}, data {}, text '{}', from {}{}", static_cast<int>(a3), a4 ? "yes" : "no", text, caller,
+                     empty ? "; dropped, a box with no content can only pause the world" : "");
+        if (empty)
+            return;
+    }
     UIMessageQueue__AddMessage_Real(a1, a2, a3, a4);
 }
 
@@ -165,9 +280,19 @@ static TiltedPhoques::Initializer s_s(
         TiltedPhoques::Put<uint16_t>(FavoritesCanProcess.Get() + 0x15, 0x9090);
 
         // Some experiments:
-        // POINTER_SKYRIMSE(TCallback, s_start, 13631, 13530);
-        // UIMessageQueue__AddMessage_Real = s_start.Get();
-        // TP_HOOK(&UIMessageQueue__AddMessage_Real, UIMessageQueue__AddMessage);
+#ifdef SKYRIMVR
+        {
+            POINTER_SKYRIMSE(TCallback, s_addMessage, 13530, 13631);
+            if (s_addMessage.Get())
+            {
+                UIMessageQueue__AddMessage_Real = s_addMessage.Get();
+                TP_HOOK(&UIMessageQueue__AddMessage_Real, UIMessageQueue__AddMessage);
+                spdlog::info("UI message queue hooked for the message box diagnostic");
+            }
+            else
+                spdlog::warn("UI message queue: id 13631 not resolved, message box diagnostic off");
+        }
+#endif
 
         // This kills the loading spinner
         // TiltedPhoques::Put<uint8_t>(0x1405D51C1, 0xEB);

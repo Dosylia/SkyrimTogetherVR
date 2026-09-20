@@ -1,0 +1,37 @@
+# The bug of 2026-09-19 evening: a player dies and respawns; the fresh copy the others receive is built from the
+# server's stored values, so it used to start at the death health and lie down for good.
+# Pass on the host's screen: the bot is visible after every respawn, and the host's tp_client.log prints
+# "copy would have spawned with the owner's health -4 ... started at 1 instead" once per respawn.
+#
+# Run:  STBot.exe scripts\copy-respawn.txt --server 127.0.0.1:10578 --password <sPassword>
+# The bot spawns 200 units from the host, cloned from the host's look and outfit.
+
+log spawned next to the host; walking a square so the copy can be found
+walk rel 300 0 150
+walk rel 0 300 150
+walk rel -300 0 150
+walk rel 0 -300 150
+wait 3
+
+log first death: health to -4, five seconds down, then respawn
+health -4
+wait 5
+respawn
+wait 2
+walk rel 200 0 150
+walk rel -200 0 150
+wait 3
+
+log second death, deeper (-16), then respawn
+health -16
+wait 5
+respawn
+wait 2
+walk rel 0 200 150
+walk rel 0 -200 150
+
+log following the host for 30 seconds at 250 units
+follow 250 30
+
+log done; disconnecting
+stop

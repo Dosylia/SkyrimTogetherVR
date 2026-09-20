@@ -1,0 +1,6 @@
+# Smallest check: connect, spawn next to the host, stand for 20 seconds, walk a little, leave.
+log standing for 20 seconds
+wait 20
+walk rel 200 0 150
+walk rel -200 0 150
+stop

@@ -3004,4 +3004,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 400184u, 0x1f81590u },
     { 400186u, 0x1f81860u },
     { 400187u, 0x1f81880u },
+    // UI message queue, from the public VR address database (alandtse/skyrim_vr_address_library, status 3).
+    { 13631u, 0x0175a10u }, // SE 13530 UIMessageQueue::AddMessage, checked against the database
+    { 400445u, 0x1f850f8u }, // SE 514285 UIMessageQueue singleton, checked against the database
 };

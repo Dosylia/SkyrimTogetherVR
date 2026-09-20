@@ -39,6 +39,8 @@ class UI
 {
 public:
     static UI* Get();
+    // TEMPORARY (2026-09-20): readable C strings reachable from an object, for naming the phantom message box.
+    static void CollectReadableStrings(const void* apObject, size_t aBytes, int aDepth, std::string& aOut) noexcept;
 
     bool GetMenuOpen(const BSFixedString& acName) const;
     void CloseAllMenus();
