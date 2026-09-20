@@ -127,6 +127,7 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     vrPose.HasData = false;
     vrPose.HasLegs = false;
     vrPose.HasFingers = false;
+    vrPose.HasScale = false;
     {
         const uint64_t poseTick = aPoseTick ? aPoseTick : aTick;
         const InterpolationComponent::TimePoint* pBefore = nullptr;
@@ -167,6 +168,12 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
             {
                 vrPose.HasFingers = true;
                 vrPose.Fingers = fingerSource.Fingers;
+            }
+            const VRPose& scaleSource = pAfter->VRPoseData.HasScale ? pAfter->VRPoseData : pBefore->VRPoseData;
+            if (scaleSource.HasScale)
+            {
+                vrPose.HasScale = true;
+                vrPose.RootScale = scaleSource.RootScale;
             }
         }
     }

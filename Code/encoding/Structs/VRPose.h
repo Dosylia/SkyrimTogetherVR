@@ -63,4 +63,10 @@ struct VRPose
     static constexpr size_t kFingerBoneCount = 2 * kFingersPerHand * kBonesPerFinger;
     bool HasFingers{false};
     std::array<Quaternion_NetQuantize, kFingerBoneCount> Fingers{};
+
+    //! Body size: the world scale of the skeleton root ("NPC Root [Root]"), times 1000. It folds in the actor's own
+    //! scale and whatever VRIK scales the body by, so a short or tall player is the same size on the other side.
+    //! Sent on change and once a second (HasScale); the receiver keeps the last value.
+    bool HasScale{false};
+    uint16_t RootScale{1000};
 };

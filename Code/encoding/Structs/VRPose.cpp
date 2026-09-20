@@ -13,6 +13,8 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
         return false;
     if (HasFingers && Fingers != acRhs.Fingers)
         return false;
+    if (HasScale != acRhs.HasScale || (HasScale && RootScale != acRhs.RootScale))
+        return false;
     const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
     return std::equal(Bones.begin(), Bones.begin() + count, acRhs.Bones.begin());
 }
@@ -37,6 +39,9 @@ void VRPose::Serialize(TiltedPhoques::Buffer::Writer& aWriter) const noexcept
     if (HasFingers)
         for (const auto& bone : Fingers)
             bone.Serialize(aWriter);
+    aWriter.WriteBits(HasScale ? 1 : 0, 1);
+    if (HasScale)
+        aWriter.WriteBits(RootScale, 16);
 }
 
 void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
@@ -60,4 +65,13 @@ void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
     if (HasFingers)
         for (auto& bone : Fingers)
             bone.Deserialize(aReader);
+    uint64_t hasScale = 0;
+    aReader.ReadBits(hasScale, 1);
+    HasScale = hasScale != 0;
+    if (HasScale)
+    {
+        uint64_t scale = 0;
+        aReader.ReadBits(scale, 16);
+        RootScale = static_cast<uint16_t>(scale);
+    }
 }

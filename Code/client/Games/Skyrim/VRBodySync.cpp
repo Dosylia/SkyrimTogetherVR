@@ -156,6 +156,13 @@ void* FindByRtti(void* apStart, const char* acpRttiName, uint32_t aDepth = 0) no
     return nullptr;
 }
 
+// The skeleton root below the actor's 3D: every bone hangs off it, and its world scale is the body's size.
+void* FindSkeletonRoot(void* apRoot) noexcept
+{
+    void* pSkeletonRoot = FindShallowest(apRoot, "NPC Root [Root]");
+    return pSkeletonRoot ? pSkeletonRoot : apRoot;
+}
+
 // The upper body is required; the legs are optional (a skeleton without them is posed above the waist only).
 bool FindBones(void* apRoot, BoneNodes& aNodes, bool* apLegsFound = nullptr) noexcept
 {
@@ -404,6 +411,9 @@ struct RemotePose
     // Kept from the last update that carried them (see VRPose::HasFingers).
     bool HasFingers = false;
     std::array<glm::quat, VRPose::kFingerBoneCount> Fingers{};
+    // Kept from the last update that carried it (see VRPose::HasScale).
+    bool HasScale = false;
+    float RootScale = 1.f;
 };
 
 std::shared_mutex s_posesLock;
@@ -505,6 +515,8 @@ struct Rig
     // Finger entries below each hand (left, right); found only when the flattened array is usable.
     std::array<FingerEntries, 2> Fingers{};
     std::array<bool, 2> FingersFound{};
+    // "NPC Root [Root]": its local scale is set to the sender's body size.
+    RigBone SkeletonRoot{};
     std::chrono::steady_clock::time_point RetryAt{};
     // Re-resolving because something attached is rate limited: an effect that attaches and detaches every frame would
     // otherwise rebuild the whole skeleton every frame.
@@ -578,6 +590,7 @@ bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
 {
     aRig = Rig{};
     aRig.pRoot = apRoot;
+    aRig.SkeletonRoot = MakeRigBone(FindSkeletonRoot(apRoot), nullptr);
 
     BoneNodes nodes;
     if (!FindBones(apRoot, nodes))
@@ -657,6 +670,8 @@ bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
 
 [[nodiscard]] bool RigIntact(const Rig& acRig) noexcept
 {
+    if (!acRig.SkeletonRoot.IsIntact())
+        return false;
     for (const auto& bone : acRig.Bones)
         if (!bone.IsIntact())
             return false;
@@ -724,6 +739,19 @@ bool IsInView(const glm::vec3& acChest) noexcept
 
 void PoseActor(const Rig& acRig, const RemotePose& acPose) noexcept
 {
+    // Body size: the skeleton root's local scale is set so that its world scale matches the sender's. Only the local
+    // is written; the game carries it into every bone's world transform on its next update, before the rotations
+    // below are written on top. Written only when it differs, so a copy that already matches is left alone.
+    if (acPose.HasScale && acRig.SkeletonRoot.pNode)
+    {
+        NiTransform& local = At<NiTransform>(acRig.SkeletonRoot.pNode, kLocalOffset);
+        const NiTransform& world = At<NiTransform>(acRig.SkeletonRoot.pNode, kWorldOffset);
+        const float parentScale = local.scale > 0.001f ? world.scale / local.scale : 1.f;
+        const float wanted = parentScale > 0.001f ? acPose.RootScale / parentScale : local.scale;
+        if (wanted > 0.05f && wanted < 20.f && std::fabs(local.scale - wanted) > 0.003f)
+            local.scale = wanted;
+    }
+
     const glm::mat3 rootRotation = ToGlm(At<NiTransform>(acRig.pRoot, kWorldOffset).rotate);
 
     // Parents first. Each bone is turned about its own position, and that rigid motion is carried to everything below
@@ -859,6 +887,7 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
         bool LegsFound = false;
         std::array<FingerEntries, 2> Fingers{};
         std::array<bool, 2> FingersFound{};
+        void* pSkeletonRoot = nullptr;
         std::chrono::steady_clock::time_point RefreshAt{};
     } s_local;
     const auto now = std::chrono::steady_clock::now();
@@ -878,6 +907,7 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
         s_local.pRoot = pRoot;
         s_local.Nodes = nodes;
         s_local.LegsFound = legsFound;
+        s_local.pSkeletonRoot = FindSkeletonRoot(pRoot);
         const BoneArrayInfo arrayInfo = ResolveBoneArray(pRoot, nodes, false);
         const uint8_t* pLeftHand = FindEntry(arrayInfo.pArray, arrayInfo.Count, nodes[VRPose::kLeftHand]);
         const uint8_t* pRightHand = FindEntry(arrayInfo.pArray, arrayInfo.Count, nodes[VRPose::kRightHand]);
@@ -932,6 +962,26 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
         }
     }
 
+    // Body size: the skeleton root's world scale, sent when it changes or once a second. Logged the first time and
+    // whenever it changes, so the log says what VRIK made of this body.
+    aOutPose.HasScale = false;
+    if (s_local.pSkeletonRoot)
+    {
+        static uint16_t s_lastScaleSent = 0;
+        static std::chrono::steady_clock::time_point s_lastScaleSentAt{};
+        const float worldScale = At<NiTransform>(s_local.pSkeletonRoot, kWorldOffset).scale;
+        const uint16_t quantized = static_cast<uint16_t>(glm::clamp(worldScale * 1000.f, 50.f, 20000.f) + 0.5f);
+        if (quantized != s_lastScaleSent || now - s_lastScaleSentAt >= std::chrono::seconds(1))
+        {
+            if (quantized != s_lastScaleSent)
+                spdlog::info("VRBodySync: local body scale {:.3f} (skeleton root world scale, actor scale field {})", worldScale, apPlayer->scale);
+            s_lastScaleSent = quantized;
+            s_lastScaleSentAt = now;
+            aOutPose.HasScale = true;
+            aOutPose.RootScale = quantized;
+        }
+    }
+
     aOutPose.HasData = true;
     return true;
 }
@@ -972,6 +1022,14 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
         pose.HasFingers = true;
         for (size_t i = 0; i < VRPose::kFingerBoneCount; ++i)
             pose.Fingers[i] = acPose.Fingers[i];
+    }
+    if (acPose.HasScale)
+    {
+        const float scale = acPose.RootScale / 1000.f;
+        if (!pose.HasScale || std::fabs(pose.RootScale - scale) > 0.0005f)
+            spdlog::info("VRBodySync: body scale of remote actor {:X} is {:.3f}", apActor->formID, scale);
+        pose.HasScale = true;
+        pose.RootScale = scale;
     }
 }
 

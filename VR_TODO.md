@@ -338,7 +338,12 @@ What we know:
       the search gives up and the hands stay on the animation. Encoding change: client and server.
 - [ ] **Legs when moving.** Check that smooth locomotion plays a walk or run on the remote copy,
       rather than sliding.
-- [ ] **Player height and scale** differences between VR players.
+- [x] **[untested] Player height and scale** differences between VR players. Since 2026-09-20 the pose carries
+      the skeleton root's world scale (times 1000, on change and once a second), which folds in the actor's own
+      scale and VRIK's body scale; the receiver sets "NPC Root [Root]" local scale so the copy's world scale
+      matches. No menu: VRIK already holds the number. Logged on both sides (`local body scale ...`, `body scale
+      of remote actor ...`). VRIK's separate arm and hand scales are not carried; a second pass on those nodes if
+      they show. Encoding change: client and server.
 - [ ] **Face "looks off"** (FaceGen on VR). Parked earlier, still open.
 
 ### 2.4 World, quests, dialogue
