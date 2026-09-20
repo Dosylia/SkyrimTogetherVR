@@ -25,7 +25,10 @@ if (Test-Path $ini) {
 }
 
 # The server's working directory decides where config\ and logs\ are.
-Start-Process -FilePath $exe -WorkingDirectory $ServerFolder
+$process = Start-Process -FilePath $exe -WorkingDirectory $ServerFolder -PassThru
+# Below normal priority: the host also plays in VR on this PC, and everyone's sync follows the host's frame rate.
+# The server needs little CPU; when both want the same core, the game wins.
+try { $process.PriorityClass = 'BelowNormal' } catch { Write-Host "Could not lower the server priority: $_" }
 
 Write-Host "Server started on UDP port $port."
 Write-Host ""

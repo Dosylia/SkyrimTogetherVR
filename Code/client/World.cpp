@@ -189,7 +189,7 @@ void World::ReportPerformance(double aFrameMs, double aUpdateMs) noexcept
     const double averageMs = totalMs / frames;
 
     std::string hooks;
-    constexpr std::array<const char*, static_cast<size_t>(PerfCounter::kCount)> kNames{"VR pose", "inventory apply", "actor spawn"};
+    constexpr std::array<const char*, static_cast<size_t>(PerfCounter::kCount)> kNames{"VR pose", "inventory apply", "actor spawn", "equipment snapshot"};
     auto& slots = PerfCounters::Get();
     for (size_t i = 0; i < slots.size(); ++i)
     {

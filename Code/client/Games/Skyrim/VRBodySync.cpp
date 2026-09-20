@@ -718,10 +718,40 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
     if (!pRoot)
         return false;
 
-    BoneNodes nodes;
-    bool legsFound = false;
-    if (!FindBones(pRoot, nodes, &legsFound))
-        return false;
+    // The bones are looked up once per 3D and kept: the search walks the whole skeleton, armour and physics nodes
+    // included, and ran at every send (30 times a second) before. The cache is dropped when the root changes, when
+    // a cached node's vtable changes (the game reuses freed node memory), or after 5 s as a safety net.
+    static struct
+    {
+        void* pRoot = nullptr;
+        BoneNodes Nodes{};
+        std::array<void*, VRPose::kBoneCount> VTables{};
+        bool LegsFound = false;
+        std::chrono::steady_clock::time_point RefreshAt{};
+    } s_local;
+    const auto now = std::chrono::steady_clock::now();
+    bool cached = s_local.pRoot == pRoot && now < s_local.RefreshAt;
+    for (uint32_t i = 0; cached && i < VRPose::kBoneCount; ++i)
+        if (s_local.Nodes[i] && *static_cast<void**>(s_local.Nodes[i]) != s_local.VTables[i])
+            cached = false;
+    if (!cached)
+    {
+        BoneNodes nodes;
+        bool legsFound = false;
+        if (!FindBones(pRoot, nodes, &legsFound))
+        {
+            s_local.pRoot = nullptr;
+            return false;
+        }
+        s_local.pRoot = pRoot;
+        s_local.Nodes = nodes;
+        s_local.LegsFound = legsFound;
+        for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
+            s_local.VTables[i] = nodes[i] ? *static_cast<void**>(nodes[i]) : nullptr;
+        s_local.RefreshAt = now + std::chrono::seconds(5);
+    }
+    const BoneNodes& nodes = s_local.Nodes;
+    const bool legsFound = s_local.LegsFound;
     const bool cLegs = legsFound && FullBodyTrackingActive();
 
     const glm::mat3 inverseRoot = glm::transpose(ToGlm(At<NiTransform>(pRoot, kWorldOffset).rotate));

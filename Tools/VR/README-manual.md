@@ -13,4 +13,5 @@
 You still need SKSE VR and the VR Address Library for SKSEVR installed in `Data`, like any SKSE mod.
 `uGridsToLoad` must be 5 in `SkyrimPrefs.ini`, which is the default.
 
-Updating: close the game, replace `SkyrimTogetherVR.exe` and `SkyrimTogetherVR.pdb` in the launcher folder.
+Updating: close the game and drag the update zip onto `update.bat` in the `Skyrim Together VR` folder.
+(By hand: replace `SkyrimTogetherVR.exe` and `SkyrimTogetherVR.pdb` there.)

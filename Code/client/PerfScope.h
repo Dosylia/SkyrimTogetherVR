@@ -63,6 +63,7 @@ enum class PerfCounter : uint8_t
     kVRPoseApply,    // remote VR pose written into the skeleton (animation update hook)
     kInventoryApply, // full inventory rebuild of a spawned or respawned actor
     kActorSpawn,     // creating a remote actor
+    kEquipmentSnapshot, // the once-a-second read of the local player's worn items (large modlist inventories)
     kCount
 };
 

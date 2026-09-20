@@ -37,6 +37,7 @@ Copy-Item (Join-Path $buildFolder 'SkyrimTogetherVR.exe') $client -Force
 Copy-Item (Join-Path $buildFolder 'TPProcess.exe') $client -Force
 Copy-Item (Join-Path $PSScriptRoot 'collect-logs.*') $client
 Copy-Item (Join-Path $PSScriptRoot 'setup-connect.*') $client
+Copy-Item (Join-Path $PSScriptRoot 'update.*') $client
 
 # Server, with default settings: never the host's password.
 $server = Join-Path $staging 'Server'

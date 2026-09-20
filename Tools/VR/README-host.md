@@ -13,8 +13,9 @@ The host installs the game side like everyone else (see the other README), plus 
 
 Everyone must run the same build as the server, or the server refuses them at connect.
 
-Updating: when a new build says the server changed, close the server, replace the three files
-`SkyrimTogetherServer.exe`, `SkyrimTogetherServer.exe.manifest` and `STServer.dll`, start it again.
-The others replace their client exe and pdb.
+Updating: when a new build says the server changed, close the server window and drag the server update zip onto
+`update.bat` in the `Skyrim Together VR` folder (it finds a `Server` folder next to it; otherwise run
+`update.bat` from a copy placed inside the `Server` folder). By hand: replace `SkyrimTogetherServer.exe`,
+`SkyrimTogetherServer.exe.manifest` and `STServer.dll`, then start the server again. The others update their client.
 
 The Linux build of the server exists for people who host on a Linux box; ask for it.

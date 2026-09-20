@@ -270,10 +270,9 @@ What we know:
       dumps, the ambiguous-signature list (120+ lines per launch), the per-second `Perf spike` lines and the
       spawn bookkeeping lines are at debug level or replaced by the 30 s summary. The file logger stays
       synchronous on purpose: crash reports depend on it being flushed.
-- [ ] **VRBodySync searches for bones every frame.**
-    - `FindBones` walks the whole skeleton, including armour nodes, on every animation update of every
-      remote player.
-    - Fix: cache the 12 bone pointers per actor and only search again when the 3D root changes.
+- [x] **VRBodySync searches for bones every frame.** Remote bodies were already cached per 3D (the Rig); the
+      local capture still walked the whole skeleton at every send. Cached since 2026-09-20 (dropped when the root
+      or a node's vtable changes, or after 5 s).
 - [ ] **Spawn bursts on cell change.** Entering an area creates dozens of actors in one frame, each
       with a full inventory rebuild (remove everything, then add and equip item by item).
     - Fix: limit spawns and inventory applies to a few per frame, and queue the rest.
@@ -283,12 +282,11 @@ What we know:
 - [ ] `RunNakedNPCBugChecks` looks at every actor's worn items once a second. Measure it, then limit
       it to a few actors per tick.
 - [ ] The new equipment snapshot reads the whole player inventory once a second, and FUS
-      inventories are big. Measure it, and if needed only rebuild when an equip hook fired or the
-      hand/spell pointers changed.
+      inventories are big. Measured since 2026-09-20 ("equipment snapshot" in the perf line); if it shows,
+      only rebuild when an equip hook fired or the hand/spell pointers changed.
 - [ ] Look for other per-frame costs: linear `find_if` searches over all entities in hot paths, and
       `TESForm::GetById` inside loops.
-- [ ] Host PC: run the server at below-normal priority, and document that the host's VR frame rate
-      drives everyone's experience.
+- [x] Host PC: `host-server.ps1` starts the server at below-normal priority (2026-09-20) and says why.
 
 ---
 
@@ -419,8 +417,9 @@ the headset off.
     - adds the MO2 executable entry;
     - creates `%LOCALAPPDATA%\SkyrimTogetherVR\connect.txt` from a template on first run;
     - checks the requirements listed in 4.2.
-- [ ] **Update script:** replace the files with the rename-aside trick, so MO2 never needs closing.
-      Optionally check for a newer GitHub release.
+- [x] **Update script:** `update.bat` (drag the zip onto it) swaps client and server files with the rename-aside
+      trick, refuses while the game runs, finds a `Server` folder next to the client folder. Tested with a held-open
+      exe. GitHub release check: not done.
 - [x] **Host script:** `host-server.bat` starts one server from its folder and prints the address to give.
 - [x] **Connect setup:** `setup-connect.bat` writes `connect.txt` (no byte order mark, port added if missing).
 - [x] **Log collector:** `collect-logs.bat` zips the client and CEF logs, the newest Crash Logger file and

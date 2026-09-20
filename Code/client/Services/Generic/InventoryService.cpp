@@ -363,7 +363,12 @@ void InventoryService::RunEquipmentSnapshotUpdates() noexcept
 
     const uint32_t serverId = view.get<LocalComponent>(*it).Id;
 
-    Inventory equipment = pPlayer->GetEquipment();
+    Inventory equipment;
+    {
+        // Measured: reads the whole inventory to keep the worn entries. The perf line reports it per 30 s.
+        PerfCounterScope perfScope(PerfCounter::kEquipmentSnapshot);
+        equipment = pPlayer->GetEquipment();
+    }
 
     // Compare only what is worn where: charges and similar extra data change constantly in combat.
     const auto isSameEquipment = [](const Inventory& acLhs, const Inventory& acRhs)

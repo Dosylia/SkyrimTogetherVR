@@ -11,4 +11,5 @@
 
 `uGridsToLoad` must be 5, which is the default of every list. The server refuses other values.
 
-Updating: close the game, replace `SkyrimTogetherVR.exe` and `SkyrimTogetherVR.pdb` in the launcher folder.
+Updating: close the game and drag the update zip onto `update.bat` in the `Skyrim Together VR` folder. It swaps the
+files without closing MO2. (By hand: replace `SkyrimTogetherVR.exe` and `SkyrimTogetherVR.pdb` there.)
