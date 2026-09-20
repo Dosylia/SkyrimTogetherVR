@@ -51,7 +51,7 @@ What is left:
 
 | SE id | Used as | What is off on VR |
 | --- | --- | --- |
-| 33236 (AE) | `s_updateTarget` (CombatController.cpp) | Combat target hook, disabled with `#if 0` even on SE. Remote NPCs pick their own targets. Only worth an address if target sync is ever turned on. |
+| 33236 (AE) | `s_updateTarget` (CombatController.cpp) | Address found: SE 32489 = 0x1404FE300, VR 0x14050E7A0 (Seenfront, 2026-09-20), now in the override table. CombatController::SetTarget SE 32488 = VR 0x14050E480 confirmed the table's entry. The hook stays `#if 0` on every platform; turning target sync on is a separate decision. |
 | 21600 (AE) | `isFirstPerson` (PlayerCamera.cpp) | VR is always first person; the VR build returns false before the lookup. Nothing lost. |
 | 63591 (AE) | `InternalSendEvent` (AnimationExperiments.cpp) | Commented out on every platform. Nothing lost. |
 | 105220 (AE) | `s_compareVariables` (BSScript.cpp) | Commented out on every platform. Nothing lost. |

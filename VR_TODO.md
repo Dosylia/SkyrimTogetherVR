@@ -74,15 +74,18 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       player copies. `SinkDiag` stays in; if it names nothing for another two sessions, close this. The havok
       capsule read (TiltedEvolutionVR `aaf5d83`: controller at `MiddleProcess+0x250`, `+0x360` bhkRigidBody,
       `+0x10` hkpRigidBody, position `+0x1A0`, filter `+0x4C`) is only worth doing if it comes back.
-- [ ] **Invisible copy after the other player's client reconnects (19:09 and 19:17 on 2026-09-20).** Seen's
-      client dropped twice ("Disconnected from server 4" = aborted; the host's server log shows the connection
-      ending and a new one 2 s later) and auto-reconnected. Each time the copy the other side then built was there
-      (hit for 2 damage at 19:10:37, animating, skeleton resolved, hands and scale applied) but not drawn. The spawn
-      lines are identical to the visible first spawn of the session, so the logs cannot say why. Two things for
-      next time: `CopyDiag:` (every 5 s per remote player copy: distance, height difference, form flags, health,
-      state, 3D root and its children, scales) and a bot script that reproduces a reconnect on demand
-      (`STBot.exe scriptseconnect.txt`): watch the bot after each reconnect. Also the desync itself was not
-      hand-offs (zero on the server, a handful of transfers on the clients); each "unsync" lines up with a drop.
+- [x] **[untested] Copy hittable but not seen after a death (19:07 Seen for the host, 19:10 the host for Seen,
+      2026-09-20; the reconnects were the cure, not the trigger).** Both copies were rebuilt after their owner's
+      death from the server's stored health (-30, -11), started at 1 by the earlier clamp, and were corrected to the
+      real value a second later. Both were then animating and hittable (hit for 2 at 19:10:37) but never drawn;
+      the copies that started healthy were fine. At 1 health one landing or one hit puts the essential copy down,
+      and with no bleedout recovery it stays down, undrawn, for the session. Since 2026-09-20 19:4x: a copy is
+      never given less than a quarter of its maximum health (25 at least) at spawn or by any update, and copies
+      may recover from bleedout, so a restored health stands them up. `CopyDiag:` (every 5 s per remote player
+      copy: distance, height, form flags, health, dead and bleedout state, 3D root and children, scales) stays in
+      to confirm the mechanism, and `STBot.exe scriptseconnect.txt` reproduces a drop and reconnect if that is
+      ever needed again. Hand-offs were not involved (zero on the server all session).
+
 - [ ] **Dropped items not visible** to the other player. Sender logs `drop: true`, receiver logs
       `Remote actor ... drops item`. Check both on the next drop. Reported with it (2026-09-20): when he drops
       something, his copy's body stays in place but "all his bones try to violently leave it". That is the VR

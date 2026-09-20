@@ -220,19 +220,25 @@ void ReleaseAllGhosts() noexcept
         EnableGhost(ghost);
     s_ghosts.clear();
 }
-//! The values a player's fresh copy starts with, health never below 1.
+//! The values a player's fresh copy starts with, health never below a quarter of its maximum.
 //! The server hands a respawning player's copy the values it last stored, and those are the ones from his death
-//! (-4, -16 on 2026-09-19 19:52 and 19:57). The copy is essential with no bleedout recovery, so a copy born at -4 goes
-//! down on the spot and the owner's real health arriving a second later cannot stand it back up: "still there, we can
-//! hurt each other, but nobody sees him" until he reconnects. A copy never goes down; the owner's game decides.
+//! (-4, -16 on 2026-09-19 19:52 and 19:57). The copy is essential, so a copy born at -4 goes down on the spot. Starting
+//! it at 1 (the first fix) was not enough: both copies that could be hit but not seen on 2026-09-20 (19:07:52 and
+//! 19:10:55) started at 1 from a stored -30 and -11, and one stray hit or the landing after the spawn takes 1 health
+//! to zero before the owner's real health arrives a second later. A copy never goes down; the owner's game decides.
 ActorValues StandingValues(const ActorValues& acValues, const uint32_t aFormId) noexcept
 {
     ActorValues values = acValues;
     auto it = values.ActorValuesList.find(ActorValueInfo::kHealth);
-    if (it != values.ActorValuesList.end() && it->second < 1.f)
+    if (it == values.ActorValuesList.end())
+        return values;
+    float floor = 25.f;
+    if (const auto max = values.ActorMaxValuesList.find(ActorValueInfo::kHealth); max != values.ActorMaxValuesList.end() && max->second > 0.f)
+        floor = std::max(floor, max->second * 0.25f);
+    if (it->second < floor)
     {
-        spdlog::info("Remote player {:X} copy would have spawned with the owner's health {:.0f} (a copy that starts down never gets up); started at 1 instead", aFormId, it->second);
-        it.value() = 1.f;
+        spdlog::info("Remote player {:X} copy would have spawned with the owner's health {:.0f} (a copy that starts down never gets up); started at {:.0f} instead", aFormId, it->second, floor);
+        it.value() = floor;
     }
     return values;
 }
@@ -772,6 +778,9 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
     {
         pActor->SetIgnoreFriendlyHit(true);
         pActor->SetPlayerRespawnMode();
+        // The copy stays essential (it cannot die here), but it may get up again: when its owner's real health arrives
+        // after a knock-down, the game lets it recover instead of leaving it down and undrawn for the session.
+        pActor->SetNoBleedoutRecovery(false);
         m_world.emplace_or_replace<PlayerComponent>(*entity, acMessage.PlayerId);
     }
 
@@ -1763,6 +1772,9 @@ Actor* CharacterService::CreateCharacterForEntity(entt::entity aEntity) const no
     {
         pActor->SetIgnoreFriendlyHit(true);
         pActor->SetPlayerRespawnMode();
+        // The copy stays essential (it cannot die here), but it may get up again: when its owner's real health arrives
+        // after a knock-down, the game lets it recover instead of leaving it down and undrawn for the session.
+        pActor->SetNoBleedoutRecovery(false);
         m_world.emplace_or_replace<PlayerComponent>(aEntity, acMessage.PlayerId);
     }
 

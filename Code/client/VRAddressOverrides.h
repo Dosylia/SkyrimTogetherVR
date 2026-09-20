@@ -3012,4 +3012,5 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 13631u, 0x0175a10u }, // SE 13530 UIMessageQueue::AddMessage, checked against the database
     { 400445u, 0x1f850f8u }, // SE 514285 UIMessageQueue singleton, checked against the database
     { 34819u, 0x058e920u }, // SE 34819 BGSSaveLoadManager::Load, from the VR address database (status 3)
+    { 33236u, 0x050e7a0u }, // SE 32489 CombatController update-target hook (s_updateTarget), read from the VR binary by Seenfront 2026-09-20, checked; the hook itself is still #if 0 on every platform
 };

@@ -40,6 +40,10 @@ ActorValueService::ActorValueService(World& aWorld, entt::dispatcher& aDispatche
     m_dispatcher.sink<NotifyDeathStateChange>().connect<&ActorValueService::OnDeathStateChange>(this);
 }
 
+// The least health a remote player's copy is ever given. See StandingValues in CharacterService: a copy at 1 went
+// down on the first hit and was never drawn again (2026-09-20).
+constexpr float kRemotePlayerHealthFloor = 25.f;
+
 void ActorValueService::CreateActorValuesComponent(const entt::entity aEntity, Actor* apActor) noexcept
 {
     auto& actorValuesComponent = m_world.emplace_or_replace<ActorValuesComponent>(aEntity);
@@ -295,12 +299,13 @@ void ActorValueService::OnHealthChangeBroadcast(const NotifyHealthChangeBroadcas
 
     float newHealth = pActor->GetActorValue(ActorValueInfo::kHealth) + acMessage.DeltaHealth;
 
-    // A player's copy is essential with no bleedout recovery: at zero it lies down for the rest of the session.
-    // Only its owner's game decides when that player is down (and a respawn replaces the copy anyway).
-    if (pActor->GetExtension() && pActor->GetExtension()->IsRemotePlayer() && newHealth < 1.f)
+    // A player's copy is essential: at zero it goes down. Only its owner's game decides when that player is down (and
+    // a respawn replaces the copy anyway), so the copy keeps a margin: 1 was not enough, one more hit took it down
+    // (2026-09-20, two copies hittable but not seen).
+    if (pActor->GetExtension() && pActor->GetExtension()->IsRemotePlayer() && newHealth < kRemotePlayerHealthFloor)
     {
-        spdlog::info("Remote player {:X} copy kept at 1 health instead of {:.0f}; its owner decides", pActor->formID, newHealth);
-        newHealth = 1.f;
+        spdlog::info("Remote player {:X} copy kept at {:.0f} health instead of {:.0f}; its owner decides", pActor->formID, kRemotePlayerHealthFloor, newHealth);
+        newHealth = kRemotePlayerHealthFloor;
     }
 
     pActor->ForceActorValue(ActorValueOwner::ForceMode::DAMAGE, ActorValueInfo::kHealth, newHealth);
@@ -365,10 +370,10 @@ void ActorValueService::OnActorValueChanges(const NotifyActorValueChanges& acMes
             // on 2026-09-19). Applied as is, it put the copy into its unrecoverable bleedout, and the owner's respawn
             // then handed the fresh copy the same stored value (see StandingValues in CharacterService). A copy never
             // goes down; the owner's game decides, and his respawn replaces the copy.
-            if (value < 1.f)
+            if (value < kRemotePlayerHealthFloor)
             {
-                spdlog::info("Remote player {:X} copy kept at 1 health instead of the owner's {:.0f}; a copy never goes down", pActor->formID, value);
-                value = 1.f;
+                spdlog::info("Remote player {:X} copy kept at {:.0f} health instead of the owner's {:.0f}; a copy never goes down", pActor->formID, kRemotePlayerHealthFloor, value);
+                value = kRemotePlayerHealthFloor;
             }
         }
 
