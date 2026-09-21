@@ -745,6 +745,53 @@ bool IsInView(const glm::vec3& acChest) noexcept
     return offAxis < cHalfAngle + std::asin(cBodyRadius / distance);
 }
 
+// A transform the renderer can still use: a real rotation, a sane scale, no infinities. A skinned body whose bone
+// transform fails this is not drawn at all, while the actor itself stays perfectly healthy, which is what the other
+// player sees as "he is there, I can hit him, I cannot see him".
+bool IsUsable(const NiTransform& acTransform) noexcept
+{
+    const glm::mat3 rotation = ToGlm(acTransform.rotate);
+    for (int column = 0; column < 3; ++column)
+    {
+        const float length = glm::length(rotation[column]);
+        if (!std::isfinite(length) || length < 0.9f || length > 1.1f)
+            return false;
+    }
+    if (!std::isfinite(acTransform.scale) || acTransform.scale < 0.05f || acTransform.scale > 20.f)
+        return false;
+    return std::isfinite(acTransform.translate.x) && std::isfinite(acTransform.translate.y) && std::isfinite(acTransform.translate.z);
+}
+
+// The bones we write to, as the renderer will read them. False means this body is about to be, or already is,
+// undrawable and we must take our hands off it.
+bool IsBodyUsable(const Rig& acRig) noexcept
+{
+    if (!acRig.pRoot || !IsUsable(At<NiTransform>(acRig.pRoot, kWorldOffset)))
+        return false;
+    for (uint32_t i = 0; i < VRPose::kUpperBoneCount; ++i)
+    {
+        const RigBone& bone = acRig.Bones[i];
+        if ((bone.pNode || bone.pEntry) && !IsUsable(bone.World()))
+            return false;
+    }
+    return true;
+}
+
+// The top of the tree a node hangs from. Two bodies drawn in the same world share it; one that has been left in a
+// subtree the world no longer holds does not.
+void* SceneTopOf(void* apNode) noexcept
+{
+    void* pWalk = apNode;
+    for (uint32_t depth = 0; pWalk && depth < 64; ++depth)
+    {
+        void* pParent = At<void*>(pWalk, kParentOffset);
+        if (!pParent || !IsReadable(pParent, kNiAVObjectSize))
+            break;
+        pWalk = pParent;
+    }
+    return pWalk;
+}
+
 void PoseActor(const Rig& acRig, const RemotePose& acPose) noexcept
 {
     // Body size: the skeleton root's local scale is set so that its world scale matches the sender's. Only the local
@@ -784,11 +831,20 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose) noexcept
         wanted.rotate = FromGlm(wantedRotation);
         bone.WriteWorld(wanted);
 
-        // local' = local * (world^-1 * world'). The position doesn't change, so only the rotation does.
+        // The local rotation is computed from scratch every frame: the parent's world rotation, inverted, times the
+        // world rotation we want. It used to be built by multiplying the previous frame's local by a correction,
+        // which never re-derives anything and so never sheds the error it picks up. Thirty times a second for
+        // minutes on end, with more bones since the fingers arrived, that drift turns a bone matrix into something
+        // that is no longer a rotation, and a skinned body hanging off such a bone stops being drawn while the
+        // actor beside it stays perfect. Deriving it fresh cannot drift, and corrects a bone that already has.
         if (bone.pNode)
         {
             NiTransform local = At<NiTransform>(bone.pNode, kLocalOffset);
-            local.rotate = FromGlm(ToGlm(local.rotate) * glm::transpose(currentRotation) * wantedRotation);
+            void* pParent = At<void*>(bone.pNode, kParentOffset);
+            if (pParent)
+                local.rotate = FromGlm(glm::transpose(ToGlm(At<NiTransform>(pParent, kWorldOffset).rotate)) * wantedRotation);
+            else
+                local.rotate = FromGlm(ToGlm(local.rotate) * glm::transpose(currentRotation) * wantedRotation);
             bone.WriteLocal(local);
         }
 
@@ -869,6 +925,23 @@ void OnFrameEnd() noexcept
         if (!IsInView(ToGlm(rig.Bones[VRPose::kSpine2].World().translate)))
             continue;
 
+        // A body whose bones are no longer usable is not drawn, and writing more of our own transforms into it
+        // keeps it that way. Let go: the game's animation rewrites those bones within a frame and the body comes
+        // back, without the other player having to reconnect. Said once every ten seconds per actor.
+        if (!IsBodyUsable(rig))
+        {
+            static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextComplaint;
+            auto& next = s_nextComplaint[formId];
+            if (now >= next)
+            {
+                next = now + std::chrono::seconds(10);
+                const NiTransform& spine = rig.Bones[VRPose::kSpine2].World();
+                spdlog::warn("VRBodySync: actor {:X} has a bone the renderer cannot use (spine scale {:.3f}, rotation row {:.4f}); not posing it until the game puts it right",
+                             formId, spine.scale, glm::length(ToGlm(spine.rotate)[0]));
+            }
+            continue;
+        }
+
         PoseActor(rig, pose);
     }
 }
@@ -922,6 +995,10 @@ std::string DescribeBody(Actor* apActor) noexcept
         if (const char* pName = GetName(pWalk); pName && IsReadable(pName, 2))
             pTopName = pName;
     }
+    // The player is always drawn, so whatever tree the player hangs from is the one the world draws.
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    void* pPlayerRoot = pPlayer ? pPlayer->GetNiNode() : nullptr;
+    const char* pSharesScene = pPlayerRoot ? (SceneTopOf(pPlayerRoot) == pWalk ? "yes" : "NO") : "unknown";
 
     BoneNodes nodes;
     float spineScale = -1.f, headScale = -1.f, spineRowLength = -1.f;
@@ -938,9 +1015,9 @@ std::string DescribeBody(Actor* apActor) noexcept
     }
 
     return fmt::format("3D root {} with {} of {} child slots filled, root world scale {:.3f} at ({:.0f}, {:.0f}, {:.0f}), skeleton root {} world scale {:.3f}; "
-                       "{} parents up to '{}'; spine scale {:.3f} rotation row {:.4f}, head scale {:.3f}",
+                       "{} parents up to '{}' (same scene as the player: {}); spine scale {:.3f} rotation row {:.4f}, head scale {:.3f}",
                        pRoot, fingerprint & 0xFFFF, fingerprint >> 16, rootWorld.scale, rootWorld.translate.x, rootWorld.translate.y, rootWorld.translate.z,
-                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale, depth, pTopName, spineScale, spineRowLength, headScale);
+                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale, depth, pTopName, pSharesScene, spineScale, spineRowLength, headScale);
 }
 
 bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept

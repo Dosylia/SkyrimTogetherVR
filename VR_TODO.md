@@ -74,39 +74,22 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       player copies. `SinkDiag` stays in; if it names nothing for another two sessions, close this. The havok
       capsule read (TiltedEvolutionVR `aaf5d83`: controller at `MiddleProcess+0x250`, `+0x360` bhkRigidBody,
       `+0x10` hkpRigidBody, position `+0x1A0`, filter `+0x4C`) is only worth doing if it comes back.
-- [x] **[untested] Copy hittable but not seen (EMERGENCY, 2026-09-20 21:12, 21:20, 21:27 and many more; every
-      reconnect that evening was a cure for it).** The copy-state probe settled what it is not: at the moment the
-      other player could not be seen, the copy stood 65 units away with full health, not dead, not bleeding out,
-      not disabled, its 3D root intact with all children, scales normal. So neither the health floor (the evening's
-      first guess) nor the body scale. What it is, from the code: every one of the 164 actor values is copied from
-      the owner to the copy on every change, and value 54 is invisibility. A copy with it above zero is exactly
-      the symptom: present, hittable, animating, not drawn; a reconnect rebuilds the copy from a fresh snapshot,
-      which is why it cured it every time. Upstream had already met this once and left a hook on the effect's
-      Finish "because the actor value does not update in time". Since 2026-09-20 21:5x: a player's copy refuses
-      invisibility from its owner on update (`refused invisibility`) and at spawn (`spawned visible instead`),
-      and a sweep every 5 s clears any that got through by another road, a magic effect the copy ran itself for
-      instance (`copy was invisible ...; cleared`). The other player must always see the body; whatever hides the
-      owner on his own screen stays there. If a copy is ever invisible with that value at zero, `CopyDiag` now
-      also prints whether the 3D root has a parent and the raw words after the node bounds (flags and fade live
-      there), to be compared visible against invisible.
-
-- [~] **The crime alarm crashes on a null actor (four sessions killed).** 2026-09-20 17:59 Seen (Frea turned
-      hostile), 2026-09-21 19:55 Emma (struck a Skaal villager, Finna), 2026-09-21 20:13 both within twelve seconds
-      (Emma with Finna again, Seen with Storn Crag-Strider). Identical every time: `Actor::StealAlarm` (SE 36427,
-      VR 0x5e5dc0) at +0x12D9 has called something with a null actor, and that callee reads the actor's `flags1`
-      (Actor+0xE8) through the null. The player and the Skaal Village Citizen Faction sit in the registers, so it
-      is the walk over possible witnesses of an offence, and one slot in it is empty. Our code is nowhere on the
-      stack. The suspects are ours all the same: villagers handed to the other player seconds before, temporary
-      copies and stand-ins deleted all session, and remote actors whose AI step we skip. Which list holds the slot
-      cannot be read offline (the exe is Steam-encrypted); it needs the game open at the main menu for one memory
-      read, or Seenfront in the disassembly.
-      The first guard (an `__except` around the alarm, 20:04) caught nothing: the callee runs inside code another
-      hook has relocated, which carries no unwind data, so the exception dispatcher never finds our handler. Since
-      21:xx the recovery lives in our vectored handler instead, which does get control: a read of null+0xE8 with
-      RCX null is handed a stand-in actor (all zeroes, every virtual call returns zero) and execution continues
-      (`Recovered from the crime alarm's missing actor`, first five logged, 64 at most per session). The alarm
-      hook now also logs its first three entries (`Crime alarm ran`), which says whether the hook fires at all.
-      Root cause still open.
+- [~] **Body there but not drawn (EMERGENCY; 2026-09-20 21:12/21:20/21:27, 2026-09-21 20:43/20:45 and many
+      more, every reconnect that evening was a cure for it).** Three wrong guesses first: the health floor, the
+      body scale, and the invisibility actor value. The copy probe killed all three. At every moment either
+      player could not be seen, the copy read perfect: metres away, full health, not dead, not bleeding out, not
+      disabled, 3D present with every child and a parent, both scales exactly 1.000, invisibility flat 0.00. The
+      refusals added for invisibility never fired once, because there was nothing to refuse.
+      What is left, and what the fix of 2026-09-21 21:xx acts on: only player copies vanish, and player copies are
+      the only bodies we write bone transforms into, thirty times a second; it grew far worse the day the fingers
+      added thirty more writes per frame. Each posed bone's local rotation was built by multiplying the previous
+      frame's value by a correction, never re-derived, so error accumulated with nothing to shed it, and a bone
+      matrix that stops being a rotation takes the skinned body out of the render while leaving the actor
+      untouched. It is now derived fresh each frame from the parent's world rotation, which cannot drift and
+      repairs a bone that already has. On top, a body whose bones the renderer cannot use (row length off 1, wild
+      scale, anything not finite) is no longer posed at all until the game's animation puts it right, which brings
+      it back without a reconnect and logs which bone and what value. `CopyDiag` also now says whether the body
+      hangs from the same scene as the player, which is the one remaining alternative cause.
 
 - [ ] **Dropped items not visible** to the other player. Sender logs `drop: true`, receiver logs
       `Remote actor ... drops item`. Check both on the next drop. Reported with it (2026-09-20): when he drops
