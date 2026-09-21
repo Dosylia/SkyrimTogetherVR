@@ -11,6 +11,7 @@
 #include <Games/Memory.h>
 #include <Forms/TESLevItem.h>
 #include <Combat/CombatController.h>
+#include <CrashHandler.h>
 
 #include <Events/HealthChangeEvent.h>
 #include <Events/InventoryChangeEvent.h>
@@ -1371,6 +1372,51 @@ bool TP_MAKE_THISCALL(HookIsFleeing, Actor)
     return TiltedPhoques::ThisCall(RealIsFleeing, apThis);
 }
 
+// The crime alarm (Actor::StealAlarm, SE 36427) walks every actor that might have witnessed the offence and reads
+// each one's flags at Actor+0xE8. Twice it read them off nothing: 2026-09-20 17:59, the friend's follower Frea
+// turned hostile and killed his session, and 2026-09-21 19:55, a Skaal villager was struck four minutes into a
+// session and killed hers. Same function, same +0x12D9, same null, both while connected, both with actors that had
+// just been handed to the other player or deleted here as temporaries. None of our code is on the stack: it is the
+// game's own walk over a list holding an empty slot, and the exe cannot be read to find which list.
+//
+// Until it can be, the alarm is allowed to fail rather than end the session. The hit lands either way; what is lost
+// is the crime being reported for that one blow, and the log says when it happened and to whom. The sibling VR port
+// guards two havok crash sites the same way.
+//
+// MSVC will not allow __try in a function that needs C++ unwinding, so the call sits alone in here.
+TP_THIS_FUNCTION(TStealAlarm, void, Actor, TESObjectREFR*, TESForm*, int32_t, int32_t, TESForm*, bool);
+static TStealAlarm* RealStealAlarm = nullptr;
+
+static bool CallStealAlarm(Actor* apThis, TESObjectREFR* apRef, TESForm* apObject, int32_t aNum, int32_t aTotal, TESForm* apOwner, bool aAllowWarning) noexcept
+{
+    __try
+    {
+        TiltedPhoques::ThisCall(RealStealAlarm, apThis, apRef, apObject, aNum, aTotal, apOwner, aAllowWarning);
+        return true;
+    }
+    __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
+    {
+        return false;
+    }
+}
+
+void TP_MAKE_THISCALL(HookStealAlarm, Actor, TESObjectREFR* apRef, TESForm* apObject, int32_t aNum, int32_t aTotal, TESForm* apOwner, bool aAllowWarning)
+{
+    // TEMPORARY (2026-09-21): the guard below did not catch the fault that killed four sessions, and a fault inside
+    // relocated hook code would not reach it whether this runs or not. These few lines say which it is.
+    static std::atomic<uint32_t> s_entries{0};
+    if (const uint32_t cEntry = ++s_entries; cEntry <= 3)
+        spdlog::info("Crime alarm ran ({}): offender {:X}, witness {:X}, object {:X}", cEntry, apThis ? apThis->formID : 0, apRef ? apRef->formID : 0, apObject ? apObject->formID : 0);
+
+    CrashGuard::Enter();
+    const bool cSurvived = CallStealAlarm(apThis, apRef, apObject, aNum, aTotal, apOwner, aAllowWarning);
+    CrashGuard::Leave();
+
+    if (!cSurvived)
+        spdlog::warn("Crime alarm walked a null actor and was skipped: offender {:X}, witness {:X}, object {:X}, count {} of {}. The blow still landed, the crime was not reported.",
+                     apThis ? apThis->formID : 0, apRef ? apRef->formID : 0, apObject ? apObject->formID : 0, aNum, aTotal);
+}
+
 static TiltedPhoques::Initializer s_actorHooks(
     []()
     {
@@ -1400,6 +1446,14 @@ static TiltedPhoques::Initializer s_actorHooks(
         POINTER_SKYRIMSE(TSpeakSoundFunction, s_speakSoundFunction, 37542, 37542);
         POINTER_SKYRIMSE(TAddDeathItems, addDeathItems, 37198, 36218);
         POINTER_SKYRIMSE(TIsFleeing, isFleeing, 37577, 37577);
+#ifdef SKYRIMVR
+        POINTER_SKYRIMSE(TStealAlarm, s_stealAlarm, 36427, 36427);
+        RealStealAlarm = s_stealAlarm.Get();
+        if (RealStealAlarm)
+            TP_HOOK(&RealStealAlarm, HookStealAlarm);
+        else
+            spdlog::warn("Crime alarm guard off: SE 36427 did not resolve");
+#endif
 
         RealActorProcess = s_actorProcess.Get();
         RealSetPosition = s_setPosition.Get();

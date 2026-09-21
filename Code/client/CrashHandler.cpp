@@ -138,8 +138,89 @@ static void LogCrashContext(PEXCEPTION_POINTERS pExceptionInfo)
         spdlog::error("    (no executable addresses found - stack likely corrupted)");
 }
 
+namespace
+{
+//! A stand-in for the actor the crime alarm walks into and finds missing. Every field reads as zero, and every
+//! virtual call on it returns zero instead of jumping through a null vtable, so a walk that stumbles onto it
+//! finishes quietly instead of ending the session. Built once, on first use.
+void* NullActorDecoy() noexcept
+{
+    static void* s_pDecoy = []() -> void*
+    {
+        auto* pStub = static_cast<uint8_t*>(VirtualAlloc(nullptr, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+        if (!pStub)
+            return nullptr;
+        pStub[0] = 0x31; // xor eax, eax
+        pStub[1] = 0xC0;
+        pStub[2] = 0xC3; // ret            (the caller cleans up, so this is safe whatever the arguments were)
+        DWORD previous = 0;
+        if (!VirtualProtect(pStub, 0x1000, PAGE_EXECUTE_READ, &previous))
+            return nullptr;
+
+        static void* s_vtable[512];
+        for (auto& entry : s_vtable)
+            entry = pStub;
+
+        static uint8_t s_object[0x1000]{};
+        *reinterpret_cast<void**>(s_object) = s_vtable;
+        return s_object;
+    }();
+    return s_pDecoy;
+}
+} // namespace
+
+namespace CrashGuard
+{
+static thread_local int s_depth = 0;
+void Enter() noexcept
+{
+    ++s_depth;
+}
+void Leave() noexcept
+{
+    if (s_depth > 0)
+        --s_depth;
+}
+bool Inside() noexcept
+{
+    return s_depth > 0;
+}
+} // namespace CrashGuard
+
 LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 {
+    // A fault inside a guarded section is caught and recovered further up this thread's stack. Reporting it would
+    // cost a second of coredump and burn the one report kept for a fault that really is fatal.
+    if (pExceptionInfo->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && CrashGuard::Inside())
+        return EXCEPTION_CONTINUE_SEARCH;
+
+    // The crime alarm (Actor::StealAlarm) walks every actor that might have witnessed an offence, and one slot in
+    // that walk is empty: the game reads the missing actor's flags at +0xE8 through a null pointer. Four sessions
+    // died this way on 2026-09-20 and 21, both players, always this instruction, always a read of 0xE8 from a null
+    // RCX, and always inside code a hook has relocated, which has no unwind data, so no __try of ours can ever
+    // catch it and the fault arrives here instead. Hand the read a stand-in that is all zeroes and let the walk
+    // finish. What put the empty slot in the list is still unknown; this only stops it ending the session.
+    {
+        const auto& record = *pExceptionInfo->ExceptionRecord;
+        static std::atomic<uint32_t> s_recovered{0};
+        constexpr uint32_t cMaxRecoveries = 64; // a genuine loop still surfaces instead of being papered over
+        if (record.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record.NumberParameters >= 2 &&
+            record.ExceptionInformation[0] == 0 /* a read */ && record.ExceptionInformation[1] == 0xE8 /* of null + 0xE8 */ &&
+            pExceptionInfo->ContextRecord->Rcx == 0)
+        {
+            const uint32_t count = ++s_recovered;
+            void* pDecoy = count <= cMaxRecoveries ? NullActorDecoy() : nullptr;
+            if (pDecoy)
+            {
+                if (count <= 5)
+                    spdlog::warn("Recovered from the crime alarm's missing actor (read of null+0xE8 at {:#x}, occurrence {}). The session continues; the crime may not have been reported.",
+                                 static_cast<uint64_t>(pExceptionInfo->ContextRecord->Rip), count);
+                pExceptionInfo->ContextRecord->Rcx = reinterpret_cast<DWORD64>(pDecoy);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+        }
+    }
+
     // One gate per exception type: a recovered access violation must not use up the report for a
     // later, fatal /GS failure.
     static int alreadyCrashedAV = 0;

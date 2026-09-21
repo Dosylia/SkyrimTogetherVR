@@ -90,12 +90,24 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       also prints whether the 3D root has a parent and the raw words after the node bounds (flags and fade live
       there), to be compared visible against invisible.
 
-- [ ] **Followers turning on the other player can crash him (2026-09-20 17:59).** Emma's Lydia and Frea
-      attacked Seen; he ran and the game died in `Actor::StealAlarm` (the crime alarm), reading through a null
-      pointer. Stack: SE `0x1405DEA49` / VR `SkyrimVR.exe+0x5e7099`, with Frea (Dragonborn.esm 0x03017A0D) in
-      RSI, a follower driven from the other side. The two frames above it were outside every module, which is
-      what a hook trampoline looks like. Open question: which field of a follower is null when its AI is not run
-      locally. Until that is known, expect a crash whenever one player's follower turns hostile to the other.
+- [~] **The crime alarm crashes on a null actor (four sessions killed).** 2026-09-20 17:59 Seen (Frea turned
+      hostile), 2026-09-21 19:55 Emma (struck a Skaal villager, Finna), 2026-09-21 20:13 both within twelve seconds
+      (Emma with Finna again, Seen with Storn Crag-Strider). Identical every time: `Actor::StealAlarm` (SE 36427,
+      VR 0x5e5dc0) at +0x12D9 has called something with a null actor, and that callee reads the actor's `flags1`
+      (Actor+0xE8) through the null. The player and the Skaal Village Citizen Faction sit in the registers, so it
+      is the walk over possible witnesses of an offence, and one slot in it is empty. Our code is nowhere on the
+      stack. The suspects are ours all the same: villagers handed to the other player seconds before, temporary
+      copies and stand-ins deleted all session, and remote actors whose AI step we skip. Which list holds the slot
+      cannot be read offline (the exe is Steam-encrypted); it needs the game open at the main menu for one memory
+      read, or Seenfront in the disassembly.
+      The first guard (an `__except` around the alarm, 20:04) caught nothing: the callee runs inside code another
+      hook has relocated, which carries no unwind data, so the exception dispatcher never finds our handler. Since
+      21:xx the recovery lives in our vectored handler instead, which does get control: a read of null+0xE8 with
+      RCX null is handed a stand-in actor (all zeroes, every virtual call returns zero) and execution continues
+      (`Recovered from the crime alarm's missing actor`, first five logged, 64 at most per session). The alarm
+      hook now also logs its first three entries (`Crime alarm ran`), which says whether the hook fires at all.
+      Root cause still open.
+
 - [ ] **Dropped items not visible** to the other player. Sender logs `drop: true`, receiver logs
       `Remote actor ... drops item`. Check both on the next drop. Reported with it (2026-09-20): when he drops
       something, his copy's body stays in place but "all his bones try to violently leave it". That is the VR

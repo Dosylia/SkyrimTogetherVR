@@ -898,16 +898,49 @@ std::string DescribeBody(Actor* apActor) noexcept
     const uint32_t fingerprint = ChildFingerprintOf(AsNode(pRoot));
     const NiTransform& rootWorld = At<NiTransform>(pRoot, kWorldOffset);
     const NiTransform& skeletonWorld = At<NiTransform>(pSkeletonRoot, kWorldOffset);
-    // If invisibility is not it, the next suspects live on the root node itself: no parent (the 3D is not in the
-    // scene), or the flag and fade words after the bounds. Their exact VR offsets are not measured, so the words from
-    // +0xE4 to +0x11C are printed raw; a visible copy against an invisible one shows which word it is.
-    void* pParent = At<void*>(pRoot, kParentOffset);
-    std::string words;
-    for (uint32_t offset = 0xE4; offset < 0x120; offset += 4)
-        words += fmt::format("{}{:x}", offset == 0xE4 ? "" : " ", At<uint32_t>(pRoot, offset));
-    return fmt::format("3D root {} (parent {}) with {} of {} child slots filled, root world scale {:.3f} at ({:.0f}, {:.0f}, {:.0f}), skeleton root {} world scale {:.3f}, node words [{}]", pRoot,
-                       pParent ? "yes" : "NONE", fingerprint & 0xFFFF, fingerprint >> 16, rootWorld.scale, rootWorld.translate.x, rootWorld.translate.y, rootWorld.translate.z,
-                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale, words);
+    // Two things can hide a body that is otherwise perfect, and this tells them apart.
+    //
+    // One: the 3D hangs in a subtree that is no longer part of the scene. It still has a parent, so "parent yes"
+    // proved nothing; what counts is whether walking up reaches the world. The depth and the topmost node's name
+    // say so, and they can be compared between a body that is drawn and one that is not.
+    //
+    // Two: the bones we pose have collapsed. We write world transforms into them every frame, thirty times a
+    // second, and more of them since the fingers arrived. A bone whose world scale has drifted to nothing, or
+    // whose rotation is no longer a rotation, takes the skinned body with it while everything attached to the
+    // actor still draws, which is exactly what "I see his spells but not his body" looks like. The scale of two
+    // posed bones and the length of a row of the spine's rotation (1.000 for a true rotation) show that drift.
+    void* pWalk = pRoot;
+    uint32_t depth = 0;
+    const char* pTopName = "?";
+    while (depth < 64)
+    {
+        void* pParent = At<void*>(pWalk, kParentOffset);
+        if (!pParent || !IsReadable(pParent, kNiAVObjectSize))
+            break;
+        pWalk = pParent;
+        ++depth;
+        if (const char* pName = GetName(pWalk); pName && IsReadable(pName, 2))
+            pTopName = pName;
+    }
+
+    BoneNodes nodes;
+    float spineScale = -1.f, headScale = -1.f, spineRowLength = -1.f;
+    if (FindBones(pRoot, nodes))
+    {
+        if (nodes[VRPose::kSpine2])
+        {
+            const NiTransform& spine = At<NiTransform>(nodes[VRPose::kSpine2], kWorldOffset);
+            spineScale = spine.scale;
+            spineRowLength = glm::length(ToGlm(spine.rotate)[0]);
+        }
+        if (nodes[VRPose::kHead])
+            headScale = At<NiTransform>(nodes[VRPose::kHead], kWorldOffset).scale;
+    }
+
+    return fmt::format("3D root {} with {} of {} child slots filled, root world scale {:.3f} at ({:.0f}, {:.0f}, {:.0f}), skeleton root {} world scale {:.3f}; "
+                       "{} parents up to '{}'; spine scale {:.3f} rotation row {:.4f}, head scale {:.3f}",
+                       pRoot, fingerprint & 0xFFFF, fingerprint >> 16, rootWorld.scale, rootWorld.translate.x, rootWorld.translate.y, rootWorld.translate.z,
+                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale, depth, pTopName, spineScale, spineRowLength, headScale);
 }
 
 bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
