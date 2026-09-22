@@ -190,6 +190,8 @@ void PlayerService::OnPlayerRespawnRequest(const PacketEvent<PlayerRespawnReques
 
             NotifyInventoryChanges notifyInventoryChanges{};
             notifyInventoryChanges.ServerId = World::ToInteger(*character);
+            if (const auto* pOwnerComponent = m_world.try_get<OwnerComponent>(*character))
+                notifyInventoryChanges.OwnershipEpoch = pOwnerComponent->OwnershipEpoch;
             notifyInventoryChanges.Item = entry;
             notifyInventoryChanges.Drop = false;
 

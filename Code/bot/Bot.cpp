@@ -13,7 +13,6 @@
 #include <Messages/PartyLeaveRequest.h>
 #include <Messages/NotifyPlayerJoined.h>
 #include <Messages/NotifyPlayerLeft.h>
-#include <Messages/NotifyRelinquishControl.h>
 #include <Messages/NotifyRemoveCharacter.h>
 #include <Messages/NotifyRespawn.h>
 #include <Messages/PlayerRespawnRequest.h>
@@ -642,12 +641,6 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         }
         else if (!leader)
             spdlog::info("In the party of player {} as a member", leaderId);
-        return;
-    }
-
-    if (opcode == NotifyRelinquishControl::Opcode)
-    {
-        spdlog::debug("Relinquish control of {:X}", static_cast<const NotifyRelinquishControl&>(acMessage).ServerId);
         return;
     }
 

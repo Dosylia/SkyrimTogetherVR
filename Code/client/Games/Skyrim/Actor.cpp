@@ -8,8 +8,8 @@
 #include <Forms/TESFaction.h>
 #include <Components/TESActorBaseData.h>
 #include <ExtraData/ExtraFactionChanges.h>
+#include <ExtraData/ExtraLeveledCreature.h>
 #include <Games/Memory.h>
-#include <Forms/TESLevItem.h>
 #include <Combat/CombatController.h>
 #include <CrashHandler.h>
 
@@ -52,11 +52,30 @@
 #include <Games/Skyrim/BSAnimationGraphManager.h>
 #include <Havok/hkbStateMachine.h>
 #include <Havok/hkbBehaviorGraph.h>
+#include <Havok/bhkCharacterController.h>
+#include <Forms/TESLevItem.h>
 #include <Forms/BGSOutfit.h>
 #include <Forms/TESObjectARMO.h>
 
 #include <ModCompat/BehaviorVar.h>
 #include <PerfScope.h>
+
+namespace
+{
+void QueueActorInventoryChange(Actor* apActor, InventoryChangeEvent aEvent, TESObjectREFR* apTransferReference = nullptr)
+{
+    auto ownershipToken = Utils::GetLocalOwnershipToken(apActor->formID);
+    if (!ownershipToken && apTransferReference == PlayerCharacter::Get())
+        ownershipToken = Utils::GetRemoteOwnershipToken(apActor->formID);
+
+    if (!ownershipToken)
+        return;
+
+    aEvent.ServerId = ownershipToken->ServerId;
+    aEvent.OwnershipEpoch = ownershipToken->OwnershipEpoch;
+    World::Get().GetRunner().Trigger(std::move(aEvent));
+}
+}
 
 #ifdef SAVE_STUFF
 
@@ -146,6 +165,16 @@ void Actor::SetSpeed(float aSpeed) noexcept
     animationGraphHolder.SetVariableFloat(&speedSampledStr, aSpeed);
 }
 
+TESNPC* Actor::GetLeveledPick() const noexcept
+{
+    const auto* pExtra = static_cast<ExtraLeveledCreature*>(extraData.GetByType(ExtraDataType::LeveledCreature));
+    TESActorBase* pTemplate = pExtra ? pExtra->templateBase : nullptr;
+    if (!pTemplate || pTemplate->formType != FormType::Npc || pTemplate->IsTemporary())
+        return nullptr;
+
+    return static_cast<TESNPC*>(pTemplate);
+}
+
 uint16_t Actor::GetLevel() const noexcept
 {
     TP_THIS_FUNCTION(TGetLevel, uint16_t, const Actor);
@@ -157,8 +186,20 @@ void Actor::ForcePosition(const NiPoint3& acPosition) noexcept
 {
     ScopedReferencesOverride recursionGuard;
 
-    // It just works TM
-    SetPosition(acPosition, true);
+    bool updateController = true;
+    if (GetExtension()->IsRemote() && currentProcess)
+    {
+        if (auto* pController = currentProcess->GetCharController())
+        {
+            // A newly created controller may be positioned before ActorProcess.
+            // Both SetPositionImpl and the following velocity reset need a step
+            updateController = pController->UpdateStepTiming();
+        }
+    }
+
+    // With no usable step yet, update the reference/3D now; interpolation will
+    // catch the controller up once physics timing becomes available
+    SetPosition(acPosition, updateController);
 }
 
 void Actor::QueueUpdate() noexcept
@@ -189,12 +230,12 @@ GamePtr<Actor> Actor::Create(TESNPC* apBaseForm) noexcept
     pActor->SetLevelMod(4);
     pActor->MarkChanged(0x40000000);
     pActor->SetParentCell(pCell);
-    pActor->SetBaseForm(apBaseForm);
+    pActor->SetObjectReference(apBaseForm);
 
     auto position = pPlayer->position;
     auto rotation = pPlayer->rotation;
 
-    if (pCell && !(pCell->cellFlags[0] & 1))
+    if (pCell && !(pCell->cellFlags & 1))
         pCell = nullptr;
 
     ModManager::Get()->Spawn(position, rotation, pCell, pWorldSpace, pActor);
@@ -518,7 +559,7 @@ bool Actor::ShouldWearBodyPiece() const noexcept
     if (!pBase)
         return false;
 
-    BGSOutfit* pDefaultOutfit = pBase->outfits[0];
+    BGSOutfit* pDefaultOutfit = pBase->defaultOutfit;
     if (!pDefaultOutfit)
         return false;
 
@@ -1181,7 +1222,7 @@ void TP_MAKE_THISCALL(HookAddInventoryItem, Actor, TESBoundObject* apItem, Extra
         if (apExtraData)
             apThis->GetItemFromExtraData(item, apExtraData);
 
-        World::Get().GetRunner().Trigger(InventoryChangeEvent(apThis->formID, std::move(item)));
+        QueueActorInventoryChange(apThis, InventoryChangeEvent(apThis->formID, std::move(item)), apOldOwner);
     }
 
     TiltedPhoques::ThisCall(RealAddInventoryItem, apThis, apItem, apExtraData, aCount, apOldOwner);
@@ -1204,7 +1245,7 @@ void* TP_MAKE_THISCALL(HookPickUpObject, Actor, TESObjectREFR* apObject, int32_t
         // The inventory change event should always be sent to the server, otherwise the server inventory won't be updated.
         bool shouldUpdateClients = apObject->IsTemporary() && !ScopedActivateOverride::IsOverriden();
 
-        World::Get().GetRunner().Trigger(InventoryChangeEvent(apThis->formID, std::move(item), false, shouldUpdateClients));
+        QueueActorInventoryChange(apThis, InventoryChangeEvent(apThis->formID, std::move(item), false, shouldUpdateClients));
     }
 
     return TiltedPhoques::ThisCall(RealPickUpObject, apThis, apObject, aCount, aUnk1, aUnk2);
@@ -1226,7 +1267,7 @@ void* TP_MAKE_THISCALL(HookDropObject, Actor, void* apResult, TESBoundObject* ap
     if (apExtraData)
         apThis->GetItemFromExtraData(item, apExtraData);
 
-    World::Get().GetRunner().Trigger(InventoryChangeEvent(apThis->formID, std::move(item), true));
+    QueueActorInventoryChange(apThis, InventoryChangeEvent(apThis->formID, std::move(item), true));
 
     ScopedInventoryOverride _;
 
@@ -1338,14 +1379,23 @@ void Actor::SpeakSound(const char* pFile)
     TiltedPhoques::ThisCall(RealSpeakSoundFunction, this, pFile, handle, 0, 0x32, 0, 0, 0, 0, 0, 0, 0, 1, 1);
 }
 
-char TP_MAKE_THISCALL(HookActorProcess, Actor, float a2)
+char TP_MAKE_THISCALL(HookActorProcess, Actor, float aDeltaTime)
 {
     // Remote actors are driven by their owner, so their AI doesn't run here. A remote corpse still updates, or its
-    // ragdoll never falls.
+    // ragdoll never falls. Upstream also keeps the character controller's timestep valid while the AI is skipped: a
+    // controller created during the skip is left with a zero step, and the actor then glides after a collision
+    // (#901). That is the sliding we have been chasing.
     if (apThis->GetExtension()->IsRemote() && !apThis->actorState.IsDeadOrDying())
+    {
+        if (apThis->currentProcess)
+        {
+            if (auto* pController = apThis->currentProcess->GetCharController())
+                pController->UpdateStepTiming(aDeltaTime);
+        }
         return 0;
+    }
 
-    return TiltedPhoques::ThisCall(RealActorProcess, apThis, a2);
+    return TiltedPhoques::ThisCall(RealActorProcess, apThis, aDeltaTime);
 }
 
 TP_THIS_FUNCTION(TAddDeathItems, void, Actor);

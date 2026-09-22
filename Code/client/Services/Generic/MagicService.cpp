@@ -133,7 +133,18 @@ void MagicService::OnSpellCastEvent(const SpellCastEvent& acEvent) const noexcep
         return;
 #endif
 
-    SpellItem* pCastSpell = Cast<SpellItem>(TESForm::GetById(acEvent.SpellId));
+    TESForm* pMagicForm = TESForm::GetById(acEvent.SpellId);
+
+    // Summoned creatures are replicated by their owning client (see IsPlayerSummon); replaying the
+    // summon cast elsewhere spawns a duplicate, unowned creature that fights the real one. Summon spells avoid
+    // this via projectile sync, but summon EnchantmentItems (Sanguine Rose, Staff of the Familiar) didn't (#791).
+    if (const MagicItem* pMagicItem = Cast<MagicItem>(pMagicForm); pMagicItem && pMagicItem->HasSummonEffect())
+    {
+        spdlog::debug("{}: not syncing summon cast {:X}, the summoned actor is synced by its owner", __FUNCTION__, acEvent.SpellId);
+        return;
+    }
+
+    SpellItem* pCastSpell = Cast<SpellItem>(pMagicForm);
 
 #ifdef SKYRIMVR
     // Powers and dragon shouts are fire-and-forget, so the concentration filter below dropped them and the other
@@ -267,6 +278,14 @@ void MagicService::OnNotifySpellCast(const NotifySpellCast& acMessage) const noe
     if (IsLocalControlForm(pSpell->formID))
         return;
 #endif
+
+    // Never replay a summon locally, whatever the sender decided: the creature arrives as a
+    // replicated actor from its owner.
+    if (pSpell->HasSummonEffect())
+    {
+        spdlog::debug("{}: ignoring remote summon cast {:X} from caster {:X}", __FUNCTION__, pSpell->formID, acMessage.CasterId);
+        return;
+    }
 
     TESObjectREFR* pDesiredTarget = nullptr;
 

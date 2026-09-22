@@ -233,7 +233,8 @@ void PlayerService::RunRespawnUpdates() noexcept
         pPlayer->PayCrimeGoldToAllFactions();
     }
 
-    if (std::chrono::steady_clock::now() >= m_respawnDeadline)
+    const auto cNow = std::chrono::steady_clock::now();
+    if (cNow >= m_respawnDeadline)
     {
         spdlog::info("PlayerService: respawning player");
         pPlayer->RespawnPlayer();
@@ -255,6 +256,9 @@ void PlayerService::RunRespawnUpdates() noexcept
         pSpell = TESForm::GetById(m_cachedPowerId);
         if (pSpell)
             pEquipManager->EquipShout(pPlayer, pSpell);
+
+        m_knockdownDeadline = std::chrono::steady_clock::now() + 1500ms;
+        m_knockdownStart = true;
     }
 }
 
@@ -343,7 +347,7 @@ void PlayerService::RunBeastFormDetection() const noexcept
     PlayerCharacter* pPlayer = PlayerCharacter::Get();
     if (!pPlayer->race)
         return;
-    
+
     if (pPlayer->race->formID == lastRaceFormID)
         return;
 
