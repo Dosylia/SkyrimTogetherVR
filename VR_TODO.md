@@ -207,14 +207,29 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       with inverted polarity and as a dword (TiltedEvolutionVR, checked against the VR prologue); ours passed bools
       through, so the death fade did nothing and the respawn fade-in faded to black ("bright light, then black
       screen", 10:39 on the 19th). Fixed 2026-09-19, untested.
-- [ ] **Grabbing an NPC with HIGGS isn't visible** to the other player. Analysis:
-    - A grabbed NPC is a ragdoll on the grabber's game only. The owner of that NPC keeps simulating it standing, and
-      the grabber's copy is overwritten by the owner's position.
-    - Moving the reference can't drive a ragdoll: TiltedEvolutionVR measured four different writes doing nothing to a
-      ragdolled body, which positions itself from its physics every frame. They exclude actors from their HIGGS sync.
-    - What it needs: HIGGS's grab/pull/drop callbacks (its `IHiggsInterface001`, found through RTTI in
-      `higgs_vr.dll`), an ownership transfer of the NPC to the grabbing player for the duration, and the ragdoll
-      pose streamed like the VR pose (root plus the main bones) and applied at frame end on the other client.
+- [ ] **Seeing the other player handle a body (HIGGS grab).** Called hard before; it is feasible now, because the
+      piece that was missing has since been built and proven. Writing bone transforms at frame end, after the game
+      has had its turn, is exactly what a ragdoll needs, and that is what `VRBodySync` does for players every frame
+      (stable since the drift fix of 2026-09-21). HIGGS also turns out to expose a proper plugin interface rather
+      than needing RTTI spelunking: `HiggsPluginAPI::IHiggsInterface001` in `higgs_vr.dll`, with registration for
+      grab, drop, pull and stash events (strings checked 2026-09-22).
+      Three stages, each shippable, each worthless-but-harmless if the next never happens:
+    - **1, detection only.** Register for the grab and drop events, log which actor and which hand. No sync, no
+      cost. Confirms the interface and shows how often it really happens.
+    - **2, ownership.** On grab, ask for the actor; on drop, let it go. Existing mechanism, no new message. Without
+      it the owner keeps simulating the body standing and overwrites the grab.
+    - **3, pose streaming.** A ragdoll pose (root position plus the main bones) sent by the grabber at the player
+      rate, only while a grab is live, applied at frame end on the other side exactly as a player's pose is, with
+      the actor's own animation skipped while driven.
+      Cost when nobody is holding anything: nothing at all. Cost while holding: one extra player's worth of
+      traffic and one more body in a loop that measures a fraction of a millisecond today.
+      Rules that keep it from hurting anything: dead bodies first, not living NPCs; a time and distance limit with
+      an automatic release; if ownership is refused, do nothing rather than half-drive it; if the bones are not
+      found, skip, as the pose system already does.
+      The one real unknown is stage 3: the receiving side's ragdoll re-derives itself from physics each frame, so
+      the written transforms may need the copy put into ragdoll too, or its physics frozen while driven. That is
+      testable with a single body and is where the work actually lives.
+
 - [ ] **Ownership churn.** Many `Transferring ownership` lines, some with position (0, 0, 0) for actors already
       gone, and `already spawned` re-sends (those are benign: the server re-sends a player's spawn on every cell
       crossing). See the upstream ownership rework below.
@@ -245,6 +260,45 @@ spawn, reconnect after a drop, shouts (ported, untested), PvP sword hits (new, u
 - [ ] **TiltedEvolutionVR `29f99ed`, two havok crash guards** (`SkyrimVR.exe+0AB1ABA` ragdoll add,
       `+03AD7B1` shadow scene listener on a temporary with no 3D). None of our dumps have those addresses; port
       them the day one does, they name the reference.
+- [ ] **[big] Merge upstream TiltedEvolution (studied 2026-09-22).** We forked at `5a99a0b6`, 28 Feb 2026.
+      Upstream's branch is `dev`, not `main`.
+
+    | | Count |
+    | --- | --- |
+    | Upstream commits we lack | 72 |
+    | Our commits since the fork | 62 |
+    | Files upstream changed | 148 |
+    | Files we changed | 199 |
+    | Files both sides changed | 51 |
+    | Files that actually conflict (trial merge) | 26 |
+
+    - **What we would gain, all of it things we are actively fighting:** havok corruption on remote actors leaving
+      a zero timestep on new controllers, which makes them glide (`#901`, 22 Sep) and is our sliding bug, named
+      and fixed; a whole leveled-NPC reconciliation system with a canonical pick, which is our wolf-on-one-side
+      troll-on-the-other, and would let us delete the ghost stand-in code rather than merge it; versioned server
+      ownership grants replacing optimistic client ownership, plus blacklists that no longer persist, which is our
+      ownership churn; dragons failing to spawn for party members; dialogue sync when the speaker does not own the
+      NPC, which is our doubled dialogue; inventory not broadcasting on pickpocket; respawn overrides for interior
+      cells and the camera sticking after a respawn; separate client logs per instance; an incompatible-version
+      popup instead of a silent refusal.
+    - **Where it hurts:** the conflicts sit exactly where both sides did surgery. Client `CharacterService.cpp`
+      (we changed 636 lines, they changed 732), server `CharacterService.cpp` (199 against 482), `Actor.cpp`
+      (243 against 119), `InventoryService.cpp` (217 against 155). Both sides also changed the same messages
+      (`CharacterSpawnRequest`, `AssignCharacterResponse`, `NotifyEquipmentChanges`), so the merged build is a new
+      wire format: everyone updates client and server together, once.
+    - **Where it does not hurt:** almost all the VR work is in files upstream never touches. `VRBodySync`, the
+      pose messages, the address overrides, the crash recovery, the crime guard, the VR dashboard and the launcher
+      come through untouched.
+    - **Order that turns risk into deletion:** take the 97 upstream files we never touched first, which is free;
+      then the ownership rework, because several of our workarounds exist only to paper over what it fixes and
+      should be deleted rather than merged; then the leveled-NPC system, same reasoning against the ghost code;
+      then the small havok fix. Keep the VR code as is throughout.
+    - **Cost:** two to four sessions of merge work and two or three play sessions to shake out what it breaks. It
+      will make the mod unstable for a few days, so not on an evening anyone wants to play.
+    - **The cheap alternative, and the thing to do first:** cherry-pick `fbf72883` alone. Four files, about forty
+      lines, and it targets the worst bug we have left. It will conflict in `HookActorProcess`, which both sides
+      rewrote, but that is one small and understandable conflict rather than twenty-six.
+
 - [ ] **[big] Upstream ownership rework** (versioned server grants, 8 commits, protocol change). Fixes
       former owners overwriting an NPC and ownership blacklists that never expire, the likely cause of the
       shared follower tug of war. A dry run conflicts in exactly our VR files (`Actor.cpp`, `CharacterService`,
