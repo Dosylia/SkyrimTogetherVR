@@ -1,13 +1,15 @@
 #include "AIProcess.h"
 
+#include <Misc/MiddleProcess.h>
+
 bhkCharacterController* AIProcess::GetCharController() noexcept
 {
-    TP_THIS_FUNCTION(TGetCharController, bhkCharacterController*, AIProcess);
-    POINTER_SKYRIMSE(TGetCharController, getCharController, 39856, 39856);
-    // No VR address for this one yet. Without the controller the caller keeps the movement path it used before.
-    if (!getCharController.Get())
-        return nullptr;
-    return TiltedPhoques::ThisCall(getCharController, this);
+    // No address needed: in CommonLibVR this function is a field read, not a call
+    // (`return middleHigh ? middleHigh->charController.get() : nullptr;`), and middleHigh is this struct's
+    // middleProcess at +0x08. That sidesteps AE id 39856, which has no VR address and could not simply be passed
+    // through as one: VR ids are looked up as Special Edition ones, so an AE id resolves to whatever SE symbol
+    // carries that number rather than to nothing. That is how GarbageCollector::Add crashed Seen on 2026-09-22.
+    return middleProcess ? middleProcess->charController : nullptr;
 }
 
 void AIProcess::KnockExplosion(Actor* apActor, const NiPoint3* aSourceLocation, float afMagnitude)

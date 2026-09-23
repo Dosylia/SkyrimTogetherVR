@@ -85,7 +85,16 @@ void RunTiltedInit(const std::filesystem::path& acGamePath, const String& aExeVe
     TiltedOnlineApp::InstallHooks2();
     TP_HOOK_COMMIT;
 
+#ifndef SKYRIMVR
+    // VR loads the Script Extender from TiltedOnlineApp::BeginMain instead, which is where it was called from
+    // before the merge of 2026-09-22 (as `LoadScriptExender`, a typo upstream has since fixed). Upstream moved
+    // the call here, which starts SKSE VR during RunTiltedInit; SKSE VR initializes from its DllMain, so every
+    // plugin is then loaded against a game that has not finished starting. On 2026-09-22 that killed the game
+    // 2.5 s in, inside CombatMusicFixNG's init, 7 ms after it logged its version (sksevr.log stops at
+    // "checking plugin CombatMusicFixNG.dll"). The launcher must still load SKSE itself, so the call moved back
+    // rather than away: nothing else starts it under this launcher, and without it no SKSE plugin runs at all.
     LoadScriptExtender();
+#endif
 }
 
 void RunTiltedApp()

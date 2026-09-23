@@ -19,15 +19,6 @@ and pdb from there. Both players run `collect-logs.bat` after each session and n
 hand; spell casting and the held spell in the hands; arrows seen leaving the other player's bow; Lydia follows,
 fights, and attacks the other player; sync of same-kind levelled bandits.
 
-- [x] **VR menu tab (in-headset menu) blank for the host.** Fixed by holding `enterGame`/`activate` until the
-      page has loaded (`OverlayService::PushUiState`); confirmed working by the host on 2026-09-20.
-- [x] **Skills and level up screens black** while connected. The cause was the unpaused-menu patch itself:
-      it worked in solo (hook inactive) and never while connected. On VR `StatsMenu` is out of the unpause
-      allow-list and pauses like vanilla. Confirmed 2026-09-18. The other player sees you standing still in there.
-- [x] **Spells off / spell beams below the hands / white flicker.** Body sync at frame end plus re-resolving the
-      skeleton when something is attached below a bone (the held spell art hangs off the magic node). Sword and
-      casting confirmed 2026-09-18.
-- [x] **Arms following the VR pose:** confirmed; the `no VR pose data` line never named a player.
 - [x] **[untested] Same symptom on 2026-09-19 evening, second half of the cause.** Three logs (host, Seen, Elbios)
       side by side: every reconnect was manual (`Disconnected from server 4` is the client closing on purpose), the
       other copies were fed and at the right height until each one, and "the player is still here, we can hurt each
@@ -65,9 +56,6 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       The override now points at `0x6226a0`, the database's address for 37356 (it sits 0x40 after 37354 exactly
       as in SE). Watch for: remote NPC copies fighting their network position (AI now runs on them locally, as
       on SE upstream where the interpolation wins), and ragdolls of remote corpses.
-- [x] **Stuck in the level-up menu (2026-09-20 07:58).** The empty-box drop caught the VR level-up choice panel,
-      which the game opens data-less and fills afterwards. The drop is now limited to the one caller of the load
-      phantom (`SkyrimVR.exe+0x168507`).
 - [ ] **NPC under the ground for one player only** (Durak, a rabbit; last seen 2026-09-19). Not seen since, and
       nothing was changed for it on purpose. Two changes since then could have taken it away by accident: the AI
       step fix (remote actors' animation graphs advance again, so their ground snap runs) and the health clamp on
@@ -98,18 +86,6 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       pose keeps writing the sender's bone rotations over it, so every bone jerks between the two each frame.
       Worth checking against `VRBodySync` whether the copy is in a hit, ragdoll or "drop" animation state during
       those frames and skipping the pose then, as it already does for dead and bleeding-out bodies.
-- [x] **World frozen at load (2026-09-20, 01:34 to 02:36).** Music on, nothing moving, still rendering, no menu
-      visible. Not the connection, the bot or the copy fix: a probe of the game's pause counter and menu stack showed
-      a `MessageBoxMenu` with the pause flag sitting in the stack from the end of every save load (and one at the
-      main menu), with no text and no buttons. A hook on `UIMessageQueue::AddMessage` (VR address from the public
-      VR address database, id 13631 = SE 13530) named the sender: `SkyrimVR.exe+0x168507`, the game itself, a show
-      request with no data. Such a box displays nothing and cannot be dismissed; when it opened before the
-      connection it paused the world, when it opened after, our menu hook unpaused it but it swallowed the first
-      controller press (which sent the game to the main menu). The client now drops a MessageBoxMenu show that
-      carries no data (`UI.cpp`, logged as `dropped, a box with no content can only pause the world`). Why the game
-      started sending it on the 20th and not on the 19th is not proven; the likely trigger is the VR controller
-      state at those moments (asleep while the player was at the keyboard), which the VR layer reports through this
-      box. The diagnostics stay in for now: `Probe` every 5 s, `Menu queued`, `UI message for MessageBoxMenu`.
 - [x] **[untested] VR tab Disconnect reconnects by itself.** Now routed through `VRConnectService::Toggle`. Was: It closes the socket through the overlay client, which the
       auto-reconnect treats as a dropped line (`attempt 2` five seconds later, 01:55:37). Route it through
       `VRConnectService` so a chosen disconnect stays disconnected.
@@ -207,28 +183,89 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       with inverted polarity and as a dword (TiltedEvolutionVR, checked against the VR prologue); ours passed bools
       through, so the death fade did nothing and the respawn fade-in faded to black ("bright light, then black
       screen", 10:39 on the 19th). Fixed 2026-09-19, untested.
-- [ ] **Seeing the other player handle a body (HIGGS grab).** Called hard before; it is feasible now, because the
-      piece that was missing has since been built and proven. Writing bone transforms at frame end, after the game
-      has had its turn, is exactly what a ragdoll needs, and that is what `VRBodySync` does for players every frame
-      (stable since the drift fix of 2026-09-21). HIGGS also turns out to expose a proper plugin interface rather
-      than needing RTTI spelunking: `HiggsPluginAPI::IHiggsInterface001` in `higgs_vr.dll`, with registration for
-      grab, drop, pull and stash events (strings checked 2026-09-22).
-      Three stages, each shippable, each worthless-but-harmless if the next never happens:
-    - **1, detection only.** Register for the grab and drop events, log which actor and which hand. No sync, no
-      cost. Confirms the interface and shows how often it really happens.
-    - **2, ownership.** On grab, ask for the actor; on drop, let it go. Existing mechanism, no new message. Without
-      it the owner keeps simulating the body standing and overwrites the grab.
-    - **3, pose streaming.** A ragdoll pose (root position plus the main bones) sent by the grabber at the player
-      rate, only while a grab is live, applied at frame end on the other side exactly as a player's pose is, with
-      the actor's own animation skipped while driven.
-      Cost when nobody is holding anything: nothing at all. Cost while holding: one extra player's worth of
-      traffic and one more body in a loop that measures a fraction of a millisecond today.
-      Rules that keep it from hurting anything: dead bodies first, not living NPCs; a time and distance limit with
-      an automatic release; if ownership is refused, do nothing rather than half-drive it; if the bones are not
-      found, skip, as the pose system already does.
-      The one real unknown is stage 3: the receiving side's ragdoll re-derives itself from physics each frame, so
-      the written transforms may need the copy put into ragdoll too, or its physics frozen while driven. That is
-      testable with a single body and is where the work actually lives.
+- [x] **[untested] Game died at startup on the first build after the upstream merge (2026-09-22 21:33).** The
+      merge made the VR build load SKSE itself. Upstream added a `LoadScriptExtender()` call to `RunTiltedInit`;
+      before the merge that function existed but was spelled `LoadScriptExender`, a typo, and nothing ever called
+      it, so VR had always let the `d3dx9_42` preloader FUS ships bring SKSE VR up once the game was ready.
+      SKSE VR initializes from its DllMain, so calling it there loads every SKSE plugin against a game that has
+      not finished starting: `sksevr.log` stops at `checking plugin CombatMusicFixNG.dll`, that plugin logged its
+      version at 21:33:01.561 and the process died 7 ms later on a null write in ntdll, with only SKSE and that
+      plugin on the stack. No mod on this machine had changed in days. The call is now `#ifndef SKYRIMVR`, which
+      restores exactly what worked before the merge and leaves SE on upstream's path. It also stops
+      `g_ScriptExtenderStarting` being flipped, which is the flag that keeps EngineFixesVR out of this launcher
+      (our own comment in `FileMapping.cpp` says it crashes under it), so that was a second failure waiting a few
+      plugins later in the alphabet. `IsScriptExtenderLoaded` on VR now asks the process for the sksevr module
+      rather than reporting on a handle we no longer hold, so `CheckInstall` stops claiming SKSE is missing.
+      Worth watching on the next merge: upstream calling a function of ours that had been dead code.
+
+- [x] **[untested] Two of the merge's missing VR addresses turned out not to be addresses (2026-09-23.)** Checked
+      against the local `CommonLibVR` checkout and a fresh clone of `cmpayc/TiltedEvolutionVR`:
+    - **`AIProcess::GetCharController` (AE 39856) needs no address.** In CommonLibVR it is a field read, not a
+      call: `middleHigh ? middleHigh->charController.get() : nullptr`, with `middleHigh` at +0x08 and
+      `charController` at +0x250. Our `MiddleProcess` now exposes that field and the function reads it. The offset
+      is confirmed three ways: CommonLibVR's VR headers, the note from TiltedEvolutionVR (`aaf5d83`), and the fact
+      that every neighbouring offset this struct already asserts matches that header exactly (rotation 0B0,
+      activeEffects 1A0, commandingActor 218, leftHand 220, rightHand 260).
+    - **The physics timestep global (AE 389089) is not needed either.** `hkStepInfo::UpdateDeltaTime` is our own
+      code and only *prefers* it: it falls back to the movement delta the caller passes, then to the stored step,
+      rejecting anything non-finite or <= 0.0001s. `HookActorProcess` already passes the frame delta, so VR now
+      calls it with a zero first argument and gets a valid step from the fallback.
+      Together these make upstream's havok fix (#901) live on VR, which is the sliding-NPC fix. Watch for: remote
+      NPCs that now stand still correctly but fight their network position, and `ForcePosition` taking its
+      "no usable step yet" branch for freshly created controllers, which it could not do before.
+    - **`GarbageCollector::Add`: the ids were mismatched overloads.** CommonLibVR has
+      `RELOCATION_ID(35492, 36459)` for `Add(TESObjectREFR*, bool)`. Upstream calls AE **36460**, the
+      `TESBoundObject*` overload, and the merge paired that with SE 35492, so we called the reference overload
+      with a base form and a junk second argument. The singleton is right, though: CommonLibVR gives
+      `RELOCATION_ID(514180, 400329)`, exactly what we have.
+    - **`cmpayc/TiltedEvolutionVR` does not have the ones still missing.** Its generated map covers the 3086 AE
+      ids its own client uses; 39856, 389089, 20231, 36460 and 36459 are all absent, because that fork never calls
+      them either. The one hit is AE 14375, which it derives (auto-diff) to VR `0x19C0C0` and names
+      `s_SetLeveledNpc` from its own `TESNPC.cpp` call site, while upstream calls the same id
+      `CreateTemplateActorBase`. Same address, two names, still unverified as the same function.
+      What that fork does have is the toolkit that derives these (`Tools/vr_addresses`: derive, match, callgraph,
+      candidates, pe), which is the route to the remaining three rather than hand-reading the disassembly.
+
+- [ ] **Levelled NPC reconciliation is off on VR (2026-09-22).** Upstream's `LeveledNpcSystem` needs three engine
+      functions, and VR cannot reach any of them cleanly:
+    - `TESObjectREFR::SetLeveledCreature` (AE 20231) has no VR address. That is the step that actually applies the
+      pick, so even before the crash the feature could not work: it logged
+      `SetLeveledCreature has no VR address` and carried on to the rest.
+    - `GarbageCollector::Add` (AE 36460, given VR 35492 in the merge) is **confirmed wrong**. It crashed Seen on
+      join at 22:14:26, in `BSExtraDataList::GetExtraDataWithoutLocking`, while disposing the temporary base
+      `FF000C6E` ("Reaver Highwayman") that the log had queued for reconciliation a moment earlier; the crash
+      registers still held the owner's pick `301E828` ("Reaver Outlaw") and a `GarbageCollector*`.
+    - `TESActorBaseData::CreateTemplateActorBase` (AE 14375) resolves to a VR address our own override table
+      labels `TESNPC::SetLeveledNpc`. Plausibly the same function under two names, never verified.
+      Both entry points (`CharacterService::ApplyLeveledNpcPick` and `LeveledNpcSystem::ApplyPick`) now return
+      early on VR, so no actor is disabled and re-enabled for a reconciliation that cannot finish, and a levelled
+      NPC that rolled differently on each side is covered the way it was before the merge, by the stand-in and
+      ghost handling. To turn it back on, all three addresses have to be confirmed first; that is a job for the
+      address work, not for another play session.
+
+- [~] **[untested] Seeing the other player handle a body (HIGGS grab).** Built 2026-09-22, never played.
+      It needs nothing from HIGGS and no protocol change, which is why it went in at once: `higgs_vr.dll` exports
+      only the two SKSE entry points, so its `IHiggsInterface001` can only be reached through SKSE messaging, and
+      guessing at the interface would crash the game. Instead the body itself is watched.
+    - **Sending.** `VRBodySync::CaptureBodyPose` reads the upper-body bones of a dead actor this machine owns,
+      within 600 units of the player, and `AnimationSystem::Serialize` puts them in the movement snapshot that
+      actor already sends. The `VRPose` field has been on every reference update since the player pose was built,
+      so nothing new travels. A body that is not moving sends nothing at all; sending carries on for two seconds
+      after it comes to rest, because the receiver only buffers two points and the final pose has to be repeated
+      to be the one that lands. After that the body is left to its own ragdoll on both sides.
+    - **Receiving.** The frame-end pass no longer skips a dead body when bones arrive for it. Dead *player*
+      copies are still skipped: posing them fights the death animation and leaves the body standing in the air.
+      The bone-usability guard from the invisible-body fix applies unchanged.
+    - **Ownership.** `CharacterService::RunBodyGrabUpdates`, every 250 ms: a dead body owned by the other player
+      that this machine has physically moved more than 32 units from where the network is playing it back is
+      claimed through the ordinary `RequestOwnership`, at most once every three seconds per body. The corpse path
+      tolerates 64 units of drift before it snaps a body back, so the claim goes out before the snap. Living NPCs,
+      player copies and summons are never taken this way.
+      To watch for on the first session: a body that stutters between the two sides while a claim is in flight,
+      a claim that is refused and leaves the grab fighting the owner, and whether the receiving side's ragdoll
+      re-derives itself from physics hard enough to ignore the written transforms. That last one is the real
+      unknown and is what the first test is for; if it shows, the copy has to be put into ragdoll, or its
+      physics frozen, while it is driven.
 
 - [ ] **Ownership churn.** Many `Transferring ownership` lines, some with position (0, 0, 0) for actors already
       gone, and `already spawned` re-sends (those are benign: the server re-sends a player's spawn on every cell
@@ -374,14 +411,6 @@ What we know:
 - [ ] **Hits from VR weapons.** A VR sword hit lands on the attacker's copy of the NPC. Check that
       damage reaches the NPC's owner, and that the health change is sent back when the NPC is owned by
       the other player.
-- [x] **PvP sword fights** confirmed 2026-09-19 (`bEnablePvp=true`). A hit on a remote player is sent as a health
-      change and applied on their side. Bug found the same day: any hitter's damage was forwarded, so the host's
-      spider bit the friend 90 times a second on top of his own spider; now only this player's own sword, arrow
-      and spell hits travel. Still damage only: no stagger, and blades do not clash (PLANCK-style weapon physics).
-- [x] **Projectile details missing.** The `LaunchData` pointers were never read on VR, so the shooter id stayed
-      0 and no projectile was ever sent. Read since 2026-09-18 behind a check (readable memory, and the form table
-      maps the id back to the same pointer); arrows confirmed seen by the other player the same evening. The
-      first launches and every spell projectile are logged (`Projectile launch`).
 - [x] **[untested] Dragons on the remote side.** `CharacterSpawnRequest.IsDragon` travels with the spawn and the
       client grid check uses it (2026-09-19).
 - [ ] **Actor ownership warnings.** Look into `Actor for ownership transfer not found` and
@@ -396,7 +425,6 @@ What we know:
 
 - [x] **[untested] Item pickups by NPCs and players** (37521, 40533) are hooked again.
 - [x] **[untested] Items added to actors and containers** (37525, 19708) are hooked again.
-- [x] Gold amount (37527) resolves again.
 
 ### 2.3 VR body
 
@@ -439,8 +467,6 @@ What we know:
       that every `OverlayService` / `ExecuteAsync` / `CefListValue` path is guarded.
 - [ ] **Intermittent crash:** a script event sent to a freed temporary reference during cell attach
       (see `KNOWN_ISSUES.md`).
-- [x] **Papyrus stand-ins** for SetNoBleedoutRecovery and SetFactionRank are replaced by the real
-      functions.
 
 ---
 
@@ -524,7 +550,6 @@ the headset off.
 - [ ] Death and bleedout: HUD message "X is down", and optionally revive by activating the downed
       player. Needs a new message: a downed player bleeds out and never reports a death state.
 - [ ] Sensible defaults for VR in `STServer.ini` (difficulty sync, PvP off, time scale).
-- [x] Trim the log to what's useful for a bug report (see 1.2).
 
 ---
 

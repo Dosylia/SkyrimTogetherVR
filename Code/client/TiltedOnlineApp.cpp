@@ -7,6 +7,7 @@
 #include <WindowsHook.hpp>
 
 #include <World.h>
+#include <ScriptExtender.h>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -95,6 +96,12 @@ bool TiltedOnlineApp::BeginMain()
     World::Create();
     World::Get().ctx().at<DiscordService>().Init();
     World::Get().ctx().emplace<RenderSystemD3D11>(World::Get().ctx().at<OverlayService>(), World::Get().ctx().at<ImguiService>());
+
+#ifdef SKYRIMVR
+    // The launcher is the only thing that starts SKSE VR, so this has to happen, but it has to happen here and
+    // not in RunTiltedInit (see main.cpp). This is where it ran before the merge of 2026-09-22.
+    LoadScriptExtender();
+#endif
 
     // TODO: Figure out a way to un-blacklist NvCamera64.dll (see DllBlocklist.cpp). Then this hack can be removed
     if (IsNvidiaOverlayLoaded())

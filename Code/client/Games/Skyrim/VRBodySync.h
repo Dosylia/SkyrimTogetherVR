@@ -18,7 +18,12 @@ namespace VRBodySync
 //! Renderer frame end (BSGraphics StopTimer). One thread, once per frame.
 void OnFrameEnd() noexcept;
 
-bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept;
+bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept;
+
+//! The pose of a body that is not the local player: a dead NPC this machine owns, so that the other players see it
+//! lie, slump and get dragged around the way it does here (HIGGS grabs, spell pushes, a foot in the ribs).
+//! Upper-body bones only. Returns false, leaving the pose empty, when the body has not moved since the last send.
+bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept;
 
 //! A pose without data clears the actor's pose.
 void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept;

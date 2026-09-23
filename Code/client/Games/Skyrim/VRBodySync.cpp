@@ -901,9 +901,25 @@ void OnFrameEnd() noexcept
         if (!pRoot)
             continue;
 
-        // A dead or downed body belongs to its ragdoll.
+        // A dead or downed player copy belongs to its ragdoll: posing it fights the death animation and the body
+        // ends up standing in the air. A dead NPC is the opposite case. Its owner only sends bones for it while it
+        // is being moved over there (dragged, thrown, shoved), and that movement is the whole point of this, so
+        // those bones are applied.
         if (pActor->actorState.IsDeadOrDying() || pActor->actorState.IsBleedingOut())
-            continue;
+        {
+            const ActorExtension* pExtension = pActor->GetExtension();
+            if (!pExtension || pExtension->IsRemotePlayer() || pExtension->IsLocalPlayer())
+                continue;
+
+            // The other half of the sender's line, so one log shows the whole chain.
+            static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextSaid;
+            auto& next = s_nextSaid[formId];
+            if (now >= next)
+            {
+                next = now + std::chrono::seconds(5);
+                spdlog::info("VRBodySync: posing body {:X} from its owner's bones (someone is moving it over there)", formId);
+            }
+        }
 
         Rig& rig = s_rigs[formId];
         const bool cGone = rig.pRoot != pRoot || !rig.Valid || !RigIntact(rig);
@@ -1137,6 +1153,98 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
         }
     }
 
+    aOutPose.HasData = true;
+    return true;
+}
+
+bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
+{
+    aOutPose.HasData = false;
+
+    if (!apActor)
+        return false;
+
+    void* pRoot = apActor->GetNiNode();
+    if (!pRoot)
+        return false;
+
+    // Same caching as the local player, one entry per body: the bone search walks the whole skeleton and would
+    // otherwise run at every send. Entries for bodies nobody has touched in a while are dropped.
+    struct BodyCapture
+    {
+        void* pRoot = nullptr;
+        BoneNodes Nodes{};
+        std::array<void*, VRPose::kBoneCount> VTables{};
+        std::chrono::steady_clock::time_point RefreshAt{};
+        std::array<Quaternion_NetQuantize, VRPose::kUpperBoneCount> LastSent{};
+        std::chrono::steady_clock::time_point LastChangeAt{};
+        std::chrono::steady_clock::time_point TouchedAt{};
+        bool Sent = false;
+    };
+    static std::unordered_map<uint32_t, BodyCapture> s_bodies;
+
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = s_bodies.begin(); it != s_bodies.end();)
+        it = now - it->second.TouchedAt > std::chrono::seconds(30) ? s_bodies.erase(it) : std::next(it);
+
+    BodyCapture& capture = s_bodies[apActor->formID];
+    capture.TouchedAt = now;
+
+    bool cached = capture.pRoot == pRoot && now < capture.RefreshAt;
+    for (uint32_t i = 0; cached && i < VRPose::kUpperBoneCount; ++i)
+        if (capture.Nodes[i] && *static_cast<void**>(capture.Nodes[i]) != capture.VTables[i])
+            cached = false;
+
+    if (!cached)
+    {
+        BoneNodes nodes;
+        if (!FindBones(pRoot, nodes))
+        {
+            capture.pRoot = nullptr;
+            return false;
+        }
+        capture.pRoot = pRoot;
+        capture.Nodes = nodes;
+        for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
+            capture.VTables[i] = nodes[i] ? *static_cast<void**>(nodes[i]) : nullptr;
+        capture.RefreshAt = now + std::chrono::seconds(5);
+        capture.Sent = false;
+    }
+
+    const glm::mat3 inverseRoot = glm::transpose(ToGlm(At<NiTransform>(pRoot, kWorldOffset).rotate));
+
+    std::array<Quaternion_NetQuantize, VRPose::kUpperBoneCount> quantized{};
+    for (uint32_t i = 0; i < VRPose::kUpperBoneCount; ++i)
+    {
+        const glm::mat3 boneWorld = ToGlm(At<NiTransform>(capture.Nodes[i], kWorldOffset).rotate);
+        quantized[i] = glm::normalize(glm::quat_cast(inverseRoot * boneWorld));
+    }
+
+    // A corpse that has settled costs nothing on the wire. Sending carries on for two seconds after the body comes
+    // to rest rather than stopping dead: the receiver only buffers two points, so the last pose has to be repeated
+    // a few times to be the one that lands. After that the body is left to its own ragdoll, which is where it was
+    // already heading on both sides.
+    const bool cChanged = !capture.Sent || quantized != capture.LastSent;
+    if (cChanged)
+    {
+        // One line each time a body starts moving again, so a session log says whether this ever happened at all.
+        // Without it the feature is invisible: a grab that works and a grab that does nothing look identical.
+        if (!capture.Sent || now - capture.LastChangeAt >= std::chrono::seconds(2))
+            spdlog::info("VRBodySync: body {:X} is being moved here, sending its bones to the other players", apActor->formID);
+        capture.LastChangeAt = now;
+    }
+    else if (now - capture.LastChangeAt >= std::chrono::seconds(2))
+        return false;
+
+    capture.LastSent = quantized;
+    capture.Sent = true;
+
+    for (uint32_t i = 0; i < VRPose::kUpperBoneCount; ++i)
+        aOutPose.Bones[i] = quantized[i];
+
+    aOutPose.HasLegs = false;
+    aOutPose.HasFingers = false;
+    aOutPose.HasScale = false;
     aOutPose.HasData = true;
     return true;
 }

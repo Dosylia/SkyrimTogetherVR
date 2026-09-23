@@ -82,7 +82,18 @@ bool g_ScriptExtenderStarting = false;
 
 bool IsScriptExtenderLoaded()
 {
+#ifdef SKYRIMVR
+    // VR never loads SKSE itself (see main.cpp), so the handle above is always null here. Ask the process
+    // instead: the preloader has brought sksevr_<version>.dll in by the time anything asks.
+    const auto version = GetSKSEStyleExeVersion();
+    std::wstring moduleName(kScriptExtenderName);
+    moduleName += L'_';
+    moduleName.append(version.begin(), version.end());
+    moduleName += L".dll";
+    return GetModuleHandleW(moduleName.c_str()) != nullptr;
+#else
     return g_SKSEModuleHandle;
+#endif
 }
 
 void LoadScriptExtender()

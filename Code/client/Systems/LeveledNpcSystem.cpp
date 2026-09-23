@@ -33,6 +33,13 @@ bool LeveledNpcSystem::ApplyPick(Actor* apActor, TESNPC* apPick) noexcept
     if (!apPick)
         return false;
 
+#ifdef SKYRIMVR
+    // See CharacterService::ApplyLeveledNpcPick: the engine calls below are not resolvable on VR, and the one
+    // taken for GarbageCollector::Add crashes. Callers treat false as "keep the local base", which is what VR
+    // did before the merge of 2026-09-22.
+    return false;
+#endif
+
     // Skyrim resolves a leveled NPC by copying the original base, then
     // applying the pick according to that base's template flags. Using
     // the pick itself discards data such as a hold guard's name/outfit.

@@ -251,6 +251,25 @@ void AnimationSystem::Serialize(World& aWorld, ClientReferencesMoveRequest& aMov
         }
         update.UpdatedVRPose = pose;
     }
+    else if (pActor->actorState.IsDeadOrDying() || pActor->actorState.IsBleedingOut())
+    {
+        // A body this machine owns, within reach of this player. Sending its bones is what lets the other players
+        // see it being dragged, thrown or shoved here instead of seeing it snap between two resting places. It only
+        // goes on the wire while the body is actually moving (CaptureBodyPose returns false otherwise), so a field
+        // of corpses left alone costs nothing, and the far ones are never read at all.
+        constexpr float cReachSquared = 600.f * 600.f;
+        const auto* pPlayer = PlayerCharacter::Get();
+        if (pPlayer)
+        {
+            const glm::vec3 toPlayer = static_cast<glm::vec3>(pActor->position) - static_cast<glm::vec3>(pPlayer->position);
+            if (glm::dot(toPlayer, toPlayer) <= cReachSquared)
+            {
+                VRPose pose{};
+                if (VRBodySync::CaptureBodyPose(pActor, pose))
+                    update.UpdatedVRPose = pose;
+            }
+        }
+    }
 #endif
 
     for (auto& entry : animationComponent.Actions)
