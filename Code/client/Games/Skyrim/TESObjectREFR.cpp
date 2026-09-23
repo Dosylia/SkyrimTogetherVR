@@ -169,20 +169,17 @@ void TESObjectREFR::SetRotation(float aX, float aY, float aZ) noexcept
 void TESObjectREFR::SetLeveledCreature(TESActorBase* apOriginalBase, TESActorBase* apTemplateA) noexcept
 {
     TP_THIS_FUNCTION(TSetLeveledCreature, void, TESObjectREFR, TESActorBase*, TESActorBase*);
-    // 20231 is an Anniversary Edition id with no VR address; the log confirmed it resolves to nothing here
-    // (2026-09-22, "SetLeveledCreature has no VR address"). Kept as a null check rather than an #ifdef because
-    // that is proven behaviour on this build, but see AIProcess::GetCharController for why null is not a
-    // reliable signal in general.
+    // The VR address arrived on 2026-09-23 (VR 0x1402b8f10, SE 0x1402a77a0, SE id 19826) and is in
+    // VRAddressOverrides under AE id 20231. The null check stays: an unresolved id would otherwise be called as
+    // address zero, and this is reached from levelled reconciliation rather than from a hot path.
     POINTER_SKYRIMSE(TSetLeveledCreature, s_SetLeveledCreature, 20231, 20231);
-    // No VR address yet. The levelled reconciliation then leaves the reference alone here, and the stand-in in
-    // CharacterService still covers a creature that rolled differently on this side.
     if (!s_SetLeveledCreature.Get())
     {
         static bool s_said = false;
         if (!s_said)
         {
             s_said = true;
-            spdlog::warn("SetLeveledCreature has no VR address; levelled creature reconciliation is off on this build");
+            spdlog::warn("SetLeveledCreature did not resolve; levelled creature reconciliation cannot run");
         }
         return;
     }

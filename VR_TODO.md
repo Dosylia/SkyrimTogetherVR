@@ -198,6 +198,61 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       rather than reporting on a handle we no longer hold, so `CheckInstall` stops claiming SKSE is missing.
       Worth watching on the next merge: upstream calling a function of ours that had been dead code.
 
+## 0a. The three open complaints, with a plan each (2026-09-23)
+
+- [ ] **Invisible player: stop guessing at actor state, look at render state.** Five occurrences now, and every
+      time `CopyDiag` reads perfect: present, metres away, right scene, invisibility 0.00, scales 1.000, spine
+      rotation clean, 3D root with its children. Four causes were proposed and all four were disproved by that
+      probe (health floor, body scale, the invisibility actor value, bone drift). They share a blind spot: they
+      are all *actor* state. A body can be flawless as an actor and still not be drawn, and the render state is
+      the one thing never measured. New clue from 2026-09-23: it happens far more indoors, and fade and LOD
+      behave differently in interiors.
+    - **Stage A, measure.** Add to `CopyDiag`, for the copy's 3D root: whether it is a `BSFadeNode` and its
+      `currentFade` (CommonLibVR puts the runtime block at +0x128 and `currentFade` at +0x08 inside it, so
+      +0x130), the cull flag on the root and on each skinned child, and the copy's parent cell and worldspace
+      against the player's. Log the raw values first and cross-check the offsets against neighbours the way
+      `charController` was checked, before any of them is acted on; VR layouts have burned us twice this week.
+    - **Stage B, recover without a reconnect.** When a copy is close and reads as not drawn (fade at or near
+      zero, or culled) for more than about three seconds, clear it: force the fade up, clear the cull, and if
+      that does not take, rebuild the 3D. Automatic, no key press, and a log line every time it fires. Even if
+      the cause is something else, this ends the reconnect ritual, and the log then says how often it was needed.
+    - Stage B is only worth shipping with Stage A's numbers in the same build, so one session answers both.
+
+- [ ] **Friend's health bar: the message is right, the widget refuses it.** Proven on 2026-09-23: our message is
+      the game's own (a `HUDData` with type 0xB at +0x10, level at +0x20, flags 0x0101 at +0x22, the handle at
+      +0x28, sent to `WSEnemyMeters` as `kUpdate`, which is 0 and matches what the probe sees the game send).
+      It was pointed at the friend **107 times** that session and drawn **once** — and the once was the moment
+      she burned him with fire.
+    - **Hypothesis:** the widget only draws for an actor the game holds as a valid hostile target, and friendly
+      fire briefly made him one. That single data point fits nothing else.
+    - **Decisive test, one minute in game:** make the two players hostile (PvP) and watch whether the bar becomes
+      reliable. If it does, the game's enemy meter structurally cannot show a friendly player and no amount of
+      message-fixing will change it.
+    - **Then it is a choice, and it is the user's:** drive a different element the HUD already has, read
+      `EnemyHealth::Update` to find what it tests and satisfy that without making anyone hostile, or accept a
+      minimal element of our own. The last one was refused before on immersion grounds, so it only comes back if
+      the game's own widget is proven incapable.
+
+- [x] **[untested] NPCs only fight the player who angered them.** Built 2026-09-23, never played. Mechanism, not mystery: combat targets belong to whoever
+      owns the NPC. A crime makes the guards hostile to that player on that player's machine. The other player's
+      hits arrive as `RequestHealthChangeBroadcast`, which carries only the actor id and a health delta and
+      **no attacker**, so the owner never learns who hit its NPC and never puts them in combat.
+    - **Fix, and it needs no new addresses.** The server already knows which player sent the broadcast: add that
+      player's id to `NotifyHealthChangeBroadcast`, and on the owner's client, when an NPC we own takes real
+      damage attributed to player X, call `Actor::StartCombatEx(copy of X)`. That function is already written
+      (Papyrus `StartCombat` plus `CombatController::SetTarget`) and is currently dead code, never called.
+    - **Cost:** one field in one message, so client and server both rebuild, and one call site.
+    - **Care:** gate it on an actual health decrease, or an NPC will turn on a player who healed or buffed it,
+      and rate limit it so a flurry of arrows does not restart combat every frame.
+    - **Built as planned.** `NotifyHealthChangeBroadcast` carries `AttackerPlayerId`, filled in by the server from
+      the sending player. `ActorValueService::StartCombatWithAttacker` on the owner's client resolves it to that
+      player's copy and calls `StartCombatEx`. Damage only (the client adds the delta, so a hit is negative),
+      never on a player or a dead or downed actor, only on an actor this client owns, and at most once every
+      three seconds per actor. Logged as `Combat: actor X now also fights player N`, so one session says whether
+      it fires. Protocol change, so client and server both move to `036b42a`.
+
+---
+
 - [x] **[untested] Two of the merge's missing VR addresses turned out not to be addresses (2026-09-23.)** Checked
       against the local `CommonLibVR` checkout and a fresh clone of `cmpayc/TiltedEvolutionVR`:
     - **`AIProcess::GetCharController` (AE 39856) needs no address.** In CommonLibVR it is a field read, not a
@@ -213,6 +268,13 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       Together these make upstream's havok fix (#901) live on VR, which is the sliding-NPC fix. Watch for: remote
       NPCs that now stand still correctly but fight their network position, and `ForcePosition` taking its
       "no usable step yet" branch for freshly created controllers, which it could not do before.
+      **Both addresses arrived on 2026-09-23 anyway** and are now in `VRAddressOverrides`: AE 39856 ->
+      VR 0x140685270 (`AIProcess::GetCharController`) and AE 389089 -> VR 0x141ec8278 (the timestep global,
+      SE id 512261). Both builds now use the engine's own function and the real global rather than the
+      reconstructions above. The field read stays behind `GetCharController` as a fallback and as a check: if the
+      engine and `MiddleProcess+0x250` ever disagree, the client says so once, which is the only thing that would
+      catch a wrong `charController` offset. **Still missing: AE 20231 (`TESObjectREFR::SetLeveledCreature`)**,
+      which is what levelled-NPC reconciliation needs before it can be turned back on at all.
     - **`GarbageCollector::Add`: the ids were mismatched overloads.** CommonLibVR has
       `RELOCATION_ID(35492, 36459)` for `Add(TESObjectREFR*, bool)`. Upstream calls AE **36460**, the
       `TESBoundObject*` overload, and the merge paired that with SE 35492, so we called the reference overload
@@ -226,8 +288,24 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       What that fork does have is the toolkit that derives these (`Tools/vr_addresses`: derive, match, callgraph,
       candidates, pe), which is the route to the remaining three rather than hand-reading the disassembly.
 
-- [ ] **Levelled NPC reconciliation is off on VR (2026-09-22).** Upstream's `LeveledNpcSystem` needs three engine
-      functions, and VR cannot reach any of them cleanly:
+- [x] **[untested] Levelled NPC reconciliation is back on for VR (2026-09-23), after being off since it crashed
+      Seen on 2026-09-22.** All three engine calls are now accounted for. Watch the next join closely: this is the
+      code path that crashed him, and the one part still taken on trust is `CreateTemplateActorBase`.
+    - `TESObjectREFR::SetLeveledCreature`: **address supplied 2026-09-23**, AE 20231 -> VR 0x1402b8f10
+      (SE 0x1402a77a0, SE id 19826). This is the step that actually applies the pick, so until now the feature
+      could not have worked even without the crash.
+    - `TESActorBaseData::CreateTemplateActorBase`: AE 14375 -> VR 0x19c0c0. Not proven by running it, but
+      corroborated: cmpayc/TiltedEvolutionVR derived the same address independently and declares it
+      `TESNPC* thiscall(TESNPC*, TESNPC*)` where upstream declares `TESActorBase* fastcall(TESActorBase*,
+      TESActorBase*)`. On x64 those pass in the same registers and return the same way, and TESNPC derives from
+      TESActorBase, so the two declarations are compatible. This is the residual risk.
+    - `GarbageCollector::Add`: **not called on VR at all.** Upstream calls AE 36460, the TESBoundObject overload;
+      the merge paired it with VR 35492, which CommonLibVR shows is the TESObjectREFR overload taking
+      `(TESObjectREFR*, bool)`. We called it with a base form and a junk second argument, which is what crashed
+      Seen inside `BSExtraDataList::GetExtraDataWithoutLocking`. Skipping it leaks one temporary base form per
+      reconciliation, which is a much better bargain. Restore it if the TESBoundObject overload's VR address
+      turns up.
+      Superseded detail from when this was off:
     - `TESObjectREFR::SetLeveledCreature` (AE 20231) has no VR address. That is the step that actually applies the
       pick, so even before the crash the feature could not work: it logged
       `SetLeveledCreature has no VR address` and carried on to the rest.

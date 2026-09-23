@@ -325,11 +325,59 @@ void ActorValueService::OnHealthChangeBroadcast(const NotifyHealthChangeBroadcas
         }
     }
 
+    StartCombatWithAttacker(pActor, acMessage.AttackerPlayerId, acMessage.DeltaHealth);
+
     // TODO(cosideci): find fix for player health sync so this can be used again
     /*
     if (pActor->GetExtension()->IsRemotePlayer())
         World::Get().GetOverlayService().SetPlayerHealthPercentage(pActor->formID);
     */
+}
+
+void ActorValueService::StartCombatWithAttacker(Actor* apActor, uint32_t aAttackerPlayerId, float aDeltaHealth) const noexcept
+{
+    // An NPC's combat belongs to whoever owns it, and until now a hit from the other player arrived as a bare health
+    // delta with no attacker. So a guard that a crime made hostile to one player ignored the other player entirely,
+    // however hard they hit it (2026-09-23: "npc i triggered by being a criminal only wanted to fight me, despite
+    // both of us fighting them"). The server now names the attacker and this puts them in the NPC's combat.
+    if (!apActor || !aAttackerPlayerId)
+        return;
+
+    // Damage only. The client adds the delta, so a hit is negative; a heal or a buff must never start a fight.
+    if (aDeltaHealth >= 0.f)
+        return;
+
+    // Only the owner runs this actor's AI, and only it can usefully start combat. Players are never made to fight.
+    ActorExtension* pExtension = apActor->GetExtension();
+    if (!pExtension || !pExtension->IsLocal() || pExtension->IsPlayer())
+        return;
+
+    if (apActor->IsDead() || apActor->actorState.IsBleedingOut())
+        return;
+
+    auto view = m_world.view<FormIdComponent, PlayerComponent>();
+    const auto it = std::find_if(view.begin(), view.end(), [view, aAttackerPlayerId](auto aEntity)
+                                 { return view.get<PlayerComponent>(aEntity).Id == aAttackerPlayerId; });
+    if (it == view.end())
+        return;
+
+    Actor* pAttacker = Cast<Actor>(TESForm::GetById(view.get<FormIdComponent>(*it).Id));
+    if (!pAttacker || pAttacker == apActor)
+        return;
+
+    // A flurry of arrows would otherwise restart combat every frame.
+    static TiltedPhoques::Map<uint32_t, std::chrono::steady_clock::time_point> s_startedAt;
+    const auto now = std::chrono::steady_clock::now();
+    for (auto entry = s_startedAt.begin(); entry != s_startedAt.end();)
+        entry = now - entry->second > std::chrono::seconds(30) ? s_startedAt.erase(entry) : std::next(entry);
+
+    auto& startedAt = s_startedAt[apActor->formID];
+    if (startedAt.time_since_epoch().count() && now - startedAt < std::chrono::seconds(3))
+        return;
+    startedAt = now;
+
+    apActor->StartCombatEx(pAttacker);
+    spdlog::info("Combat: actor {:X} now also fights player {} (copy {:X}), which hit it for {:.0f}", apActor->formID, aAttackerPlayerId, pAttacker->formID, -aDeltaHealth);
 }
 
 void ActorValueService::OnActorValueChanges(const NotifyActorValueChanges& acMessage) const noexcept

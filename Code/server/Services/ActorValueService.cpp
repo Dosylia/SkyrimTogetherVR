@@ -93,6 +93,8 @@ void ActorValueService::OnHealthChangeBroadcast(const PacketEvent<RequestHealthC
     NotifyHealthChangeBroadcast notify;
     notify.Id = message.Id;
     notify.DeltaHealth = message.DeltaHealth;
+    // Only the server knows who sent this, and the actor's owner needs it to start combat with the right player.
+    notify.AttackerPlayerId = acMessage.pPlayer ? acMessage.pPlayer->GetId() : 0;
 
     const entt::entity cEntity = static_cast<entt::entity>(message.Id);
     if (!GameServer::Get()->SendToPlayersInRange(notify, cEntity, acMessage.pPlayer))

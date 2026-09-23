@@ -38,6 +38,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 18518u, 0x025b7c0u }, // SE 18133 BGSWorldLocation distance
     { 18563u, 0x025da30u }, // SE 18178 ImageSpaceModifierInstance stop
     { 19075u, 0x027a4c0u }, // SE 18606 TESObjectCELL::GetCOCPlacementInfo
+    { 20231u, 0x02b8f10u }, // SE 19826 (SE 0x2a77a0) TESObjectREFR::SetLeveledCreature (supplied 2026-09-23)
     { 19362u, 0x02a7f00u }, // SE 19362 TESObjectREFR::SetAngleZ
     { 19364u, 0x028ccd0u }, // SE 18949 EventDispatcher::PushEvent
     { 19512u, 0x0297310u }, // SE 19110 TESObjectREFR::AddLockChange
@@ -129,6 +130,8 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 39004u, 0x0646160u }, // SE 38048 ApplyAnimationVariables
     { 39114u, 0x064c170u }, // SE 38156 AIProcess::CheckForNewPackage
     { 39643u, 0x066dd50u }, // SE 38612 dialogue response processing
+    { 39856u, 0x0685270u }, // SE 0x67bdf0 AIProcess::GetCharController (supplied 2026-09-23)
+    { 389089u, 0x1ec8278u }, // SE 512261 (SE 0x1e083a8) physics timestep global (supplied 2026-09-23)
     { 40245u, 0x069bec0u }, // SE 39171 Character ctor
     { 40246u, 0x069bfc0u }, // SE 39172 Character ctor (uint8)
     { 40454u, 0x06c00f0u }, // SE 39382 Actor::DropObject

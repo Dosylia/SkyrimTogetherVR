@@ -251,7 +251,7 @@ void AnimationSystem::Serialize(World& aWorld, ClientReferencesMoveRequest& aMov
         }
         update.UpdatedVRPose = pose;
     }
-    else if (pActor->actorState.IsDeadOrDying() || pActor->actorState.IsBleedingOut())
+    else if (pActor->actorState.IsDead())
     {
         // A body this machine owns, within reach of this player. Sending its bones is what lets the other players
         // see it being dragged, thrown or shoved here instead of seeing it snap between two resting places. It only

@@ -911,6 +911,13 @@ void OnFrameEnd() noexcept
             if (!pExtension || pExtension->IsRemotePlayer() || pExtension->IsLocalPlayer())
                 continue;
 
+            // Only a properly dead body. A downed one (bleeding out) gets back up, and a dying one is playing its
+            // death animation; writing bones into either fights the game. Seen reported exactly that on
+            // 2026-09-23: "npcs that get downed but cant be killed dont stand back up, they just lay on the floor
+            // weirdly". The sender no longer sends for those, and this refuses them even if an old client does.
+            if (!pActor->actorState.IsDead())
+                continue;
+
             // The other half of the sender's line, so one log shows the whole chain.
             static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextSaid;
             auto& next = s_nextSaid[formId];
@@ -1179,6 +1186,9 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
         std::array<Quaternion_NetQuantize, VRPose::kUpperBoneCount> LastSent{};
         std::chrono::steady_clock::time_point LastChangeAt{};
         std::chrono::steady_clock::time_point TouchedAt{};
+        glm::vec3 LastPosition{};
+        std::chrono::steady_clock::time_point MovedAt{};
+        bool Placed = false;
         bool Sent = false;
     };
     static std::unordered_map<uint32_t, BodyCapture> s_bodies;
@@ -1209,6 +1219,28 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
             capture.VTables[i] = nodes[i] ? *static_cast<void**>(nodes[i]) : nullptr;
         capture.RefreshAt = now + std::chrono::seconds(5);
         capture.Sent = false;
+    }
+
+    // Bones alone are a bad signal for "someone is handling this body": a corpse settling on the ground, or an
+    // actor still playing an animation, changes its bones without anyone touching it. That is why this fired 204
+    // times in one session on 2026-09-23 when nobody had dragged much of anything. What a grab really does is
+    // move the body, so the gate is displacement of the 3D root, not bone movement.
+    const glm::vec3 rootPosition = ToGlm(At<NiTransform>(pRoot, kWorldOffset).translate);
+    if (capture.Placed)
+    {
+        constexpr float cMovedSquared = 4.f * 4.f; // a settled ragdoll still twitches a little
+        const glm::vec3 delta = rootPosition - capture.LastPosition;
+        if (glm::dot(delta, delta) >= cMovedSquared)
+            capture.MovedAt = now;
+    }
+    capture.LastPosition = rootPosition;
+    capture.Placed = true;
+
+    // Two seconds after it comes to rest, this body stops costing anything at all.
+    if (now - capture.MovedAt >= std::chrono::seconds(2))
+    {
+        capture.Sent = false;
+        return false;
     }
 
     const glm::mat3 inverseRoot = glm::transpose(ToGlm(At<NiTransform>(pRoot, kWorldOffset).rotate));

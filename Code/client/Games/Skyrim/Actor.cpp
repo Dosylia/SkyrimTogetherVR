@@ -1343,7 +1343,9 @@ uint64_t TP_MAKE_THISCALL(HookProcessResponse, void, DialogueItem* apVoice, Acto
 
 bool TP_MAKE_THISCALL(HookInitiateMountPackage, Actor, Actor* apMount)
 {
-    if (apMount && apThis->GetExtension()->IsLocal())
+    // Same as HookActorProcess: an actor with no extension is not one of ours.
+    const ActorExtension* pExtension = apThis->GetExtension();
+    if (apMount && pExtension && pExtension->IsLocal())
         World::Get().GetRunner().Trigger(MountEvent(apThis->formID, apMount->formID));
 
     return TiltedPhoques::ThisCall(RealInitiateMountPackage, apThis, apMount);
@@ -1385,7 +1387,15 @@ char TP_MAKE_THISCALL(HookActorProcess, Actor, float aDeltaTime)
     // ragdoll never falls. Upstream also keeps the character controller's timestep valid while the AI is skipped: a
     // controller created during the skip is left with a zero step, and the actor then glides after a collision
     // (#901). That is the sliding we have been chasing.
-    if (apThis->GetExtension()->IsRemote() && !apThis->actorState.IsDeadOrDying())
+    //
+    // GetExtension() returns null by design for anything this client did not allocate as an ExActor, and this
+    // hook is handed every actor the engine processes. Seen crashed here on 2026-09-23 with a null extension
+    // while guards were reacting to a crime (HookActorProcess+0x1e calling ActorExtension::IsRemote with rcx 0,
+    // on a Redoran Guard). Nothing about the merge caused it; the same unguarded dereference is in the pre-merge
+    // code, it just needs an actor without an extension to meet it. An actor we do not extend is not remote, so
+    // it takes the normal path.
+    const ActorExtension* pExtension = apThis->GetExtension();
+    if (pExtension && pExtension->IsRemote() && !apThis->actorState.IsDeadOrDying())
     {
         if (apThis->currentProcess)
         {
@@ -1403,7 +1413,9 @@ static TAddDeathItems* RealAddDeathItems = nullptr;
 
 void TP_MAKE_THISCALL(HookAddDeathItems, Actor)
 {
-    if (apThis->GetExtension()->IsRemote())
+    // Same as HookActorProcess: the engine hands this every dying actor, including ones with no extension.
+    const ActorExtension* pExtension = apThis->GetExtension();
+    if (pExtension && pExtension->IsRemote())
         return;
 
     TiltedPhoques::ThisCall(RealAddDeathItems, apThis);

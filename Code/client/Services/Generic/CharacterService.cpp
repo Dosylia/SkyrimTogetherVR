@@ -1928,23 +1928,12 @@ void CharacterService::ApplyLeveledNpcPick(Actor* apActor, const GameId& acPickI
     if (acPickId == GameId{})
         return;
 
-#ifdef SKYRIMVR
-    // Upstream's levelled reconciliation needs three engine functions that VR cannot reach. Two have no VR
-    // address at all (TESObjectREFR::SetLeveledCreature, which is the step that actually applies the pick), and
-    // the address taken for GarbageCollector::Add in the merge of 2026-09-22 turned out to belong to something
-    // else: it crashed Seen on join at 22:14, inside BSExtraDataList::GetExtraDataWithoutLocking, while
-    // disposing the temporary base FF000C6E of the Reaver Highwayman queued a moment earlier.
-    // So the whole feature is off here rather than half-run. Nothing is disabled and re-enabled for it, and a
-    // levelled NPC that rolled differently on each side is covered as it was before the merge, by the stand-in
-    // and ghost handling further down this file. Turn this back on only once all three addresses are confirmed.
-    static bool s_said = false;
-    if (!s_said)
-    {
-        s_said = true;
-        spdlog::warn("Leveled NPC reconciliation is off on VR: it needs engine functions this build cannot resolve");
-    }
-    return;
-#endif
+    // Back on for VR since 2026-09-23: SetLeveledCreature has a real address now (AE 20231 -> VR 0x1402b8f10),
+    // and CreateTemplateActorBase (AE 14375 -> VR 0x19c0c0) is corroborated by cmpayc/TiltedEvolutionVR, which
+    // derived the same address independently and declares it `TESNPC* thiscall(TESNPC*, TESNPC*)` against
+    // upstream's `TESActorBase* fastcall(TESActorBase*, TESActorBase*)` -- the same registers on x64, and TESNPC
+    // derives from TESActorBase. The piece that crashed Seen on 2026-09-22, GarbageCollector::Add, is simply not
+    // called here any more; see LeveledNpcSystem::ApplyPick.
 
     TESNPC* pBase = Cast<TESNPC>(apActor->baseForm);
     if (!pBase)

@@ -2,20 +2,15 @@
 
 bool bhkCharacterController::UpdateStepTiming(float aMovementDeltaTime) noexcept
 {
-#ifdef SKYRIMVR
-    // AE id 389089 (the physics timestep global) has no VR address, and an AE id cannot be passed through as a VR
-    // one: VR ids are looked up as Special Edition ones, so it would read a stranger's memory. It is not needed.
-    // UpdateDeltaTime only *prefers* the physics timestep: it falls back to the movement delta the caller passes
-    // and then to the step already stored, rejecting anything non-finite or <= 0.0001s. HookActorProcess passes
-    // the frame delta, so the controller still ends up with a valid step and upstream's #901 fix does its job
-    // here. A zero first argument is simply rejected and skipped.
-    // Note this no longer always reports success: ForcePosition calls it with no movement delta, so a freshly
-    // created controller with no stored step now correctly reports "no usable step yet" and the caller takes its
-    // own branch, which is what upstream intends.
-    return stepInfo.UpdateDeltaTime(0.f, aMovementDeltaTime);
-#else
-    // Same physics timestep used by the native rigid-body controller movement path
+    // The same physics timestep the native rigid-body controller movement path uses. The VR address arrived on
+    // 2026-09-23 (VR 0x141ec8278, SE 0x141e083a8, SE id 512261) and is in VRAddressOverrides under AE id 389089,
+    // so both builds read the real global now.
+    //
+    // If it ever fails to resolve, zero is passed instead, which UpdateDeltaTime rejects before falling back to
+    // the movement delta the caller passes and then to the step already stored. HookActorProcess passes the frame
+    // delta, so the controller still gets a usable step either way. Dereferencing the pointer blindly would not
+    // be safe: an unresolved id reads address zero.
     POINTER_SKYRIMSE(float, s_physicsDeltaTime, 389089, 389089);
-    return stepInfo.UpdateDeltaTime(*s_physicsDeltaTime.Get(), aMovementDeltaTime);
-#endif
+    const float* pPhysicsDeltaTime = s_physicsDeltaTime.Get();
+    return stepInfo.UpdateDeltaTime(pPhysicsDeltaTime ? *pPhysicsDeltaTime : 0.f, aMovementDeltaTime);
 }

@@ -4,12 +4,32 @@
 
 bhkCharacterController* AIProcess::GetCharController() noexcept
 {
-    // No address needed: in CommonLibVR this function is a field read, not a call
-    // (`return middleHigh ? middleHigh->charController.get() : nullptr;`), and middleHigh is this struct's
-    // middleProcess at +0x08. That sidesteps AE id 39856, which has no VR address and could not simply be passed
-    // through as one: VR ids are looked up as Special Edition ones, so an AE id resolves to whatever SE symbol
-    // carries that number rather than to nothing. That is how GarbageCollector::Add crashed Seen on 2026-09-22.
-    return middleProcess ? middleProcess->charController : nullptr;
+    TP_THIS_FUNCTION(TGetCharController, bhkCharacterController*, AIProcess);
+
+    // A VR address for this arrived on 2026-09-23 (VR 0x140685270, SE 0x14067bdf0) and is in
+    // VRAddressOverrides under AE id 39856, so the engine's own function is what answers now.
+    //
+    // The field read below stays as the fallback, and as a check on it. CommonLibVR implements this as
+    // `middleHigh ? middleHigh->charController.get() : nullptr` with middleHigh at +0x08 and charController at
+    // +0x250, which is what this struct's middleProcess says. If the two ever disagree, the offset is wrong and
+    // that is worth knowing, because nothing else here would notice: it is said once and then left alone.
+    bhkCharacterController* pFromField = middleProcess ? middleProcess->charController : nullptr;
+
+    POINTER_SKYRIMSE(TGetCharController, getCharController, 39856, 39856);
+    if (!getCharController.Get())
+        return pFromField;
+
+    bhkCharacterController* pFromGame = TiltedPhoques::ThisCall(getCharController, this);
+
+    static bool s_disagreed = false;
+    if (!s_disagreed && pFromGame != pFromField)
+    {
+        s_disagreed = true;
+        spdlog::warn("AIProcess::GetCharController: the engine says {} and MiddleProcess+0x250 says {}; the charController offset is wrong",
+                     fmt::ptr(pFromGame), fmt::ptr(pFromField));
+    }
+
+    return pFromGame;
 }
 
 void AIProcess::KnockExplosion(Actor* apActor, const NiPoint3* aSourceLocation, float afMagnitude)

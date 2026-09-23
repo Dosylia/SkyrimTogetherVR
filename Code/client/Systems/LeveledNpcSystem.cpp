@@ -33,12 +33,7 @@ bool LeveledNpcSystem::ApplyPick(Actor* apActor, TESNPC* apPick) noexcept
     if (!apPick)
         return false;
 
-#ifdef SKYRIMVR
-    // See CharacterService::ApplyLeveledNpcPick: the engine calls below are not resolvable on VR, and the one
-    // taken for GarbageCollector::Add crashes. Callers treat false as "keep the local base", which is what VR
-    // did before the merge of 2026-09-22.
-    return false;
-#endif
+
 
     // Skyrim resolves a leveled NPC by copying the original base, then
     // applying the pick according to that base's template flags. Using
@@ -55,7 +50,19 @@ bool LeveledNpcSystem::ApplyPick(Actor* apActor, TESNPC* apPick) noexcept
     // Match RecalcLeveledActor's disposal policy, but never dispose of
     // a static pick left by the old reconciliation implementation.
     if (pOldBase && pOldBase->IsTemporary() && pOldBase != pOriginalBase && pOldBase != apPick)
+    {
+#ifdef SKYRIMVR
+        // Not on VR. Upstream calls AE 36460, the TESBoundObject overload; the VR id it was paired with in the
+        // merge, 35492, is the TESObjectREFR overload, which CommonLibVR shows takes (TESObjectREFR*, bool). We
+        // called it with a base form and a junk second argument, and it killed Seen on join on 2026-09-22 inside
+        // BSExtraDataList::GetExtraDataWithoutLocking. Skipping the disposal leaks one temporary base form per
+        // reconciliation, which is a far better bargain than that. Restore this once the VR address of the
+        // TESBoundObject overload is known.
+        (void)pOldBase;
+#else
         GarbageCollector::Get()->Add(pOldBase);
+#endif
+    }
 
     spdlog::info("Applied leveled NPC pick for actor {:X}, original base: {:X}, base: {:X}, pick: {:X}",
         apActor->formID, pOriginalBase->formID, pResolvedBase->formID, apPick->formID);

@@ -80,6 +80,8 @@ private:
      * @brief Receives health value changes and applies them locally.
      */
     void OnHealthChangeBroadcast(const NotifyHealthChangeBroadcast& acMessage) const noexcept;
+    //! Puts the player who landed a hit into the combat of an NPC this client owns.
+    void StartCombatWithAttacker(Actor* apActor, uint32_t aAttackerPlayerId, float aDeltaHealth) const noexcept;
     /**
      * @brief Receives death state changes and applies them locally.
      */
