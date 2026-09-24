@@ -202,7 +202,9 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
 
     // A dying body falls with its own ragdoll. Once dead it is moved to where the owner's corpse lies, but only
     // when it is clearly elsewhere, so a settled ragdoll isn't pulled around every frame.
-    if (apActor->actorState.IsDying())
+    // A dying body falls with its own ragdoll, and a downed one has to be able to get back up where it fell;
+    // forcing either to follow its owner's position pulls the body away from the animation playing on it.
+    if (apActor->actorState.IsDying() || apActor->actorState.IsBleedingOut())
         return;
 
     if (apActor->actorState.IsDead())

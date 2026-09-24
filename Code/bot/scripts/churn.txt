@@ -1,0 +1,56 @@
+# Connect and disconnect churn.
+#
+# Every join and leave makes the server spawn a character, hand ownership around and remove it again, and the
+# audit of 2026-09-24 flagged two weaknesses there that the bot can reach without a headset:
+#   - a duplicate spawn is discarded rather than refreshing ownership, cell or death state
+#   - actor removal is not idempotent, so handlers can race and leave components behind
+# Neither has a fix yet. This is the test that would catch one, and a baseline to compare against later.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Script churn.txt
+#
+# What it checks: after every round trip the world still agrees this bot exists, the other player is still
+# visible, and nothing has wedged. A failure here is a real ownership or lifecycle bug, not flakiness, because
+# the bot waits on conditions rather than sleeping and hoping.
+
+log Join and leave churn
+waitfor connected 45
+collect ownership spawn party death
+record churn
+
+expect players >= 1
+
+log round 1
+disconnect
+wait 3
+reconnect
+waitfor connected 45
+expect players >= 1
+
+log round 2, straight back out again
+disconnect
+wait 2
+reconnect
+waitfor connected 45
+expect players >= 1
+
+log round 3, with movement so the spawn lands somewhere new
+walk rel 500 0 250
+wait 2
+disconnect
+wait 3
+reconnect
+waitfor connected 45
+expect players >= 1
+
+log round 4, the quickest turnaround the server will take
+disconnect
+wait 1
+reconnect
+waitfor connected 45
+expect players >= 1
+expect connected
+
+record off
+report bot-churn.txt
+log done
+stop

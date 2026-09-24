@@ -198,6 +198,193 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       rather than reporting on a handle we no longer hold, so `CheckInstall` stops claiming SKSE is missing.
       Worth watching on the next merge: upstream calling a function of ours that had been dead code.
 
+## 0. Everything from 2026-09-24, ordered. Nothing dropped.
+
+Ordered by what costs a session first, then by how cheap the fix is. "Debug plan" means there is no fix yet and
+the task is to find the cause rather than guess at one.
+
+### Shipped today, all unplayed. Confirm these before anything new goes in.
+
+- [x] **[untested] Essential NPCs hammered with Kill().** 236 attempts on Commander Caius in two minutes, 38 on
+      another actor, every one returning `dead: false`, each re-entering the death transition. Bleeding-out actors
+      are no longer killed at all, and after three refusals an actor is left alone with one warning.
+- [x] **[untested] Downed NPCs lay on the floor and never got up.** Bleedout is neither dead nor alive, and two
+      places only tested `IsDeadOrDying()`: `HookActorProcess` suppressed a downed remote actor so it could not
+      play its get-up, and `InterpolationSystem` force-positioned it to follow its standing owner. Both now treat
+      bleedout like dying.
+- [x] **[untested] The server stored damage as healing.** Damage is a negative delta and the server subtracted it,
+      so the health it hands out on spawns, hand-offs and respawns drifted upward.
+- [x] **[untested] Animation replay backlog.** One action is played per frame and nothing bounded the queue, so a
+      looping owner built a backlog that could never drain: 717 refused `Unequip` replays on one guard while 30
+      other actors starved. Capped at 96, oldest dropped.
+- [x] **[untested] Dragging a corpse was invisible.** `PoseActor` writes bone *world* transforms and the renderer
+      follows the bones, so writing the root position alone moved nothing. The offset now reaches every bone.
+- [x] **[untested] Ownership churn crashed the receiver.** The grab detector claimed any dead body more than 32
+      units from its network position; corpses sit that far apart routinely, so it fired 207 times across 58
+      bodies in one session and the entity churn left `AnimationSystem::Update` casting a freed form. Removed.
+
+### 1. Costs a session, cause known, do next
+
+- [x] **[untested] The `Unequip` loop: found and stopped (2026-09-24).** `InventoryService::RunNakedNPCBugChecks`
+      walks every actor once a second and calls `ResetInventory` on any it thinks is naked. Re-equipping emits
+      equip and unequip animation events, which travel to the other players as actions to replay, and nothing
+      ever stopped: if `IsWearingBodyPiece()` stays false -- a body slot the check does not understand, an outfit
+      a mod manages itself -- the same actor is reset every second for as long as it is loaded. One per second
+      matches the 717 refused replays on a single Redoran Guard almost exactly. It now gives up after three
+      attempts per actor and says which actor it gave up on. Capping the replay queue treated the symptom; this
+      is the source.
+- [x] **[untested] The receiver could replay the wrong spell (2026-09-24).** It read `magicItems[CastingSource]`
+      first -- whatever is staged in that hand on the receiving side -- and only fell back to the transmitted id
+      when the slot was empty, so a quick spell switch or a late equip message replayed the previous spell. The
+      transmitted id is now tried first, with the staged item as the fallback for a spell this game cannot
+      resolve, and the fallback says so in the log.
+
+
+- [ ] **The `Unequip` loop itself.** Capping the queue treats the symptom. Something makes one actor emit the same
+      unequip action hundreds of times; the suspect is the once-a-second naked-NPC re-equip check fighting whatever
+      unequips it, and `Actor::IsWearingBodyPiece` was rewritten during the merge to read container flags.
+      **Plan:** on the owner's side, log each time the re-equip check acts on an actor, with what it saw and what
+      it did. One session then says whether our check is the source. Cheap, and it is the last known cause of the
+      stream starving.
+- [x] **[untested] Spell hits are now authoritative against another player (2026-09-24).** A damaging spell on a
+      remote player used to end in `MagicTarget::AddTarget` applying nothing and sending nothing, so whether it
+      hurt was decided entirely by the target's own game re-simulating the projectile. A sword already avoids
+      this: the attacker's game is the only one that knows the swing connected, so it sends the hit as a health
+      change. Spells now do the same, under the same conditions -- PvP on, cast by this player, never applied
+      locally -- and only for **instant** damage-health effects, because a damage-over-time effect arrives once
+      and then ticks on its own. Anything not recognised as damage-health keeps today's behaviour of sending
+      nothing, so the failure mode is the status quo rather than a wrong number.
+      **Known inaccuracy:** the magnitude sent is the effect's, before the target's resistances, where a sword
+      sends damage the attacker's game has already mitigated. Spells will therefore hit a little harder than they
+      should until the target's side applies resistance. Watch `PvP: spell X hit remote player Y for N`.
+- [ ] **Superseded: spell hits are not authoritative.** The caster sends the cast and the projectile; whether it *hit* is
+      decided separately on each machine, so a spell can land on one screen and miss on the other. Sword hits
+      already avoid this by sending the damage. **Plan:** do the same for spells against a remote player, reusing
+      the health-change path. Medium, no new addresses, and the most likely explanation for "I damage him, he
+      takes nothing".
+- [ ] **The receiver can replay the wrong spell.** It uses whatever is equipped in that casting slot and only
+      falls back to the transmitted spell id when the slot is empty, so a quick spell switch replays the old one.
+      **Plan:** trust the transmitted id first, fall back to the slot. Small.
+
+### 2. Crashes with no cause yet: debug plans, not fixes
+
+- [ ] **Elbios, on opening the wrist menu.** `TweenMenu` at 21:27:52.184, `InventoryMenu` 174 ms later, dead 6 ms
+      after that on a null byte read. No frame of ours anywhere in the stack; it holds `handleVRButtonUpdate`,
+      `SkyUI-VR::DispatchControllerState`, HIGGS and FBT callbacks, which is controller input reaching a Scaleform
+      menu mid-initialisation, and there is a matching firsthand report on FBT's support page. Our contribution is
+      timing only: `TweenMenu` and `InventoryMenu` are kept unpaused.
+      **Debug plan:** have him open and close the wrist menu a dozen times in one session. If it reproduces, drop
+      those two from the unpause list (brief hub menus, so the cost is small) and see whether it stops. Do not
+      remove them pre-emptively: a paused player stops sending updates and goes silent to everyone else, which
+      trades a confirmed problem for an unconfirmed one.
+- [ ] **Seen, on the load after death.** Save/load request built at 21:28:07.734, `Loading Menu` while still
+      connected, access violation 68 ms later with a `MovementHandlerArbiter*` in the registers. Same connected-load
+      path as the long-standing "level-up and death end at the main menu" item.
+      **Debug plan:** the `SaveLoad` probes already installed name the caller and the stack; read the next
+      occurrence from them rather than from the dump.
+
+### 3. Known broken, plan already written, waiting on a session
+
+- [ ] **Invisible player, worse indoors.** Plan in section 0a: measure render state (fade, cull) rather than actor
+      state, and recover automatically instead of reconnecting. Nothing built yet.
+- [ ] **Friend's health bar.** Plan in section 0a, blocked on the one-minute PvP test only the players can run.
+      Note the damage itself works: the log shows hits landing and the player going down, so what is missing is the
+      feedback, not the damage.
+
+### 4. Position accuracy: two problems that look alike and are not
+
+- [ ] **The other player's hands sit slightly off (palms together, seen lower).** Structural, not a bug. `VRPose`
+      carries bone **rotations only** and `PoseActor` keeps each bone's own translation, so anything VRIK does by
+      moving a bone rather than turning it -- height calibration, crouch, arm length -- cannot be reproduced, and
+      the arm lands at the receiver's own skeleton's height.
+      **Plan:** send the root-relative translation of a few bones, hands and head first since those are what people
+      touch, the same way the corpse root position was added. Start with two and measure the cost. Medium, and it
+      is the honest fix; nothing else closes that gap.
+- [ ] **Your own sword hitting where the blade is not.** The screenshots of 2026-09-24 are a first-person view of
+      the player's own weapon striking the Earth Stone with the impact well off the blade. This client never writes
+      the local player's bones, it only reads them, so this is not sync and not ours: it is the weapon collision
+      offset of the VR setup (VRIK or HIGGS).
+      **Debug plan:** reproduce in solo with the mod disconnected. If it still happens it is a VRIK/HIGGS setting
+      and belongs in their configuration. Do that before any time is spent here.
+
+- [x] **[untested] Swept the null-extension crash family out of every engine hook (2026-09-25).**
+      `Actor::GetExtension()` returns null by design for an actor this client did not allocate, and 62 call sites
+      dereferenced it without checking. Two of those killed both players: `HookActorProcess` on 2026-09-23 (a
+      Redoran Guard during a crime response) and the same family on 2026-09-24.
+      Every dereference inside a hook the engine calls with an arbitrary actor is now guarded -- 14 sites across
+      `Actor.cpp`, `References.cpp`, `SubtitleManager.cpp`, `InvisibilityEffect.cpp`, `ActorMagicCaster.cpp` and
+      `TESObjectREFR.cpp`. All were read-only questions about whether an actor is one of ours, so the fallback is
+      the same everywhere: no extension means not ours, condition false, engine path taken.
+      **Not done by making GetExtension() return a dummy**, which would have fixed all 62 at once: 23 sites
+      *write* through it (`SetRemote`, `SetPlayer`, `GraphDescriptorHash`), and a shared dummy would swallow those
+      silently. One deref remains inside a hook, in `PlayerCharacter.cpp`, and it is on the local player, who
+      always has an extension.
+
+- [x] **[untested] Two unchecked lookups in the message handlers, from the audit (2026-09-25).**
+      `OnBeastFormChange` ran `std::find_if` for the player's entity and dereferenced the result without checking
+      it against `end()`. That is undefined behaviour whenever the player has no entity -- before it is created,
+      or after teardown -- so a werewolf or vampire lord transformation at either moment would have taken the game
+      with it. `OnNotifyNewPackage` passed the result of `Cast<TESPackage>` straight to `SetPackage` without
+      checking it, so a form id that resolves to something that is not a package (a mod mismatch between the two
+      games) handed it null.
+      Swept the rest of the client for the same shape: the two other dereferenced `find_if` results, in
+      `CharacterService` and `ObjectService`, are both already guarded. `OnBeastFormChange` was the only one.
+
+### Bot coverage (2026-09-24)
+
+- [x] **Unattended test runs.** `Tools\VRun-bot-tests.ps1` starts a server, puts a standalone bot in the world
+      to hold it open, runs a script and reports pass or fail, with no human and no headset.
+      `-Script <name> -Repeat <n>`. Exit code 0 means every check passed.
+- [x] **Scripts so far:** `auto-suite.txt` (presence, health, death, respawn, movement, reconnect -- 8 checks),
+      `death-recovery.txt` (three death and respawn rounds back to back, which is where things used to come
+      apart), `churn.txt` (four join and leave round trips, down to a one-second turnaround, aimed at the audit's
+      duplicate-spawn and non-idempotent-removal findings), `health-sign.txt`, `suite-soak.txt`.
+      `churn.txt` passes 11 checks and the server logs nothing during it, so those two findings are **not**
+      reproducible this way yet -- it stands as a regression guard rather than a reproduction.
+- [ ] **What the bot still cannot cover, and what to do about it.** It has no game behind it, so nothing visual is
+      testable: invisible bodies, dragged corpses, hand positions, the health bar. Those need a headset. What
+      could be added without one: an NPC-ownership churn test (two bots taking turns owning an actor), a test that
+      a looping animation does not starve the stream, and a test that a spell hit reaches the target's health.
+      The last one needs the bot to be able to cast, which it cannot yet.
+
+### 5. Smaller, known, unglamorous
+
+- [ ] **`Actor::ForceState` (AE 37313) does not resolve**, confirmed by the new unresolved-address logging, so that
+      hook has never installed. Ask Seenfront. The same logging cleared 16113, 80061, 104788, 104359, 36564 and
+      40412 as either handled or harmless.
+- [ ] **The crime alarm guard is installed but has never fired.** Address confirmed at `0x1405e5dc0`; no crime has
+      been committed since it landed. Needs one session of actual crime.
+- [x] **[untested] `This isn't a crime faction! 4018279` (fixed 2026-09-24).** The Solstheim crime faction was
+      written as the form id `0x04018279`, which is only right when Dragonborn.esm loads fourth. On this modlist
+      it loads second, so the lookup failed on both deaths logged that day -- meaning every co-op death. There is
+      no plugin-name lookup bound in this client, so the load index is now found by trying them (256 form lookups,
+      once, cached), and the log says which index it found. The nine Skyrim.esm factions were always fine: their
+      index is 0x00.
+      **Still a decision, not a bug:** every multiplayer death clears bounties in every hold. Nobody asked for
+      that, and it is a real gameplay change. Worth deciding whether co-op death should pay fines at all.
+- [ ] **Superseded: `This isn't a crime faction! 4018279`.** Every multiplayer death calls `PayCrimeGoldToAllFactions` with a
+      hard-coded faction id that depends on load order, and it failed on both deaths logged. Clearing bounties on
+      every co-op death is also a gameplay decision nobody asked for. Small fix, worth a decision first.
+- [x] **[untested] NPC health now has an authoritative correction (2026-09-25).** An NPC's health on the
+      receiving side was only ever the sum of the damage deltas that happened to arrive: a delta lost to a starved
+      stream, a hit applied on one side only, an owner handover mid-fight, and the number drifted away from the
+      owner's for as long as the actor lived, with nothing to repair it. Health snapshots were applied to player
+      copies only.
+      The owner's snapshot is now used for NPCs too, but **as a correction rather than a constant override**, and
+      only when the gap is 25 or more: a small difference mid-combat is normal and is left alone, and the delta
+      path still carries deaths, which a continuous override would fight every frame. Dead actors are untouched.
+      Every correction is logged (rate limited to one line per five seconds) as
+      `NPC X health corrected from A to its owner's B`.
+      **What to watch:** if that line appears constantly rather than occasionally, the stream is dropping deltas
+      and this is papering over it -- which would itself be the finding.
+- [ ] **Superseded: NPC health has no authoritative correction.** Snapshots are ignored for NPCs in favour of accumulated
+      deltas, so once a value diverges nothing repairs it. Larger work, and it interacts with the essential-NPC
+      handling above.
+- [ ] **Duplicate spawn messages are discarded rather than refreshing state**, so a newer spawn carrying updated
+      ownership, cell or death state is dropped. Explains some of the "already spawned" warnings.
+
+---
+
 ## 0a. The three open complaints, with a plan each (2026-09-23)
 
 - [ ] **Invisible player: stop guessing at actor state, look at render state.** Five occurrences now, and every
@@ -207,7 +394,16 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       are all *actor* state. A body can be flawless as an actor and still not be drawn, and the render state is
       the one thing never measured. New clue from 2026-09-23: it happens far more indoors, and fade and LOD
       behave differently in interiors.
-    - **Stage A, measure.** Add to `CopyDiag`, for the copy's 3D root: whether it is a `BSFadeNode` and its
+    - **Stage A is built and deployed (2026-09-24, `7bb3c6d`), and it does not guess.** `CopyDiag` now prints the
+      eight words just past the end of a VR `NiNode` (0x140 to 0x15C) for the copy **and** for the player, whose
+      body is always drawn. The fade offset was not taken on trust: CommonLibVR puts `BSFadeNode`'s data at
+      +0x128, but VR keeps `NiNode::children` at +0x138, so +0x128 is still inside `NiNode` here and cannot be the
+      fade. Reading it anyway would have been the fifth wrong offset on this bug. Instead: whatever the player
+      reads while visible is the "drawn" value, and the word that differs when a body vanishes is the fade.
+      **What to do with the next occurrence:** find a `CopyDiag` line from while the body was invisible and compare
+      its `copy words` against `player words` on the same line. One should differ. That names the offset, and
+      Stage B can then force it.
+    - **Stage A (superseded plan).** Add to `CopyDiag`, for the copy's 3D root: whether it is a `BSFadeNode` and its
       `currentFade` (CommonLibVR puts the runtime block at +0x128 and `currentFade` at +0x08 inside it, so
       +0x130), the cull flag on the root and on each skinned child, and the copy's parent cell and worldspace
       against the player's. Log the raw values first and cross-check the offsets against neighbours the way

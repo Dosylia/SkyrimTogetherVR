@@ -236,37 +236,44 @@ void MagicService::OnNotifySpellCast(const NotifySpellCast& acMessage) const noe
         return;
     }
 
+    // The caster told us exactly which spell it cast, so that is what gets cast here.
+    //
+    // This used to read `magicItems[CastingSource]` first -- whatever happens to be staged in that hand on this
+    // side -- and only fall back to the id that was sent when the slot was empty. A staged spell is the right
+    // answer only while equipment sync is up to date: switch spells quickly, or let an equip message arrive late,
+    // and the other player's game replays the spell that was in that hand a moment ago instead of the one that
+    // was actually cast. The voice slot already had to be resolved this way on VR for the same reason.
     MagicItem* pSpell = nullptr;
 
-#ifdef SKYRIMVR
-    // magicItems[OTHER] on a remote actor holds whatever was last staged there, not necessarily the power or shout
-    // just used, so a voice cast is always resolved from the form id that was sent (TiltedEvolutionVR 20a62f9).
-    if (acMessage.CastingSource != CS::OTHER)
-#endif
-        pSpell = pActor->magicItems[acMessage.CastingSource];
-
-    if (!pSpell)
+    const uint32_t cSpellFormId = World::Get().GetModSystem().GetGameId(acMessage.SpellFormId);
+    if (cSpellFormId != 0)
     {
-        const uint32_t cSpellFormId = World::Get().GetModSystem().GetGameId(acMessage.SpellFormId);
-        if (cSpellFormId == 0)
-        {
-            spdlog::error("Could not find spell form id for GameId base {:X}, mod {:X}", acMessage.SpellFormId.BaseId, acMessage.SpellFormId.ModId);
-            return;
-        }
-
-        TESForm* pSpellForm = TESForm::GetById(cSpellFormId);
-        if (!pSpellForm)
-        {
-            spdlog::error("Cannot find spell form, id: {:X}.", cSpellFormId);
-            return;
-        }
-
-        pSpell = Cast<MagicItem>(pSpellForm);
+        if (TESForm* pSpellForm = TESForm::GetById(cSpellFormId))
+            pSpell = Cast<MagicItem>(pSpellForm);
     }
 
     if (!pSpell)
     {
-        spdlog::error("Could not find spell.");
+        // The id did not resolve here: a mod the caster has and this game does not, or a form not loaded yet.
+        // What is staged in that hand is then the best guess left, and it is better than casting nothing.
+        MagicItem* pStaged = pActor->magicItems[acMessage.CastingSource];
+
+#ifdef SKYRIMVR
+        // magicItems[OTHER] on a remote actor holds whatever was last staged there, not necessarily the power or
+        // shout just used, so a voice cast is never resolved from it (TiltedEvolutionVR 20a62f9).
+        if (acMessage.CastingSource == CS::OTHER)
+            pStaged = nullptr;
+#endif
+
+        if (pStaged)
+            spdlog::warn("Remote spell {:X}:{:X} did not resolve here; falling back to what is staged in slot {}", acMessage.SpellFormId.ModId, acMessage.SpellFormId.BaseId, acMessage.CastingSource);
+
+        pSpell = pStaged;
+    }
+
+    if (!pSpell)
+    {
+        spdlog::error("Could not find spell {:X}:{:X} for casting source {}", acMessage.SpellFormId.ModId, acMessage.SpellFormId.BaseId, acMessage.CastingSource);
         return;
     }
 

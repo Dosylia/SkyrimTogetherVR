@@ -7,6 +7,8 @@
 #include <Messages/EnterExteriorCellRequest.h>
 #include <Messages/Message.h>
 #include <Messages/NotifyActorValueChanges.h>
+#include <Messages/NotifyDeathStateChange.h>
+#include <Messages/NotifyHealthChangeBroadcast.h>
 #include <Messages/NotifyOwnershipTransfer.h>
 #include <Messages/NotifyPartyInfo.h>
 #include <Messages/NotifyPartyJoined.h>
@@ -156,6 +158,18 @@ int Bot::Run() noexcept
         std::this_thread::sleep_for(10ms);
     }
 
+    // The exit code is the verdict, so a run can be checked by a script instead of read by a person.
+    if (!m_failures.empty())
+    {
+        spdlog::error("[script] {} of {} checks failed", m_failures.size(), m_failures.size() + m_checksPassed);
+        for (const auto& failure : m_failures)
+            spdlog::error("  {}", failure);
+        return 1;
+    }
+
+    if (m_checksPassed)
+        spdlog::info("[script] all {} checks passed", m_checksPassed);
+
     return 0;
 }
 
@@ -262,6 +276,11 @@ void Bot::Tick() noexcept
     case Phase::Scouting:
         if (Host())
             Assign();
+        else if (m_options.Standalone && Seconds(now - m_connectAt) >= m_options.HostTimeout)
+        {
+            UseEmptyBody();
+            Assign();
+        }
         else if (now - m_phaseStart > 5s)
         {
             spdlog::info("No player character seen around ({:.0f}, {:.0f}) yet; is the host in game there? Asking again", m_start ? m_start->x : 0.f, m_start ? m_start->y : 0.f);
@@ -338,16 +357,34 @@ void Bot::Scout() noexcept
     m_phaseStart = Clock::now();
 }
 
+void Bot::UseEmptyBody() noexcept
+{
+    if (m_hasBody)
+        return;
+
+    m_appearance = TiltedPhoques::String{};
+    m_changeFlags = 0;
+    m_faceTints = Tints{};
+    m_inventory = Inventory{};
+    m_cell = GameId{};
+    m_position = glm::vec3(m_start ? m_start->x : 0.f, m_start ? m_start->y : 0.f, 0.f);
+    m_yaw = 0.f;
+    m_hasBody = true;
+
+    spdlog::info("No host found in {:.0f}s; going in standalone with an empty body at ({:.0f}, {:.0f}). Nothing will render this bot; it is here to exercise the protocol.", m_options.HostTimeout,
+                 m_position.x, m_position.y);
+}
+
 void Bot::Assign() noexcept
 {
     const KnownPlayer* pHost = Host();
-    if (!pHost)
+    if (!pHost && !m_hasBody)
     {
         m_phase = Phase::Scouting;
         return;
     }
 
-    if (!m_hasBody)
+    if (pHost && !m_hasBody)
     {
         // Cloned from the host: the receiving game builds this body from data it has already accepted once.
         m_appearance = pHost->AppearanceBuffer;
@@ -392,7 +429,10 @@ void Bot::Assign() noexcept
     request.CurrentActorData.IsWeaponDrawn = false;
     SendMsg(request);
 
-    spdlog::info("Asked for a character at ({:.0f}, {:.0f}, {:.0f}), {:.0f} units from player {}", m_position.x, m_position.y, m_position.z, m_options.Spacing, pHost->PlayerId);
+    if (pHost)
+        spdlog::info("Asked for a character at ({:.0f}, {:.0f}, {:.0f}), {:.0f} units from player {}", m_position.x, m_position.y, m_position.z, m_options.Spacing, pHost->PlayerId);
+    else
+        spdlog::info("Asked for a character at ({:.0f}, {:.0f}, {:.0f}), standalone", m_position.x, m_position.y, m_position.z);
     m_phase = Phase::Assigning;
     m_phaseStart = Clock::now();
 }
@@ -526,7 +566,28 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         }
         if (!skyrimFound)
             spdlog::warn("The server did not echo Skyrim.esm in the mod list; using mod id 0");
-        m_worldSpace = Skyrim(kTamriel);
+        if (m_options.WorldSpaceFormId.has_value())
+        {
+            // The low 24 bits are the form id inside its plugin; the top byte is this machine's load order index,
+            // which means nothing to the server, so the plugin is looked up by name instead.
+            const uint32_t baseId = *m_options.WorldSpaceFormId & 0x00FFFFFF;
+            uint32_t modId = m_skyrimModId;
+            bool pluginFound = false;
+            for (const auto& mod : message.UserMods.ModList)
+            {
+                if (mod.Filename == m_options.WorldSpacePlugin.c_str())
+                {
+                    modId = mod.Id;
+                    pluginFound = true;
+                }
+            }
+            if (!pluginFound)
+                spdlog::warn("The server does not have '{}' loaded; looking in Skyrim.esm instead", m_options.WorldSpacePlugin);
+            m_worldSpace = GameId(modId, baseId);
+            spdlog::info("Looking in worldspace {:X} of '{}' (server mod {})", baseId, m_options.WorldSpacePlugin, modId);
+        }
+        else
+            m_worldSpace = Skyrim(kTamriel);
 
         spdlog::info("Accepted as player {} on server {} (Skyrim.esm is mod {}; PvP {}, death system {})", m_playerId, m_serverVersion, m_skyrimModId, message.Settings.PvpEnabled ? "on" : "off",
                      message.Settings.DeathSystemEnabled ? "on" : "off");
@@ -598,6 +659,27 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
                 pPlayer->Rotation = glm::vec2(entry.second.UpdatedMovement.Rotation.x, entry.second.UpdatedMovement.Rotation.y);
             }
         }
+        return;
+    }
+
+    if (opcode == NotifyHealthChangeBroadcast::Opcode)
+    {
+        const auto& message = static_cast<const NotifyHealthChangeBroadcast&>(acMessage);
+        KnownActor& actor = Actor(message.Id);
+        actor.Health += message.DeltaHealth;
+        actor.HealthKnown = true;
+        actor.LastChange = Clock::now();
+        Record(Collect::Health, fmt::format("health {:X} delta {:+.1f} -> {:.1f} (from player {})", message.Id, message.DeltaHealth, actor.Health, message.AttackerPlayerId));
+        return;
+    }
+
+    if (opcode == NotifyDeathStateChange::Opcode)
+    {
+        const auto& message = static_cast<const NotifyDeathStateChange&>(acMessage);
+        KnownActor& actor = Actor(message.Id);
+        actor.Dead = message.IsDead;
+        actor.LastChange = Clock::now();
+        Record(Collect::Death, fmt::format("death {:X} dead={}", message.Id, message.IsDead));
         return;
     }
 
@@ -860,6 +942,96 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return true;
     }
 
+    if (name == "collect")
+    {
+        uint32_t mask = 0;
+        for (const auto& kind : args)
+        {
+            if (kind == "all") mask = static_cast<uint32_t>(Collect::All);
+            else if (kind == "none") mask = 0;
+            else if (kind == "health") mask |= static_cast<uint32_t>(Collect::Health);
+            else if (kind == "death") mask |= static_cast<uint32_t>(Collect::Death);
+            else if (kind == "ownership") mask |= static_cast<uint32_t>(Collect::Ownership);
+            else if (kind == "spawn") mask |= static_cast<uint32_t>(Collect::Spawn);
+            else if (kind == "party") mask |= static_cast<uint32_t>(Collect::Party);
+            else if (kind == "movement") mask |= static_cast<uint32_t>(Collect::Movement);
+            else spdlog::warn("Line {}: unknown collect kind '{}'", acCommand.Line, kind);
+        }
+        m_collect = mask;
+        spdlog::info("[script] collecting: {}", Join(args));
+        return true;
+    }
+
+    if (name == "record")
+    {
+        const bool on = !args.empty() && args[0] != "off";
+        if (on)
+        {
+            m_recording = true;
+            m_recordName = args.empty() ? "unnamed" : Join(args);
+            m_recordStart = now;
+            m_events.clear();
+            m_suppressed = 0;
+            spdlog::info("[script] recording '{}'", m_recordName);
+        }
+        else
+        {
+            m_recording = false;
+            spdlog::info("[script] recording stopped: {} events kept, {} suppressed", m_events.size(), m_suppressed);
+        }
+        return true;
+    }
+
+    if (name == "waitfor" || name == "expect")
+    {
+        // waitfor blocks until it holds or the timeout runs out; expect checks once, now.
+        std::vector<std::string> condition(args.begin(), args.end());
+        float timeout = 10.f;
+        if (name == "waitfor" && condition.size() > 1)
+        {
+            float parsed = 0.f;
+            if (ParseFloat(condition.back(), parsed))
+            {
+                timeout = parsed;
+                condition.pop_back();
+            }
+        }
+
+        std::string why;
+        const std::optional<bool> held = Evaluate(condition, why);
+        if (!held.has_value())
+        {
+            m_failures.push_back(fmt::format("line {}: cannot read condition '{}'", acCommand.Line, Join(condition)));
+            spdlog::error("[script] line {}: cannot read condition '{}'", acCommand.Line, Join(condition));
+            return true;
+        }
+
+        if (*held)
+        {
+            ++m_checksPassed;
+            spdlog::info("[script] ok: {} ({})", Join(condition), why);
+            Record(Collect::All, fmt::format("PASS {} ({})", Join(condition), why));
+            return true;
+        }
+
+        if (name == "expect" || Seconds(now - m_commandStart) >= timeout)
+        {
+            const auto text = fmt::format("line {}: {} -- {}", acCommand.Line, Join(condition), why);
+            m_failures.push_back(text);
+            spdlog::error("[script] FAILED {}", text);
+            Record(Collect::All, fmt::format("FAIL {}", text));
+            return true;
+        }
+
+        return false; // keep waiting
+    }
+
+    if (name == "report")
+    {
+        WriteReport(args.empty() ? "bot-report.txt" : args[0]);
+        return true;
+    }
+
     if (name == "stop")
     {
         spdlog::info("[script] stop");
@@ -870,6 +1042,176 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
 
     spdlog::warn("Line {}: unknown command '{}'", acCommand.Line, name);
     return true;
+}
+
+void Bot::Record(const Collect aKind, const std::string& acText) noexcept
+{
+    if (!m_recording)
+        return;
+
+    if ((m_collect & static_cast<uint32_t>(aKind)) == 0)
+    {
+        ++m_suppressed;
+        return;
+    }
+
+    const double at = std::chrono::duration<double>(Clock::now() - m_recordStart).count();
+    m_events.push_back(fmt::format("[{:8.3f}] {}", at, acText));
+}
+
+KnownActor& Bot::Actor(const uint32_t aServerId) noexcept
+{
+    for (auto& actor : m_actors)
+    {
+        if (actor.ServerId == aServerId)
+            return actor;
+    }
+
+    m_actors.push_back(KnownActor{aServerId});
+    return m_actors.back();
+}
+
+std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::string& aOutWhy) const noexcept
+{
+    if (acArgs.empty())
+        return std::nullopt;
+
+    const std::string& what = acArgs[0];
+
+    auto findActor = [this](const uint32_t aServerId) -> const KnownActor*
+    {
+        for (const auto& actor : m_actors)
+        {
+            if (actor.ServerId == aServerId)
+                return &actor;
+        }
+        return nullptr;
+    };
+
+    auto parseId = [&](const size_t aIndex, uint32_t& aOut)
+    {
+        if (aIndex >= acArgs.size())
+            return false;
+        aOut = static_cast<uint32_t>(std::strtoul(acArgs[aIndex].c_str(), nullptr, 16));
+        return aOut != 0;
+    };
+
+    if (what == "players")
+    {
+        // players <op> <n>: how many other players this bot can see.
+        if (acArgs.size() < 3)
+            return std::nullopt;
+        float wanted = 0.f;
+        if (!ParseFloat(acArgs[2], wanted))
+            return std::nullopt;
+        const auto count = static_cast<float>(m_players.size());
+        aOutWhy = fmt::format("{} players known", m_players.size());
+        const std::string& op = acArgs[1];
+        if (op == "==") return count == wanted;
+        if (op == ">=") return count >= wanted;
+        if (op == "<=") return count <= wanted;
+        if (op == ">") return count > wanted;
+        if (op == "<") return count < wanted;
+        return std::nullopt;
+    }
+
+    if (what == "health")
+    {
+        // health <serverId hex> <op> <value>
+        uint32_t id = 0;
+        if (!parseId(1, id) || acArgs.size() < 4)
+            return std::nullopt;
+        float wanted = 0.f;
+        if (!ParseFloat(acArgs[3], wanted))
+            return std::nullopt;
+        const KnownActor* pActor = findActor(id);
+        if (!pActor || !pActor->HealthKnown)
+        {
+            aOutWhy = fmt::format("no health seen for {:X} yet", id);
+            return false;
+        }
+        aOutWhy = fmt::format("{:X} health is {:.1f}", id, pActor->Health);
+        const std::string& op = acArgs[2];
+        if (op == "==") return pActor->Health == wanted;
+        if (op == ">=") return pActor->Health >= wanted;
+        if (op == "<=") return pActor->Health <= wanted;
+        if (op == ">") return pActor->Health > wanted;
+        if (op == "<") return pActor->Health < wanted;
+        return std::nullopt;
+    }
+
+    if (what == "dead" || what == "alive")
+    {
+        uint32_t id = 0;
+        if (!parseId(1, id))
+            return std::nullopt;
+        const KnownActor* pActor = findActor(id);
+        if (!pActor)
+        {
+            aOutWhy = fmt::format("nothing known about {:X}", id);
+            return false;
+        }
+        aOutWhy = fmt::format("{:X} dead={}", id, pActor->Dead);
+        return what == "dead" ? pActor->Dead : !pActor->Dead;
+    }
+
+    if (what == "known")
+    {
+        uint32_t id = 0;
+        if (!parseId(1, id))
+            return std::nullopt;
+        const bool seen = findActor(id) != nullptr;
+        aOutWhy = seen ? fmt::format("{:X} is known", id) : fmt::format("{:X} never arrived", id);
+        return seen;
+    }
+
+    if (what == "connected")
+    {
+        const bool inWorld = m_phase == Phase::InWorld;
+        aOutWhy = inWorld ? "in world" : "not in world";
+        return inWorld;
+    }
+
+    return std::nullopt;
+}
+
+void Bot::WriteReport(const std::string& acPath) const noexcept
+{
+    std::ofstream out(acPath, std::ios::trunc);
+    if (!out)
+    {
+        spdlog::error("[script] could not write the report to {}", acPath);
+        return;
+    }
+
+    out << "Skyrim Together VR bot report\n";
+    out << "run: " << (m_recordName.empty() ? "unnamed" : m_recordName) << "\n";
+    out << "server: " << m_options.Server << " (" << m_serverVersion << ")\n";
+    out << "checks passed: " << m_checksPassed << ", failed: " << m_failures.size() << "\n";
+    out << "verdict: " << (m_failures.empty() ? "PASS" : "FAIL") << "\n\n";
+
+    if (!m_failures.empty())
+    {
+        out << "failures\n";
+        for (const auto& failure : m_failures)
+            out << "  " << failure << "\n";
+        out << "\n";
+    }
+
+    out << "events kept: " << m_events.size() << ", suppressed by the collect filter: " << m_suppressed << "\n";
+    for (const auto& event : m_events)
+        out << event << "\n";
+
+    out << "\nactors seen\n";
+    for (const auto& actor : m_actors)
+    {
+        out << fmt::format("  {:X}{}{} health {}{} \n", actor.ServerId, actor.IsPlayer ? " (player)" : "",
+                           actor.Name.empty() ? "" : " " + actor.Name,
+                           actor.HealthKnown ? fmt::format("{:.1f}", actor.Health) : std::string("unknown"),
+                           actor.Dead ? ", dead" : "");
+    }
+
+    spdlog::info("[script] report written to {} ({})", acPath, m_failures.empty() ? "PASS" : "FAIL");
 }
 
 bool Bot::MoveTowards(const glm::vec3& acTarget, const float aSpeed, const float aDt) noexcept

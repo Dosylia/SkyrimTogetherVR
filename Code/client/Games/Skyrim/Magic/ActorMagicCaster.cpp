@@ -26,7 +26,8 @@ void TP_MAKE_THISCALL(HookSpellCast, ActorMagicCaster, bool abSuccess, int32_t a
     if (!apSpell && !apThis->pCurrentSpell)
         return;
 
-    if (apThis->pCasterActor->GetExtension()->IsRemote())
+    const ActorExtension* pCasterExtension = apThis->pCasterActor ? apThis->pCasterActor->GetExtension() : nullptr;
+    if (pCasterExtension && pCasterExtension->IsRemote())
         return;
 
     uint32_t targetFormId = 0;

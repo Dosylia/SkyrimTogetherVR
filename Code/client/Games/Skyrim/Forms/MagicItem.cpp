@@ -75,6 +75,25 @@ bool MagicItem::IsHealingSpell() const noexcept
     return false;
 }
 
+bool MagicItem::IsDamageHealthSpell() const noexcept
+{
+    // The counterpart of IsHealingSpell, which uses MagicRestoreHealth (0x1CEB0) the same way.
+    BGSKeyword* pMagicDamageHealth = Cast<BGSKeyword>(TESForm::GetById(0x1cead));
+    if (!pMagicDamageHealth)
+        return false;
+
+    if (keyword.count > 0 && keyword.Contains(pMagicDamageHealth))
+        return true;
+
+    for (const EffectItem* pEffect : listOfEffects)
+    {
+        if (pEffect->pEffectSetting && pEffect->pEffectSetting->keywordForm.count > 0 &&
+            pEffect->pEffectSetting->keywordForm.Contains(pMagicDamageHealth))
+            return true;
+    }
+    return false;
+}
+
 bool MagicItem::IsBuffSpell() const noexcept
 {
     switch (formID)

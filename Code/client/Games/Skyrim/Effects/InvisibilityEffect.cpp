@@ -13,7 +13,8 @@ void TP_MAKE_THISCALL(HookFinish, InvisibilityEffect)
     {
         if (Actor* pActor = apThis->pTarget->GetTargetAsActor())
         {
-            if (pActor->GetExtension()->IsRemote())
+            const ActorExtension* pInvisExtension = pActor->GetExtension();
+            if (pInvisExtension && pInvisExtension->IsRemote())
                 pActor->SetActorValue(ActorValueInfo::kInvisibility, 0.f);
         }
     }

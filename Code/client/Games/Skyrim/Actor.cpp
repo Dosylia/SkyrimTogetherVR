@@ -432,7 +432,8 @@ uint8_t Actor::GetPerkRank(uint32_t aPerkFormId) const noexcept
 bool TP_MAKE_THISCALL(HookRemoveSpell, Actor, MagicItem* apSpell)
 {
     bool result = TiltedPhoques::ThisCall(RealRemoveSpell, apThis, apSpell);
-    if (apThis->GetExtension()->IsLocalPlayer() && result)
+    const ActorExtension* pExtension = apThis->GetExtension();
+    if (pExtension && pExtension->IsLocalPlayer() && result)
     {
         //spdlog::info(__FUNCTION__ ": spell: {}, ID: {} from local player", apSpell->GetName() , apSpell->formID);
        RemoveSpellEvent removalEvent;
@@ -765,7 +766,8 @@ void Actor::SetActorInventory(const Inventory& acInventory) noexcept
 
     Inventory currentInventory = GetActorInventory();
 
-    if (!this->GetExtension()->IsPlayer() && currentInventory.ContainsQuestItems())
+    const ActorExtension* pSelfExtension = this->GetExtension();
+    if (pSelfExtension && !pSelfExtension->IsPlayer() && currentInventory.ContainsQuestItems())
         SetInventoryRetainingQuestItems(currentInventory, acInventory);
     else
         SetInventory(acInventory);
@@ -1109,7 +1111,8 @@ bool TP_MAKE_THISCALL(HookDamageActor, Actor, float aDamage, Actor* apHitter, bo
     {
         if (!World::Get().GetServerSettings().PvpEnabled)
         {
-            if (apHitter && apHitter->GetExtension()->IsRemotePlayer())
+            const ActorExtension* pHitterExtension = apHitter ? apHitter->GetExtension() : nullptr;
+            if (pHitterExtension && pHitterExtension->IsRemotePlayer())
                 return false;
         }
 
@@ -1125,7 +1128,8 @@ bool TP_MAKE_THISCALL(HookDamageActor, Actor, float aDamage, Actor* apHitter, bo
         // Only this player's own hits (sword, arrow, spell): the other player's game already handles what its own
         // copies of NPCs do to it, and forwarding an NPC's hits from here doubled them (a spider's bites arrived
         // 90 times a second on top of the victim's own spider, 2026-09-19).
-        if (World::Get().GetServerSettings().PvpEnabled && realDamage > 0.f && apHitter && apHitter->GetExtension()->IsLocalPlayer())
+        const ActorExtension* pPvpHitterExtension = apHitter ? apHitter->GetExtension() : nullptr;
+        if (World::Get().GetServerSettings().PvpEnabled && realDamage > 0.f && pPvpHitterExtension && pPvpHitterExtension->IsLocalPlayer())
         {
             if (realDamage >= 1.f)
                 spdlog::info("PvP: hit remote player {:X} for {:.0f}", apThis->formID, realDamage);
@@ -1316,7 +1320,9 @@ void TP_MAKE_THISCALL(HookUpdateDetectionState, ActorKnowledge, void* apState)
         auto pTargetActor = Cast<Actor>(pTarget);
         if (pOwnerActor && pTargetActor)
         {
-            if (pOwnerActor->GetExtension()->IsRemotePlayer() && pTargetActor->GetExtension()->IsLocalPlayer())
+            const ActorExtension* pOwnerExtension = pOwnerActor->GetExtension();
+            const ActorExtension* pTargetExtension = pTargetActor->GetExtension();
+            if (pOwnerExtension && pTargetExtension && pOwnerExtension->IsRemotePlayer() && pTargetExtension->IsLocalPlayer())
             {
                 spdlog::debug("Cancelling detection from remote player to local player, owner: {:X}, target: {:X}", pOwner->formID, pTarget->formID);
                 return;
@@ -1337,7 +1343,8 @@ uint64_t TP_MAKE_THISCALL(HookProcessResponse, void, DialogueItem* apVoice, Acto
 {
     if (apTalkingActor)
     {
-        if (apTalkingActor->GetExtension()->IsRemotePlayer())
+        const ActorExtension* pTalkingExtension = apTalkingActor->GetExtension();
+        if (pTalkingExtension && pTalkingExtension->IsRemotePlayer())
             return 0;
     }
     return TiltedPhoques::ThisCall(RealProcessResponse, apThis, apVoice, apTalkingActor, apTalkedToActor);
@@ -1370,7 +1377,8 @@ bool TP_MAKE_THISCALL(HookSpeakSoundFunction, Actor, const char* apName, uint32_
 
     // The player having the conversation may not own this NPC. Ambient
     // speech still comes only from the actor's simulation owner.
-    if (apThis->GetExtension()->IsLocal() || MenuTopicManager::IsPlayerDialogueSpeaker(apThis))
+    const ActorExtension* pSpeakerExtension = apThis->GetExtension();
+    if ((pSpeakerExtension && pSpeakerExtension->IsLocal()) || MenuTopicManager::IsPlayerDialogueSpeaker(apThis))
         World::Get().GetRunner().Trigger(DialogueEvent(apThis->formID, apName));
 
     return TiltedPhoques::ThisCall(RealSpeakSoundFunction, apThis, apName, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
@@ -1396,8 +1404,11 @@ char TP_MAKE_THISCALL(HookActorProcess, Actor, float aDeltaTime)
     // on a Redoran Guard). Nothing about the merge caused it; the same unguarded dereference is in the pre-merge
     // code, it just needs an actor without an extension to meet it. An actor we do not extend is not remote, so
     // it takes the normal path.
+    // Bleeding out is the game's downed state and it is recoverable, so it needs its own processing exactly as a
+    // dying body does. Suppressing it left downed NPCs unable to play their get-up, which is what "npcs that get
+    // downed but cant be killed dont stand back up, they just lay on the floor weirdly" was (2026-09-23).
     const ActorExtension* pExtension = apThis->GetExtension();
-    if (pExtension && pExtension->IsRemote() && !apThis->actorState.IsDeadOrDying())
+    if (pExtension && pExtension->IsRemote() && !apThis->actorState.IsDeadOrDying() && !apThis->actorState.IsBleedingOut())
     {
         if (apThis->currentProcess)
         {
@@ -1430,7 +1441,8 @@ bool TP_MAKE_THISCALL(HookIsFleeing, Actor)
 {
     // TODO: Player or RemotePlayer? Can players be in fleeing mode in skyrim?
     // TODO: investigate why the flee flag is set at all on remote players sometimes.
-    if (apThis->GetExtension()->IsPlayer())
+    const ActorExtension* pFleeingExtension = apThis->GetExtension();
+    if (pFleeingExtension && pFleeingExtension->IsPlayer())
         return false;
     
     return TiltedPhoques::ThisCall(RealIsFleeing, apThis);

@@ -1,4 +1,5 @@
 #include "MagicTarget.h"
+#include <Events/HealthChangeEvent.h>
 
 #include <Actor.h>
 #include <World.h>
@@ -108,12 +109,34 @@ bool TP_MAKE_THISCALL(HookAddTarget, MagicTarget, MagicTarget::AddTargetData& ar
         if (!arData.pCaster)
             return false;
 
-        if (!arData.pSpell->IsHealingSpell() && !arData.pSpell->IsBuffSpell())
+        ActorExtension* pCasterExtension = arData.pCaster->GetExtension();
+        if (!pCasterExtension || !pCasterExtension->IsLocalPlayer())
             return false;
 
-        ActorExtension* pCasterExtension = arData.pCaster->GetExtension();
-        if (!pCasterExtension->IsLocalPlayer())
+        if (!arData.pSpell->IsHealingSpell() && !arData.pSpell->IsBuffSpell())
+        {
+            // A damaging spell on the other player used to end here, applying nothing and sending nothing. Whether
+            // it hurt them was then decided entirely by their own game re-simulating the projectile, and a small
+            // difference in position, pose or latency meant the caster saw it land while the target took nothing
+            // ("I use spells on Seenfront, he sees it, he does not take damage", 2026-09-24).
+            //
+            // A sword already avoids this: the attacker's game is the only one that knows the swing connected, so
+            // it sends the hit as a health change (Actor::HookDamageActor). A spell is the same situation, so it
+            // is sent the same way, under the same conditions: PvP on, cast by this player, and never applied
+            // locally, because the other side owns that body and applies it to its own player.
+            //
+            // Only instant damage-health effects. A damage-over-time or concentration effect arrives here once and
+            // then ticks on its own, so sending its magnitude now would be wrong, and anything this cannot
+            // recognise as damage keeps today's behaviour of sending nothing.
+            if (World::Get().GetServerSettings().PvpEnabled && arData.pSpell->IsDamageHealthSpell() && arData.pEffectItem && arData.pEffectItem->data.iDuration == 0 &&
+                arData.fMagnitude > 0.f)
+            {
+                spdlog::info("PvP: spell {:X} hit remote player {:X} for {:.0f}", arData.pSpell->formID, pTargetActor->formID, arData.fMagnitude);
+                World::Get().GetRunner().Trigger(HealthChangeEvent(pTargetActor->formID, -arData.fMagnitude));
+            }
+
             return false;
+        }
 
         if (arData.pSpell->IsHealingSpell())
         {

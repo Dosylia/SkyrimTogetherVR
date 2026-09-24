@@ -1,0 +1,45 @@
+# Does the server still store damage as healing?
+#
+# This is the fix of 2026-09-24: damage is a negative delta, and the server used to subtract it, so every hit
+# raised the health it kept. The bot cannot see a game, but it can watch what the server tells it, which is
+# exactly where that bug lived.
+#
+#   STBot.exe scripts\health-sign.txt --server 127.0.0.1:10578
+#
+# Exit code 0 means every check passed. Run it with a headset player connected and fighting something, or with a
+# second bot; the bot damages itself, which is enough to exercise the broadcast path.
+
+log Waiting to be in the world
+waitfor connected 30
+
+# Only health and death matter here. Movement would bury the report in noise.
+collect health death
+record server health sign
+
+log Baseline
+health 100
+wait 2
+
+# Twenty damage. The client sends this as a negative delta; the server should store 80, not 120.
+log Taking 20 damage
+damage 20
+wait 3
+
+# The broadcast comes back to us with the delta the server relayed. A positive one here means the sign is wrong
+# somewhere between the hit and the wire.
+expect health 0 <= 100
+
+log Dying, then respawning, which is where the server's stored health is handed back
+die
+waitfor connected 20
+respawn
+wait 5
+
+# After a respawn the server sends the health it has kept. If damage was being stored as healing, this comes back
+# above the maximum rather than at it.
+expect health 0 <= 100
+
+record off
+report bot-health-sign.txt
+log Done
+stop

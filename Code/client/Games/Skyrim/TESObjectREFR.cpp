@@ -1105,7 +1105,8 @@ void TP_MAKE_THISCALL(HookRotateX, TESObjectREFR, float aAngle)
     {
         const auto pActor = static_cast<Actor*>(apThis);
         // We don't allow remotes to move, except a corpse falling with its own ragdoll (see HookSetPosition).
-        if (pActor->GetExtension()->IsRemote() && !pActor->actorState.IsDeadOrDying())
+        const ActorExtension* pExtension = pActor->GetExtension();
+    if (pExtension && pExtension->IsRemote() && !pActor->actorState.IsDeadOrDying())
             return;
     }
 
@@ -1118,7 +1119,8 @@ void TP_MAKE_THISCALL(HookRotateY, TESObjectREFR, float aAngle)
     {
         const auto pActor = static_cast<Actor*>(apThis);
         // We don't allow remotes to move, except a corpse falling with its own ragdoll (see HookSetPosition).
-        if (pActor->GetExtension()->IsRemote() && !pActor->actorState.IsDeadOrDying())
+        const ActorExtension* pExtension = pActor->GetExtension();
+    if (pExtension && pExtension->IsRemote() && !pActor->actorState.IsDeadOrDying())
             return;
     }
 
@@ -1131,7 +1133,8 @@ void TP_MAKE_THISCALL(HookRotateZ, TESObjectREFR, float aAngle)
     {
         const auto pActor = static_cast<Actor*>(apThis);
         // We don't allow remotes to move, except a corpse falling with its own ragdoll (see HookSetPosition).
-        if (pActor->GetExtension()->IsRemote() && !pActor->actorState.IsDeadOrDying())
+        const ActorExtension* pExtension = pActor->GetExtension();
+    if (pExtension && pExtension->IsRemote() && !pActor->actorState.IsDeadOrDying())
             return;
     }
 

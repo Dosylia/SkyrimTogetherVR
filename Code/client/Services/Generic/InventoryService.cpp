@@ -361,6 +361,9 @@ void InventoryService::RunNakedNPCBugChecks() noexcept
     static std::chrono::steady_clock::time_point lastSendTimePoint;
     constexpr auto cDelayBetweenUpdates = 1000ms;
 
+    // How many times this has tried to dress each actor. See the give-up below.
+    static TiltedPhoques::Map<uint32_t, uint32_t> s_resets;
+
     const auto now = std::chrono::steady_clock::now();
     if (now - lastSendTimePoint < cDelayBetweenUpdates)
         return;
@@ -376,16 +379,34 @@ void InventoryService::RunNakedNPCBugChecks() noexcept
         if (!pActor)
             continue;
 
-        if (pActor->GetExtension()->IsPlayer())
+        const ActorExtension* pExtension = pActor->GetExtension();
+        if (!pExtension || pExtension->IsPlayer())
             continue;
 
         if (pActor->IsDead())
             continue;
 
         if (pActor->IsWearingBodyPiece())
+        {
+            s_resets.erase(pActor->formID);
             continue;
+        }
 
         if (!pActor->ShouldWearBodyPiece())
+            continue;
+
+        // Give up on an actor this cannot dress.
+        //
+        // ResetInventory re-equips everything, and re-equipping emits equip and unequip animation events, which
+        // travel to the other players as actions to replay. Nothing here ever stopped: if IsWearingBodyPiece
+        // stays false -- a body slot this check does not understand, an outfit a mod manages itself -- the same
+        // actor is reset every second for as long as it is loaded. On 2026-09-24 that put 717 refused 'Unequip'
+        // replays on one Redoran Guard into the other player's queue, one per second, while thirty other actors
+        // starved for updates behind them. Three attempts is generous; after that the actor is left dressed
+        // however it is, which is a far smaller problem than a stream that never catches up.
+        constexpr uint32_t cMaxResets = 3;
+        auto& resets = s_resets[pActor->formID];
+        if (resets >= cMaxResets)
             continue;
 
         // Don't broadcast changes, it'll just make things messier.
@@ -394,7 +415,18 @@ void InventoryService::RunNakedNPCBugChecks() noexcept
         ScopedInventoryOverride sio;
 
         pActor->ResetInventory(false);
+
+        if (++resets == cMaxResets)
+        {
+            const auto* pBase = Cast<TESNPC>(pActor->baseForm);
+            spdlog::warn("Naked NPC check gave up on actor {:X} ({}) after {} resets; it never reported a body piece, and retrying floods the other players with equip actions", pActor->formID,
+                         pBase && pBase->fullName.value.AsAscii() ? pBase->fullName.value.AsAscii() : "?", cMaxResets);
+        }
     }
+
+    // Actors nobody has seen for a while, so a cell revisit starts fresh.
+    if (s_resets.size() > 256)
+        s_resets.clear();
 }
 
 void InventoryService::RunEquipmentSnapshotUpdates() noexcept

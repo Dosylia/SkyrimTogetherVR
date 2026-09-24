@@ -1,0 +1,64 @@
+# Death, respawn and recovery, repeated.
+#
+# Covers the fixes of 2026-09-24 that the bot can actually see:
+#   - the server stored damage as healing (it subtracted a delta that is already negative)
+#   - a player copy must never be left dead on the other side after a respawn
+#   - repeated death and respawn must not leave the connection or the party in a bad state
+#
+#   STBot.exe scripts\death-recovery.txt --server 127.0.0.1:10578
+#
+# Run it with run-bot-tests.ps1 so a standalone bot is holding the world open. Exit code 0 means every check
+# passed; the report names anything that did not.
+
+log Death and recovery, three times over
+waitfor connected 45
+collect health death ownership
+record death recovery
+
+expect players >= 1
+
+# Round one
+log round 1
+health 100
+wait 2
+damage 40
+wait 2
+die
+wait 6
+respawn
+wait 6
+expect connected
+expect players >= 1
+
+# Round two, straight after: a second death used to be where things came apart
+log round 2
+health 100
+wait 2
+damage 40
+wait 2
+die
+wait 6
+respawn
+wait 6
+expect connected
+expect players >= 1
+
+# Round three, with movement in between so the copy is not standing still
+log round 3
+walk rel 300 0 200
+wait 2
+damage 40
+wait 2
+die
+wait 6
+respawn
+wait 6
+walk rel -300 0 200
+wait 2
+expect connected
+expect players >= 1
+
+record off
+report bot-death-recovery.txt
+log done
+stop

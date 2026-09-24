@@ -317,11 +317,27 @@ void ActorValueService::OnHealthChangeBroadcast(const NotifyHealthChangeBroadcas
     if (!pActor->IsDead() && health <= 0.f)
     {
         ActorExtension* pExtension = pActor->GetExtension();
-        // Players should never be killed
-        if (!pExtension->IsPlayer())
+        // Players should never be killed. Nor should an actor that is bleeding out: that is the game's downed
+        // state, it is recoverable, and an essential NPC lives there rather than dying.
+        if (pExtension && !pExtension->IsPlayer() && !pActor->actorState.IsBleedingOut())
         {
-            pActor->Kill();
-            spdlog::info("Death sync: health broadcast killed actor {:X} (now dead: {})", pActor->formID, pActor->IsDead());
+            // An essential NPC refuses to die, so IsDead() stays false and the next health broadcast tries again.
+            // On 2026-09-24 that was 236 attempts on Commander Caius in two minutes, plus 38 on another actor,
+            // each one re-entering the death transition. After a few refusals this actor is left alone: whatever
+            // it is, this client cannot kill it, and hammering it only disturbs its ragdoll and its recovery.
+            static TiltedPhoques::Map<uint32_t, uint32_t> s_refused;
+            auto& refusals = s_refused[pActor->formID];
+            if (refusals < 3)
+            {
+                pActor->Kill();
+                if (pActor->IsDead())
+                {
+                    s_refused.erase(pActor->formID);
+                    spdlog::info("Death sync: health broadcast killed actor {:X}", pActor->formID);
+                }
+                else if (++refusals == 3)
+                    spdlog::warn("Death sync: actor {:X} refuses to die (essential, or protected); leaving it to its owner", pActor->formID);
+            }
         }
     }
 
@@ -425,8 +441,38 @@ void ActorValueService::OnActorValueChanges(const NotifyActorValueChanges& acMes
         // the truth for a player copy; NPC copies keep the delta path, which also carries their deaths.
         if (key == ActorValueInfo::kHealth)
         {
-            if (!isRemotePlayer || pActor->IsDead())
+            if (pActor->IsDead())
                 continue;
+
+            if (!isRemotePlayer)
+            {
+                // An NPC's health here is only ever the sum of the damage deltas that happened to arrive. Nothing
+                // repairs it: a delta lost to a starved stream, a hit applied on one side only, an owner handover
+                // mid-fight, and this side's number drifts away from the owner's for as long as the actor lives.
+                // The owner's snapshot is the truth, so it is used -- but only as a correction, not as a constant
+                // override, because the delta path is what carries a death and the two would otherwise fight
+                // every frame.
+                //
+                // Deliberately blunt: a small difference is normal mid-combat and is left alone, and only a gap
+                // big enough to matter is closed. Every correction is logged, so a session says whether this is
+                // firing sanely or papering over a stream that is dropping deltas.
+                const float current = pActor->GetActorValue(ActorValueInfo::kHealth);
+                const float gap = std::abs(current - value);
+                constexpr float cWorthCorrecting = 25.f;
+                if (gap < cWorthCorrecting)
+                    continue;
+
+                static std::chrono::steady_clock::time_point s_nextSaid{};
+                const auto now = std::chrono::steady_clock::now();
+                if (now >= s_nextSaid)
+                {
+                    s_nextSaid = now + 5s;
+                    spdlog::info("NPC {:X} health corrected from {:.0f} to its owner's {:.0f}", pActor->formID, current, value);
+                }
+
+                pActor->ForceActorValue(ActorValueOwner::ForceMode::DAMAGE, ActorValueInfo::kHealth, value);
+                continue;
+            }
 
             const float current = pActor->GetActorValue(ActorValueInfo::kHealth);
             if (std::abs(current - value) >= 10.f)

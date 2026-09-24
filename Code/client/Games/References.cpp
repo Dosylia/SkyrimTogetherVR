@@ -101,7 +101,8 @@ static TCheckForNewPackage* RealCheckForNewPackage = nullptr;
 bool TP_MAKE_THISCALL(HookCheckForNewPackage, void, Actor* apActor, uint64_t aUnk1)
 {
 #if AI_SYNC
-    if (apActor && apActor->GetExtension()->IsRemote())
+    const ActorExtension* pPackageExtension = apActor ? apActor->GetExtension() : nullptr;
+    if (pPackageExtension && pPackageExtension->IsRemote())
         return false;
 
 #endif
@@ -118,7 +119,8 @@ void TP_MAKE_THISCALL(HookInitFromPackage, void, TESPackage* apPackage, TESObjec
     if (s_execInitPackage)
         return TiltedPhoques::ThisCall(RealInitFromPackage, apThis, apPackage, apTarget, arActor);
 
-    if (arActor && arActor->GetExtension()->IsRemote())
+    const ActorExtension* pInitExtension = arActor ? arActor->GetExtension() : nullptr;
+    if (pInitExtension && pInitExtension->IsRemote())
         return;
 
     if (arActor && apPackage)

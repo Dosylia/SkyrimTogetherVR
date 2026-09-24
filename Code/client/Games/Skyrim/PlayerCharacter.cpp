@@ -143,9 +143,18 @@ NiPoint3 PlayerCharacter::RespawnPlayer() noexcept
 void PlayerCharacter::PayCrimeGoldToAllFactions() noexcept
 {
     // Yes, yes, this isn't great, but there's no "pay fines everywhere" function
-    const uint32_t crimeFactionIds[]{0x28170, 0x267E3, 0x29DB0, 0x2816D, 0x2816e, 0x2816C, 0x2816B, 0x267EA, 0x2816F, 0x4018279};
+    //
+    // The Skyrim.esm factions below carry mod index 0x00, which is always right. The Solstheim one does not: it
+    // lives in Dragonborn.esm, and the index in a form id is this machine's load order, not a constant. It was
+    // written as 0x04018279, which is only correct when Dragonborn.esm happens to load fourth; on a modlist where
+    // it loads second the id is 0x02018279 and the lookup fails. It failed on both deaths logged on 2026-09-24
+    // ("This isn't a crime faction! 4018279"), which is every co-op death on that setup.
+    //
+    // There is no plugin-name lookup bound in this client, so the index is found by trying them. It is 256 form
+    // lookups once per death, which costs nothing next to the load that follows.
+    const uint32_t cVanillaCrimeFactions[]{0x28170, 0x267E3, 0x29DB0, 0x2816D, 0x2816e, 0x2816C, 0x2816B, 0x267EA, 0x2816F};
 
-    for (uint32_t crimeFactionId : crimeFactionIds)
+    for (uint32_t crimeFactionId : cVanillaCrimeFactions)
     {
         TESFaction* pCrimeFaction = Cast<TESFaction>(TESForm::GetById(crimeFactionId));
         if (!pCrimeFaction)
@@ -155,6 +164,34 @@ void PlayerCharacter::PayCrimeGoldToAllFactions() noexcept
         }
 
         PayFine(pCrimeFaction, false, false);
+    }
+
+    // DLC2RavenRockFaction, whichever load order slot Dragonborn.esm ended up in. Cached: the answer cannot change
+    // while the game is running.
+    constexpr uint32_t cRavenRockBaseId = 0x018279;
+    static uint32_t s_ravenRockId = 0;
+    static bool s_searched = false;
+    if (!s_searched)
+    {
+        s_searched = true;
+        for (uint32_t modIndex = 1; modIndex < 0xFE; ++modIndex)
+        {
+            const uint32_t candidate = (modIndex << 24) | cRavenRockBaseId;
+            if (Cast<TESFaction>(TESForm::GetById(candidate)))
+            {
+                s_ravenRockId = candidate;
+                spdlog::info("Solstheim crime faction found at {:X} (Dragonborn.esm is load index {:02X})", candidate, modIndex);
+                break;
+            }
+        }
+        if (!s_ravenRockId)
+            spdlog::info("No Solstheim crime faction on this modlist; Dragonborn.esm is probably not loaded");
+    }
+
+    if (s_ravenRockId)
+    {
+        if (TESFaction* pRavenRock = Cast<TESFaction>(TESForm::GetById(s_ravenRockId)))
+            PayFine(pRavenRock, false, false);
     }
 }
 

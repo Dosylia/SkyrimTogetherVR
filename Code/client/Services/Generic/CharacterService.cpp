@@ -1222,6 +1222,15 @@ void CharacterService::OnBeastFormChange(const BeastFormChangeEvent& acEvent) co
 
     const auto it = std::find_if(view.begin(), view.end(), [view](auto entity) { return view.get<FormIdComponent>(entity).Id == 0x14; });
 
+    // find_if returns end() when the player's entity is not in the world yet, or has already been torn down, and
+    // dereferencing that is undefined. A werewolf or vampire lord transformation at either of those moments would
+    // have taken the game with it.
+    if (it == view.end())
+    {
+        spdlog::warn("{}: the player has no entity right now; beast form change not sent", __FUNCTION__);
+        return;
+    }
+
     std::optional<uint32_t> serverIdRes = Utils::GetServerId(*it);
     if (!serverIdRes.has_value())
     {
@@ -1392,6 +1401,13 @@ void CharacterService::OnNotifyNewPackage(const NotifyNewPackage& acMessage) con
     }
 
     TESPackage* pPackage = Cast<TESPackage>(pPackageForm);
+    if (!pPackage)
+    {
+        // The id resolved to a form that is not a package: a mod mismatch between the two games, or a form this
+        // side loaded as something else. Handing null to SetPackage is not worth finding out about the hard way.
+        spdlog::warn("Form {:X} is not a package; leaving actor {:X} on the package it has", cPackageFormId, pActor->formID);
+        return;
+    }
 
     pActor->SetPackage(pPackage);
 }

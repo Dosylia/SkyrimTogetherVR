@@ -120,6 +120,22 @@ int main(int argc, char** argv)
             options.Name = value;
         else if (arg == "--hostlog" && next(value))
             options.HostLog = value;
+        else if (arg == "--worldspace" && next(value))
+        {
+            options.WorldSpaceFormId = static_cast<uint32_t>(std::strtoul(value.c_str(), nullptr, 16));
+        }
+        else if (arg == "--standalone")
+        {
+            options.Standalone = true;
+        }
+        else if (arg == "--host-timeout" && next(value))
+        {
+            options.HostTimeout = std::strtof(value.c_str(), nullptr);
+        }
+        else if (arg == "--plugin" && next(value))
+        {
+            options.WorldSpacePlugin = value;
+        }
         else if (arg == "--spacing" && next(value))
             options.Spacing = std::stof(value);
         else if (arg == "--x" && next(value))

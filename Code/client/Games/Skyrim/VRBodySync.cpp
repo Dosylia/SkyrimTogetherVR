@@ -1067,10 +1067,40 @@ std::string DescribeBody(Actor* apActor) noexcept
             headScale = At<NiTransform>(nodes[VRPose::kHead], kWorldOffset).scale;
     }
 
+    // Render state, which no probe has ever looked at.
+    //
+    // Every cause proposed for the invisible body so far has been *actor* state -- health, scale, the invisibility
+    // value, bone drift -- and this probe disproved each one by reading perfect every time. A body can be a
+    // flawless actor and still not be drawn, and what decides that is the fade the renderer applies to the node.
+    //
+    // The offset is not guessed. CommonLibVR puts BSFadeNode's own data at +0x128, but VR's NiNode keeps its
+    // children at +0x138, so +0x128 is still inside NiNode here and cannot be the fade: taking it on trust would
+    // be the fifth wrong offset on this bug. Instead the words just past the end of a VR NiNode are printed for
+    // the copy *and* for the player, whose body is always drawn. Whatever the player reads as "visible" is the
+    // value to look for, and the word that differs when a body vanishes is the fade.
+    std::string renderWords;
+    std::string playerWords;
+    const auto dumpFloats = [](void* apNode, std::string& aOut)
+    {
+        if (!apNode || !IsReadable(apNode, 0x170))
+        {
+            aOut = "unreadable";
+            return;
+        }
+        for (uint32_t offset = 0x140; offset < 0x160; offset += 4)
+        {
+            const float value = At<float>(apNode, offset);
+            aOut += fmt::format("{}{:X}={:.3f}", aOut.empty() ? "" : " ", offset, std::isfinite(value) ? value : -999.f);
+        }
+    };
+    dumpFloats(pRoot, renderWords);
+    dumpFloats(pPlayerRoot, playerWords);
+
     return fmt::format("3D root {} with {} of {} child slots filled, root world scale {:.3f} at ({:.0f}, {:.0f}, {:.0f}), skeleton root {} world scale {:.3f}; "
-                       "{} parents up to '{}' (same scene as the player: {}); spine scale {:.3f} rotation row {:.4f}, head scale {:.3f}",
+                       "{} parents up to '{}' (same scene as the player: {}); spine scale {:.3f} rotation row {:.4f}, head scale {:.3f}; "
+                       "copy words [{}]; player words [{}]",
                        pRoot, fingerprint & 0xFFFF, fingerprint >> 16, rootWorld.scale, rootWorld.translate.x, rootWorld.translate.y, rootWorld.translate.z,
-                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale, depth, pTopName, pSharesScene, spineScale, spineRowLength, headScale);
+                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale, depth, pTopName, pSharesScene, spineScale, spineRowLength, headScale, renderWords, playerWords);
 }
 
 bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
