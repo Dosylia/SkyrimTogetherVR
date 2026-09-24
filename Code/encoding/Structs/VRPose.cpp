@@ -1,5 +1,6 @@
 #include <Structs/VRPose.h>
 #include <algorithm>
+#include <cstring>
 
 bool VRPose::operator==(const VRPose& acRhs) const noexcept
 {
@@ -14,6 +15,10 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
     if (HasFingers && Fingers != acRhs.Fingers)
         return false;
     if (HasScale != acRhs.HasScale || (HasScale && RootScale != acRhs.RootScale))
+        return false;
+    if (HasRootPosition != acRhs.HasRootPosition)
+        return false;
+    if (HasRootPosition && !std::equal(std::begin(RootPosition), std::end(RootPosition), std::begin(acRhs.RootPosition)))
         return false;
     const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
     return std::equal(Bones.begin(), Bones.begin() + count, acRhs.Bones.begin());
@@ -42,6 +47,18 @@ void VRPose::Serialize(TiltedPhoques::Buffer::Writer& aWriter) const noexcept
     aWriter.WriteBits(HasScale ? 1 : 0, 1);
     if (HasScale)
         aWriter.WriteBits(RootScale, 16);
+    aWriter.WriteBits(HasRootPosition ? 1 : 0, 1);
+    if (HasRootPosition)
+    {
+        // Raw bits, as Quaternion_NetQuantize does: world coordinates run to six figures, so quantising them
+        // would move the body further than the drag being sent.
+        for (const float value : RootPosition)
+        {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            aWriter.WriteBits(bits, 32);
+        }
+    }
 }
 
 void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
@@ -73,5 +90,18 @@ void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
         uint64_t scale = 0;
         aReader.ReadBits(scale, 16);
         RootScale = static_cast<uint16_t>(scale);
+    }
+    uint64_t hasRootPosition = 0;
+    aReader.ReadBits(hasRootPosition, 1);
+    HasRootPosition = hasRootPosition != 0;
+    if (HasRootPosition)
+    {
+        for (float& value : RootPosition)
+        {
+            uint64_t bits = 0;
+            aReader.ReadBits(bits, 32);
+            const uint32_t raw = static_cast<uint32_t>(bits);
+            std::memcpy(&value, &raw, sizeof(value));
+        }
     }
 }

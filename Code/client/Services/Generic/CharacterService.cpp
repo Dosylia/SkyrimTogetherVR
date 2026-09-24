@@ -436,7 +436,13 @@ void CharacterService::OnActorAdded(const ActorAddedEvent& acEvent) noexcept
 void CharacterService::OnActorRemoved(const ActorRemovedEvent& acEvent) noexcept
 {
     if (auto* pActor = Cast<Actor>(TESForm::GetById(acEvent.FormId)))
-        pActor->GetExtension()->Reconciliation = ActorExtension::ReconciliationStage::None;
+    {
+        // GetExtension() returns null for an actor this client did not allocate, and this runs while the game is
+        // tearing actors down, which is the worst moment to assume otherwise. Same family as the crash of
+        // 2026-09-23 in HookActorProcess.
+        if (ActorExtension* pExtension = pActor->GetExtension())
+            pExtension->Reconciliation = ActorExtension::ReconciliationStage::None;
+    }
 
     m_pendingLeveledConforms.erase(acEvent.FormId);
 
@@ -445,7 +451,9 @@ void CharacterService::OnActorRemoved(const ActorRemovedEvent& acEvent) noexcept
 
     if (entityIt == view.end())
     {
-        spdlog::error("Actor to remove not found in form ids map {:X}", acEvent.FormId);
+        // Not an error: the game removes plenty of actors this client never tracked, and a cell change retires
+        // dozens at once. It was logged at error level and filled the console with red on every load door.
+        spdlog::debug("Actor removed that was not tracked here: {:X}", acEvent.FormId);
         return;
     }
 
@@ -482,10 +490,6 @@ void CharacterService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
     {
         PerfScope perfScope("CharacterService::RunEnemyMeterUpdates");
         RunEnemyMeterUpdates();
-    }
-    {
-        PerfScope perfScope("CharacterService::RunBodyGrabUpdates");
-        RunBodyGrabUpdates();
     }
     {
         PerfScope perfScope("CharacterService::RunRemotePlayerDiag");
@@ -2235,72 +2239,6 @@ void CharacterService::RunEnemyMeterUpdates() noexcept
                      pBest->GetLevel());
     UI::SetEnemyMeterTarget(handle, pBest->GetLevel());
     s_shownHandle = handle;
-#endif
-}
-
-void CharacterService::RunBodyGrabUpdates() noexcept
-{
-#ifdef SKYRIMVR
-    // A dead body owned by the other player that this machine is physically moving (a HIGGS grab, a shove, a spell)
-    // drifts away from the position being played back for it. The remote corpse path allows 64 units of that drift
-    // before it pulls the body back, so the drift shows up here first. Asking for ownership at that point is what
-    // makes the grab win: from then on this side is the one sending the body's position and its bones, and the
-    // other player sees it move.
-    if (!m_transport.IsOnline())
-        return;
-
-    constexpr float cReach = 600.f;  // a body further away than this is not one the player is holding
-    constexpr float cGrabbed = 32.f; // half of what the corpse path tolerates, so the claim goes out before the snap
-
-    static std::chrono::steady_clock::time_point s_next;
-    static Map<uint32_t, std::chrono::steady_clock::time_point> s_asked;
-    const auto now = std::chrono::steady_clock::now();
-    if (now < s_next)
-        return;
-    s_next = now + 250ms;
-
-    const PlayerCharacter* pPlayer = PlayerCharacter::Get();
-    if (!pPlayer)
-        return;
-
-    const glm::vec3 playerPosition{pPlayer->position.x, pPlayer->position.y, pPlayer->position.z};
-
-    auto view = m_world.view<RemoteComponent, InterpolationComponent, FormIdComponent>();
-    for (auto entity : view)
-    {
-        const auto& formIdComponent = view.get<FormIdComponent>(entity);
-
-        Actor* pActor = Cast<Actor>(TESForm::GetById(formIdComponent.Id));
-        if (!pActor || !pActor->actorState.IsDead())
-            continue;
-
-        // Living NPCs are never taken this way: their owner is running their AI, and a handover mid fight is the
-        // kind of thing that leaves an actor standing still. Player copies and summons are off limits everywhere.
-        ActorExtension* pExtension = pActor->GetExtension();
-        if (!pExtension || pExtension->IsRemotePlayer() || pActor->IsPlayerSummon())
-            continue;
-
-        const glm::vec3 here{pActor->position.x, pActor->position.y, pActor->position.z};
-        if (glm::distance(here, playerPosition) > cReach)
-            continue;
-
-        const auto& interpolationComponent = view.get<InterpolationComponent>(entity);
-        const float drift = glm::distance(here, interpolationComponent.Position);
-        if (drift < cGrabbed)
-            continue;
-
-        auto& askedAt = s_asked[formIdComponent.Id];
-        if (askedAt.time_since_epoch().count() && now - askedAt < 3s)
-            continue;
-        askedAt = now;
-
-        const auto& remoteComponent = view.get<RemoteComponent>(entity);
-        if (RequestOwnership(formIdComponent.Id, remoteComponent.Id, entity))
-            spdlog::info("Asking for the body {:X}: it has been moved {:.0f} units from where its owner has it", formIdComponent.Id, drift);
-    }
-
-    for (auto it = s_asked.begin(); it != s_asked.end();)
-        it = now - it->second > 30s ? s_asked.erase(it) : std::next(it);
 #endif
 }
 

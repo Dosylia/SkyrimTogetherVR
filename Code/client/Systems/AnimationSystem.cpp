@@ -200,6 +200,30 @@ void AnimationSystem::AddAction(RemoteAnimationComponent& aAnimationComponent, c
     lastProcessedAction.ApplyDifferential(reader);
 
     aAnimationComponent.TimePoints.push_back(lastProcessedAction);
+
+    // Update plays at most one action per frame, and nothing bounded this queue. An actor whose owner is stuck in
+    // a loop therefore builds a backlog that never drains: on 2026-09-24 a single Redoran Guard reached 717
+    // refused 'Unequip' replays while the rest of the world starved for updates. An action this far behind is not
+    // worth playing anyway, so the oldest are dropped and the actor catches up with the present.
+    constexpr size_t cMaxQueued = 96; // over a second of backlog at the frame rate these replay at
+    if (aAnimationComponent.TimePoints.size() > cMaxQueued)
+    {
+        const size_t dropped = aAnimationComponent.TimePoints.size() - cMaxQueued;
+        for (size_t i = 0; i < dropped; ++i)
+            aAnimationComponent.TimePoints.pop_front();
+        if (aAnimationComponent.ReplayCount > dropped)
+            aAnimationComponent.ReplayCount -= dropped;
+        else
+            aAnimationComponent.ReplayCount = 0;
+
+        static std::chrono::steady_clock::time_point s_nextSaid{};
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= s_nextSaid)
+        {
+            s_nextSaid = now + 10s;
+            spdlog::warn("Animation replay backlog over {} actions, dropped {} stale ones; an owner is looping an action", cMaxQueued, dropped);
+        }
+    }
 }
 
 void AnimationSystem::Serialize(World& aWorld, ClientReferencesMoveRequest& aMovementSnapshot, LocalComponent& localComponent, LocalAnimationComponent& animationComponent, FormIdComponent& formIdComponent)

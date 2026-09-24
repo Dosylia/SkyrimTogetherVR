@@ -91,6 +91,7 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 36048u, 0x05a1070u }, // SE 35158 BGSSaveFormBuffer::WriteFormId
     { 36291u, 0x05ad8f0u }, // SE 35402 Calendar::Update
     { 36372u, 0x05e2010u }, // SE 36372 Character animation graph update (VRBodySync)
+    { 36427u, 0x05e5dc0u }, // SE 36427 (SE 0x5dd770) Actor::StealAlarm, the crime alarm (supplied 2026-09-23)
     { 36525u, 0x05ef640u }, // SE 36525 Actor::AddObjectToContainer
     { 36527u, 0x05efa10u }, // SE 36527 Actor::GetGoldAmount
     { 36544u, 0x05b4290u }, // SE 35545 WinMain

@@ -414,6 +414,10 @@ struct RemotePose
     // Kept from the last update that carried it (see VRPose::HasScale).
     bool HasScale = false;
     float RootScale = 1.f;
+    // Only for a dead body being moved (see VRPose::HasRootPosition). Not kept: when the sender stops, the body
+    // goes back to its own ragdoll rather than being pinned where it last was.
+    bool HasRootPosition = false;
+    glm::vec3 RootPosition{};
 };
 
 std::shared_mutex s_posesLock;
@@ -792,7 +796,9 @@ void* SceneTopOf(void* apNode) noexcept
     return pWalk;
 }
 
-void PoseActor(const Rig& acRig, const RemotePose& acPose) noexcept
+//! acWorldOffset shifts the whole skeleton, for a corpse being dragged elsewhere. It has to reach every bone:
+//! this writes world transforms directly and the skinned body follows the bones, not the root.
+void PoseActor(const Rig& acRig, const RemotePose& acPose, const glm::vec3& acWorldOffset) noexcept
 {
     // Body size: the skeleton root's local scale is set so that its world scale matches the sender's. Only the local
     // is written; the game carries it into every bone's world transform on its next update, before the rotations
@@ -829,6 +835,7 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose) noexcept
 
         NiTransform wanted = current;
         wanted.rotate = FromGlm(wantedRotation);
+        wanted.translate = FromGlm(ToGlm(wanted.translate) + acWorldOffset);
         bone.WriteWorld(wanted);
 
         // The local rotation is computed from scratch every frame: the parent's world rotation, inverted, times the
@@ -852,7 +859,7 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose) noexcept
         {
             NiTransform world = child.World();
             world.rotate = FromGlm(delta * ToGlm(world.rotate));
-            world.translate = FromGlm(pivot + delta * (ToGlm(world.translate) - pivot));
+            world.translate = FromGlm(pivot + delta * (ToGlm(world.translate) - pivot) + acWorldOffset);
             child.WriteWorld(world);
         }
     }
@@ -965,7 +972,30 @@ void OnFrameEnd() noexcept
             continue;
         }
 
-        PoseActor(rig, pose);
+        // Placing the root first, so the bone world transforms below are built on the right origin. Written here,
+        // at the renderer's frame end, for the same reason the bones are: the local ragdoll has already had its
+        // turn this frame and would otherwise drag the body back.
+        // How far the whole body has to move to be where its owner has it. Applied to every bone by PoseActor,
+        // because the renderer follows the bones and not the root: writing the root alone moved nothing at all,
+        // which is why nobody could see a dragged body on 2026-09-24.
+        glm::vec3 worldOffset{};
+        if (pose.HasRootPosition)
+        {
+            const glm::vec3& wanted = pose.RootPosition;
+            if (std::isfinite(wanted.x) && std::isfinite(wanted.y) && std::isfinite(wanted.z))
+            {
+                NiTransform& rootWorld = At<NiTransform>(pRoot, kWorldOffset);
+                worldOffset = wanted - ToGlm(rootWorld.translate);
+                // A body half a cell away is a desync, not a drag, and hauling the skeleton that far would look
+                // worse than leaving it where it is.
+                if (glm::dot(worldOffset, worldOffset) > 2048.f * 2048.f)
+                    worldOffset = glm::vec3{};
+                else
+                    rootWorld.translate = wanted; // NiPoint3 derives from glm::vec3
+            }
+        }
+
+        PoseActor(rig, pose, worldOffset);
     }
 }
 
@@ -1277,6 +1307,14 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
     aOutPose.HasLegs = false;
     aOutPose.HasFingers = false;
     aOutPose.HasScale = false;
+
+    // Where the body is, not just how it is bent. The receiver cannot get this from the reference: a corpse is
+    // carried by its ragdoll, and moving the reference leaves the visible body behind.
+    aOutPose.HasRootPosition = true;
+    aOutPose.RootPosition[0] = rootPosition.x;
+    aOutPose.RootPosition[1] = rootPosition.y;
+    aOutPose.RootPosition[2] = rootPosition.z;
+
     aOutPose.HasData = true;
     return true;
 }
@@ -1326,6 +1364,12 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
         pose.HasScale = true;
         pose.RootScale = scale;
     }
+
+    // Deliberately not sticky: the sender only fills this while a dead body is being moved, and when it stops the
+    // body should settle on its own ragdoll rather than stay pinned to the last place it was dragged to.
+    pose.HasRootPosition = acPose.HasRootPosition;
+    if (acPose.HasRootPosition)
+        pose.RootPosition = glm::vec3{acPose.RootPosition[0], acPose.RootPosition[1], acPose.RootPosition[2]};
 }
 
 void LogCastOrigin(Actor* apActor, uint32_t aCastingSource) noexcept

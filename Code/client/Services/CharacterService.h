@@ -103,8 +103,6 @@ private:
 
     void RunLocalUpdates() const noexcept;
     void RunEnemyMeterUpdates() noexcept;
-    //! Claims a dead body this player has physically moved but does not own, so the other side sees it move.
-    void RunBodyGrabUpdates() noexcept;
     void RunRemotePlayerDiag() noexcept;
 
 public:

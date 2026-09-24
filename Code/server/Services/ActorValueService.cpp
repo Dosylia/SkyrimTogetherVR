@@ -86,8 +86,11 @@ void ActorValueService::OnHealthChangeBroadcast(const PacketEvent<RequestHealthC
     if (it != actorValuesView.end())
     {
         auto& actorValuesComponent = actorValuesView.get<ActorValuesComponent>(*it);
+        // Damage is a negative delta: Actor::DamageActor raises HealthChangeEvent(formId, -realDamage) and the
+        // clients add it. Subtracting it here turned every hit into healing in the server's copy, so the health
+        // it hands out on a spawn, a hand-off or a respawn drifted upwards away from what the players saw.
         auto currentHealth = actorValuesComponent.CurrentActorValues.ActorValuesList[24];
-        actorValuesComponent.CurrentActorValues.ActorValuesList[24] = currentHealth - message.DeltaHealth;
+        actorValuesComponent.CurrentActorValues.ActorValuesList[24] = currentHealth + message.DeltaHealth;
     }
 
     NotifyHealthChangeBroadcast notify;

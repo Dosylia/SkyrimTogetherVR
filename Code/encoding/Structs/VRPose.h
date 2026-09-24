@@ -69,4 +69,13 @@ struct VRPose
     //! Sent on change and once a second (HasScale); the receiver keeps the last value.
     bool HasScale{false};
     uint16_t RootScale{1000};
+
+    //! World position of the 3D root, sent only for a dead body that is being moved (HasRootPosition).
+    //!
+    //! A corpse is not driven by its character controller but by its ragdoll, so moving the reference on the
+    //! receiving side leaves the visible body where its own ragdoll dropped it: the two never agreed, and nobody
+    //! could drag anything (2026-09-23). The bones already survive the local animation by being written at the
+    //! renderer's frame end, and the root position is written in the same place for the same reason.
+    bool HasRootPosition{false};
+    float RootPosition[3]{};
 };

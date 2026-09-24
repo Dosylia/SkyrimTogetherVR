@@ -451,6 +451,15 @@ template <class T> struct VersionDbPtr
                 char buf[96];
                 _snprintf_s(buf, sizeof(buf), "VersionDbPtr: unresolved id %u (GetPtr returning null)\n", m_id);
                 OutputDebugStringA(buf);
+
+                // OutputDebugStringA needs a debugger attached, and the user does not run one in the headset, so
+                // an id that never resolved stayed invisible until someone noticed the feature silently doing
+                // nothing. In the log it answers "which addresses is this build still missing?" by itself.
+                if (!m_reported)
+                {
+                    m_reported = true;
+                    spdlog::warn("Address id {} did not resolve on this build; whatever uses it does nothing", m_id);
+                }
             }
         }
 
@@ -459,5 +468,6 @@ template <class T> struct VersionDbPtr
 
 private:
     mutable void* m_pPtr;
+    mutable bool m_reported{false};
     uint32_t m_id;
 };

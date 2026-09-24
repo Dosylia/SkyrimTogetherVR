@@ -186,8 +186,10 @@ void Actor::ForcePosition(const NiPoint3& acPosition) noexcept
 {
     ScopedReferencesOverride recursionGuard;
 
+    // GetExtension() returns null for an actor this client did not allocate; see HookActorProcess.
+    const ActorExtension* pExtension = GetExtension();
     bool updateController = true;
-    if (GetExtension()->IsRemote() && currentProcess)
+    if (pExtension && pExtension->IsRemote() && currentProcess)
     {
         if (auto* pController = currentProcess->GetCharController())
         {
@@ -1512,7 +1514,14 @@ static TiltedPhoques::Initializer s_actorHooks(
         POINTER_SKYRIMSE(TStealAlarm, s_stealAlarm, 36427, 36427);
         RealStealAlarm = s_stealAlarm.Get();
         if (RealStealAlarm)
+        {
             TP_HOOK(&RealStealAlarm, HookStealAlarm);
+            // The address is logged because this hook has never once fired, through whole sessions of guards
+            // reacting to crimes, so whatever it resolved to before was not the crime alarm. The VR address was
+            // supplied on 2026-09-23 as 0x1405e5dc0 and put in VRAddressOverrides, but the CSV wins over that
+            // table when it carries the id, so the only way to know which one answered is to print it.
+            spdlog::info("Crime alarm guard installed on {} (expected SkyrimVR+0x5e5dc0)", fmt::ptr(RealStealAlarm));
+        }
         else
             spdlog::warn("Crime alarm guard off: SE 36427 did not resolve");
 #endif

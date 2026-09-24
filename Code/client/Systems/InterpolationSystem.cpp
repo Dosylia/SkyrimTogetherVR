@@ -128,6 +128,7 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     vrPose.HasLegs = false;
     vrPose.HasFingers = false;
     vrPose.HasScale = false;
+    vrPose.HasRootPosition = false;
     {
         const uint64_t poseTick = aPoseTick ? aPoseTick : aTick;
         const InterpolationComponent::TimePoint* pBefore = nullptr;
@@ -169,6 +170,20 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
                 vrPose.HasFingers = true;
                 vrPose.Fingers = fingerSource.Fingers;
             }
+            // The position of a body being dragged, blended like the movement it is. Only when both points carry
+            // one, so it never blends against a stale origin.
+            if (pBefore->VRPoseData.HasRootPosition && pAfter->VRPoseData.HasRootPosition)
+            {
+                vrPose.HasRootPosition = true;
+                for (size_t i = 0; i < 3; ++i)
+                    vrPose.RootPosition[i] = TiltedPhoques::Lerp(pBefore->VRPoseData.RootPosition[i], pAfter->VRPoseData.RootPosition[i], poseDelta);
+            }
+            else if (pAfter->VRPoseData.HasRootPosition)
+            {
+                vrPose.HasRootPosition = true;
+                std::copy(std::begin(pAfter->VRPoseData.RootPosition), std::end(pAfter->VRPoseData.RootPosition), std::begin(vrPose.RootPosition));
+            }
+
             const VRPose& scaleSource = pAfter->VRPoseData.HasScale ? pAfter->VRPoseData : pBefore->VRPoseData;
             if (scaleSource.HasScale)
             {
