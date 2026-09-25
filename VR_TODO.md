@@ -252,6 +252,60 @@ the other client.
       session to confirm -- but it is no longer a guess: a character can demonstrably exist at negative health
       on another client with nothing to correct it.
 
+### Session of 2026-09-25, 21:15-21:26 (Seen's logs): one cause behind most of it
+
+Reported: a bandit launched into the sky (21:19), a dead body in the wrong place (21:20), Lydia not visible at
+all and frozen (21:21), a Burned Spriggan trying to attack and never landing one (21:25), and the health bar
+working perfectly. Almost all of it is downstream of one thing.
+
+- [x] **Seen's client dropped five times and that is what broke the world.**
+      `Disconnected from server 0` (kTimeout) at 21:16:01 and 21:16:16, then `4` (kAborted) at 21:16:24, 21:22:39
+      and 21:23:55. At **21:19:01.484 his client handed back 45 actors in one burst** -- "Transferring ownership
+      of local actor" 45 times, each followed by "Actor removed" -- with no cell change anywhere near it.
+      Lydia (`A2C94`) was one of them: removed 21:19:01, **not spawned again until 21:24:30**, a gap of five and a
+      half minutes that contains the 21:21 report exactly. The bandit through the sky (21:19), the body in the
+      wrong place (21:20) and the spriggan that cannot land a hit (21:25) all sit on the same churn: an actor
+      whose owner changes mid-action, or whose updates stop arriving, is an actor doing nonsense.
+      He had **loaded a save at 21:15:38** and the first timeout followed 23 seconds later. "Seenfront joined
+      first" matches too: joining first means owning the most, so a drop costs the most.
+
+- [x] **A second crash, and it was ours: mimalloc handed a pointer it never allocated.**
+      `_mi_free_delayed_block + 0x27d`, reached through **`Hook_aligned_free`**, dereferencing `0x7ffa2f938d28` --
+      an address in the region where **DLLs are mapped**, not where any heap lives.
+      `Code/client/Games/Memory.cpp` hooks the game's imports of `malloc`/`free`/`_aligned_malloc`/`_aligned_free`
+      and sends them all to mimalloc. The game is not the only thing in the process: a block allocated before
+      those hooks went in, or by a DLL carrying its own CRT, is still freed through the game's imports, and
+      mimalloc walks it as though it were one of its own. The exit-time guard right above it was written for this
+      exact failure ("a plugin string that isn't a heap block"); it was simply never true that it only happens
+      while quitting.
+      `free`, `_aligned_free` and `_msize` now ask `mi_is_in_heap_region` first and hand anything else to the real
+      CRT entry, resolved once at startup.
+
+- [x] **A diagnostic of ours was making it worse.** 128 "Mod update took ..." warnings in eleven minutes, and
+      **54 of them name `CharacterService::RunRemotePlayerDiag`** at 20 to 30 ms a time -- a dropped frame or two
+      every five seconds, on a client that was already timing out. The cost is `VRBodySync::DescribeBody`, which
+      walks the whole skeleton by name and measures it. The measuring now runs every 30 s; the cheap corrective
+      pass that clears an invisible copy keeps its five seconds. (Worst single stall was 316 ms in
+      `OverlayService::OnUpdate`, once, at overlay creation after the save load -- not chased.)
+
+- [x] **"SKSE VR is not loaded" was a lie.** Logged twice on 2026-09-25 while his crash dump lists
+      `sksevr_1_4_15.dll` as loaded. `GetSKSEStyleExeVersion` trimmed a trailing empty patch number with
+      `find_last_of("_0")`, which matches an underscore as happily as a zero: a version string without that
+      trailing ".0" was cut down to "1_" and the module searched for became `sksevr_1_.dll`. Only a real trailing
+      "_0" is removed now. The flag also travels to the server, but the server only refuses when SKSE is *active*
+      and disallowed, so the false negative cost nothing beyond a frightening message in the headset.
+
+- [x] **The health bar is confirmed working**, by the people playing. That is the respawn-health fix and the
+      damage-sign fix landing together.
+
+- [ ] **Why does a fresh connection time out at all?** This is now the top question. A client that has just
+      joined takes the whole world at once -- 30 to 40 `Spawn Actor` lines land in a single millisecond -- and the
+      one that joined first owns the most, so it has the most to hand back when it stalls. Nothing here measures
+      how long that burst takes.
+      **Plan:** time the spawn burst and the authentication-to-first-update window, and log the gap between
+      updates on the client when it exceeds a second. Until that exists, every symptom above can recur and the
+      logs will only show the aftermath.
+
 ### Session of 2026-09-25, 20:44-20:51 (Seen's logs)
 
 - [x] **Seen's crash: ours, found, fixed.** `EXCEPTION_ACCESS_VIOLATION` at `SkyrimVR.exe+0x495253`,

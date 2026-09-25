@@ -112,8 +112,47 @@ bool IsProcessExiting() noexcept
     return s_processExiting.load(std::memory_order_relaxed);
 }
 
+// The real CRT entries, so a pointer that is not ours can be given back to whoever really owns it.
+//
+// These hooks sit on the game's import table and send its allocations to mimalloc, but the game is not the only
+// thing in this process and mimalloc has not always been here. A block allocated before these hooks went in, or by
+// a DLL carrying its own copy of the CRT, is still freed through the game's imports -- and mimalloc, handed a
+// pointer it never allocated, walks it as though it were one of its own.
+//
+// Seen's crash of 2026-09-25 21:26 is that, during play rather than at exit: `_mi_free_delayed_block` reached
+// through `Hook_aligned_free`, dereferencing 0x7ffa2f938d28 -- an address in the region where **DLLs are mapped**,
+// not where any heap lives. The existing exit-time guard below was written for the same failure ("a plugin string
+// that isn't a heap block"); it was simply never true that this only happens while quitting.
+using TRealFree = void(__cdecl*)(void*);
+using TRealMsize = size_t(__cdecl*)(void*);
+static TRealFree s_realFree = nullptr;
+static TRealFree s_realAlignedFree = nullptr;
+static TRealMsize s_realMsize = nullptr;
+
+static void ResolveRealHeapEntries() noexcept
+{
+    HMODULE crt = GetModuleHandleA("ucrtbase.dll");
+    if (!crt)
+        crt = GetModuleHandleA("api-ms-win-crt-heap-l1-1-0.dll");
+    if (!crt)
+        return;
+
+    s_realFree = reinterpret_cast<TRealFree>(GetProcAddress(crt, "free"));
+    s_realAlignedFree = reinterpret_cast<TRealFree>(GetProcAddress(crt, "_aligned_free"));
+    s_realMsize = reinterpret_cast<TRealMsize>(GetProcAddress(crt, "_msize"));
+}
+
+//! Whether mimalloc allocated this, and so whether mimalloc may be asked about it.
+static inline bool IsOurs(const void* apData) noexcept
+{
+    return apData == nullptr || mi_is_in_heap_region(apData);
+}
+
 size_t Hook_msize(void* apData)
 {
+    if (!IsOurs(apData))
+        return s_realMsize ? s_realMsize(apData) : 0;
+
     return mi_malloc_size(apData);
 }
 
@@ -121,6 +160,13 @@ void Hookfree(void* apData)
 {
     if (s_processExiting.load(std::memory_order_relaxed))
         return;
+
+    if (!IsOurs(apData))
+    {
+        if (s_realFree)
+            s_realFree(apData);
+        return;
+    }
 
     mi_free(apData);
 }
@@ -139,6 +185,13 @@ void Hook_aligned_free(void* apData)
 {
     if (s_processExiting.load(std::memory_order_relaxed))
         return;
+
+    if (!IsOurs(apData))
+    {
+        if (s_realAlignedFree)
+            s_realAlignedFree(apData);
+        return;
+    }
 
     mi_free(apData);
 }
@@ -170,6 +223,9 @@ static TiltedPhoques::Initializer s_memoryHooks(
         Tmalloc Realmalloc = nullptr;
         T_aligned_malloc Real_aligned_malloc = nullptr;
         T_aligned_free Real_aligned_free = nullptr;
+
+        // Before the hooks, so a foreign pointer arriving at the very first free already has somewhere to go.
+        ResolveRealHeapEntries();
 
         const char* cModuleName = "api-ms-win-crt-heap-l1-1-0.dll";
 

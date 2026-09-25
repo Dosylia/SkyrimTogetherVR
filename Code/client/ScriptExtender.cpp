@@ -63,12 +63,15 @@ std::string GetSKSEStyleExeVersion()
     auto exeBuild = VersionDb::Get().GetLoadedVersionString();
     std::replace(exeBuild.begin(), exeBuild.end(), '.', '_');
 
-    // chop off empty patch numbers for instance "1.6.323.0 becomes "1_6_323"
-    auto patchPos = exeBuild.find_last_of("_0");
-    if (patchPos != std::string::npos)
-    {
-        exeBuild.erase(exeBuild.begin() + (patchPos - 1), exeBuild.end());
-    }
+    // Chop an empty patch component, so "1_6_323_0" becomes "1_6_323".
+    //
+    // This used to be find_last_of("_0"), which matches an underscore just as readily as a zero: a version with no
+    // trailing ".0" -- "1.4.15" -> "1_4_15" -- matched the underscore at index 3 and was cut down to "1_", so the
+    // module looked for was "sksevr_1_.dll" and SKSE was reported missing while it was plainly loaded. Seen's log
+    // of 2026-09-25 says "SKSE VR is not loaded" twice; his crash dump from the same session lists
+    // sksevr_1_4_15.dll. Only a real trailing "_0" is removed now.
+    if (exeBuild.size() > 2 && exeBuild.compare(exeBuild.size() - 2, 2, "_0") == 0)
+        exeBuild.erase(exeBuild.size() - 2);
 
     return exeBuild;
 }

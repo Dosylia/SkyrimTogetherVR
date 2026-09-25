@@ -2311,6 +2311,8 @@ void CharacterService::RunRemotePlayerDiag() noexcept
     PlayerCharacter* pPlayer = PlayerCharacter::Get();
     if (!pPlayer)
         return;
+    static std::chrono::steady_clock::time_point s_nextBody;
+    bool measured = false;
     auto view = m_world.view<PlayerComponent, FormIdComponent, RemoteComponent>();
     for (auto entity : view)
     {
@@ -2328,10 +2330,23 @@ void CharacterService::RunRemotePlayerDiag() noexcept
             spdlog::info("Remote player {:X} copy was invisible ({:.2f}); cleared", pActor->formID, invisibility);
             pActor->SetActorValue(ActorValueInfo::kInvisibility, 0.f);
         }
+        // The line below costs 20 to 30 ms, because DescribeBody walks the whole skeleton by name and measures it.
+        // At five seconds that is a dropped frame or two every five seconds, for ever: Seen's session of
+        // 2026-09-25 has 54 "Mod update took ..." warnings naming this function, on a client that was already
+        // timing out. A diagnostic that destabilises the thing it is watching is worse than no diagnostic, so the
+        // measuring runs every 30 s and the cheap corrective pass above -- which is what actually puts an
+        // invisible copy right -- keeps its five.
+        if (now < s_nextBody)
+            continue;
+
         spdlog::info("CopyDiag: player copy {:X} '{}' {:.0f} units away, dz {:.0f}, form flags {:X}, health {:.0f}, dead {}, bleedout {}, state1 {:X}, invisibility {:.2f}, {}", pActor->formID,
                      pActor->baseForm ? Cast<TESNPC>(pActor->baseForm)->fullName.value.AsAscii() : "?", std::sqrt(dx * dx + dy * dy + dz * dz), dz, pActor->flags,
                      pActor->GetActorValue(24), pActor->IsDead(), pActor->actorState.IsBleedingOut(), pActor->actorState.flags1, invisibility, VRBodySync::DescribeBody(pActor));
+        measured = true;
     }
+
+    if (measured)
+        s_nextBody = now + 30s;
 }
 #else
 void CharacterService::RunRemotePlayerDiag() noexcept {}
