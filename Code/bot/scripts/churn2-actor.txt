@@ -1,0 +1,59 @@
+# The joining and leaving half. Four round trips, each with a few seconds in the world.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Pair churn2
+#
+# The dwell matters. Written without it this bot was in the world for about 150 milliseconds per round, which is
+# nothing a player does and too short for the other side to see at all -- the test then failed on the watcher never
+# having caught a glimpse, which says nothing about removal.
+
+log churn actor
+waitfor connected 45
+collect spawn ownership
+record churn actor
+
+waitfor players >= 1 30
+expect known me
+
+log settling so the other side has a clear look before anything churns
+wait 10
+
+log round 1
+disconnect
+wait 2
+reconnect
+waitfor connected 45
+expect known me
+wait 3
+
+log round 2
+disconnect
+wait 1
+reconnect
+waitfor connected 45
+expect known me
+wait 3
+
+log round 3
+disconnect
+wait 3
+reconnect
+waitfor connected 45
+expect known me
+wait 3
+
+log round 4, the quickest turnaround the server will take
+disconnect
+wait 1
+reconnect
+waitfor connected 45
+expect known me
+
+# Staying put at the end. The watcher does its final count once the churn has stopped, and a bot that leaves the
+# moment its last round finishes is a bot the watcher can only report as missing.
+wait 25
+expect connected
+
+record off
+report bot-churn2-actor.txt
+log done
+stop

@@ -18,6 +18,10 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
         return false;
     if (HasRootPosition != acRhs.HasRootPosition)
         return false;
+    if (HasHips != acRhs.HasHips)
+        return false;
+    if (HasHips && !std::equal(std::begin(HipOffset), std::end(HipOffset), std::begin(acRhs.HipOffset)))
+        return false;
     if (HasRootPosition && !std::equal(std::begin(RootPosition), std::end(RootPosition), std::begin(acRhs.RootPosition)))
         return false;
     const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
@@ -53,6 +57,18 @@ void VRPose::Serialize(TiltedPhoques::Buffer::Writer& aWriter) const noexcept
         // Raw bits, as Quaternion_NetQuantize does: world coordinates run to six figures, so quantising them
         // would move the body further than the drag being sent.
         for (const float value : RootPosition)
+        {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            aWriter.WriteBits(bits, 32);
+        }
+    }
+    aWriter.WriteBits(HasHips ? 1 : 0, 1);
+    if (HasHips)
+    {
+        // Root-relative, so a few hundred units at most, but written raw like the root position above: the body
+        // lands where this says, and a quantisation step here is a step the hips would visibly sit wrong by.
+        for (const float value : HipOffset)
         {
             uint32_t bits = 0;
             std::memcpy(&bits, &value, sizeof(bits));
@@ -97,6 +113,19 @@ void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
     if (HasRootPosition)
     {
         for (float& value : RootPosition)
+        {
+            uint64_t bits = 0;
+            aReader.ReadBits(bits, 32);
+            const uint32_t raw = static_cast<uint32_t>(bits);
+            std::memcpy(&value, &raw, sizeof(value));
+        }
+    }
+    uint64_t hasHips = 0;
+    aReader.ReadBits(hasHips, 1);
+    HasHips = hasHips != 0;
+    if (HasHips)
+    {
+        for (float& value : HipOffset)
         {
             uint64_t bits = 0;
             aReader.ReadBits(bits, 32);

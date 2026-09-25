@@ -1,0 +1,33 @@
+# The watching half of the churn test, and the one that does the checking.
+#
+# The audit of 2026-09-24 flagged that actor removal is not idempotent, so handlers can race and leave components
+# behind. This is the visible form of that: every join builds a fresh character with a new server id and every leave
+# should remove the old one, so the number of copies this bot holds must come back to two -- itself and the other
+# player -- however many times the other side goes round.
+#
+# A number that climbs is a body nobody owns left standing in the world, which is the shape of somebody else's crash
+# later on.
+
+log churn watcher
+waitfor connected 45
+collect spawn ownership death
+record churn watcher
+
+waitfor known other 40
+expect known other
+expect actors == 2
+
+log riding out four join-and-leave rounds
+wait 32
+
+log the other player is back, and there is exactly one of them
+waitfor known other 30
+expect known other
+expect alive other
+expect actors == 2
+expect connected
+
+record off
+report bot-churn2-watcher.txt
+log done
+stop

@@ -418,6 +418,10 @@ struct RemotePose
     // goes back to its own ragdoll rather than being pinned where it last was.
     bool HasRootPosition = false;
     glm::vec3 RootPosition{};
+    // Where the sender's hips are relative to its root (see VRPose::HasHips). Not kept either: when the sender's
+    // trackers stop driving the legs the body should go back to its own animation rather than hold the last crouch.
+    bool HasHips = false;
+    glm::vec3 HipOffset{};
 };
 
 std::shared_mutex s_posesLock;
@@ -995,6 +999,38 @@ void OnFrameEnd() noexcept
             }
         }
 
+        // Hips. The pose is rotations, so a crouch or a lean -- which move the body relative to the root without
+        // changing any rotation -- never arrived, and the hip tracker did nothing while the feet followed. Moving
+        // every bone puts the hip joint where the sender's is; the thigh and calf rotations being written anyway
+        // then swing the feet from there. It has to be the whole body: the spine hangs off NPC COM beside the
+        // pelvis rather than below it, so shifting the pelvis alone would pull the legs off the torso.
+        if (pose.HasHips)
+        {
+            const RigBone& pelvis = rig.Bones[VRPose::kPelvis];
+            if (pelvis.pNode || pelvis.pEntry)
+            {
+                const NiTransform& rootWorld = At<NiTransform>(pRoot, kWorldOffset);
+                const glm::vec3 wanted = ToGlm(rootWorld.translate) + ToGlm(rootWorld.rotate) * pose.HipOffset;
+                const glm::vec3 delta = wanted - ToGlm(pelvis.World().translate);
+                // A hip a body-length away from where this copy has it is a bad read, not a crouch.
+                if (std::isfinite(delta.x) && std::isfinite(delta.y) && std::isfinite(delta.z) && glm::dot(delta, delta) < 256.f * 256.f)
+                {
+                    worldOffset += delta;
+
+                    // The other half of the measurement. Compare with the sender's "local hips" line: the offset
+                    // should be the same, and the correction is how far this copy's own animation had the hips
+                    // from where they belong.
+                    static std::chrono::steady_clock::time_point s_lastHipLog{};
+                    if (now - s_lastHipLog >= std::chrono::seconds(5))
+                    {
+                        s_lastHipLog = now;
+                        spdlog::info("VRBodySync: actor {:X} hips wanted at ({:.1f}, {:.1f}, {:.1f}) from its root, moving the body by {:.1f}", formId, pose.HipOffset.x, pose.HipOffset.y,
+                                     pose.HipOffset.z, glm::length(delta));
+                    }
+                }
+            }
+        }
+
         PoseActor(rig, pose, worldOffset);
     }
 }
@@ -1078,6 +1114,45 @@ std::string DescribeBody(Actor* apActor) noexcept
     // be the fifth wrong offset on this bug. Instead the words just past the end of a VR NiNode are printed for
     // the copy *and* for the player, whose body is always drawn. Whatever the player reads as "visible" is the
     // value to look for, and the word that differs when a body vanishes is the fade.
+    // Why the other player's palm does not land where yours does.
+    //
+    // VRPose carries bone **rotations** only, and PoseActor keeps each bone's own translation, so the copy's hand
+    // ends up wherever the receiver's own skeleton puts it once the sent rotations are applied. Three things can
+    // move it from where the sender had it, and they need different fixes, so guessing between them is no use:
+    //   1. the skeleton root sits at a different height (VRIK height calibration moves it by translation)
+    //   2. the bones are different lengths (a different skeleton, or a scale this does not capture)
+    //   3. VRIK moved the hand itself by translation, which rotations can never reproduce
+    // Printing the copy's numbers next to the player's own tells them apart: same root height and same arm
+    // lengths but a different hand height means (3); a different root height means (1); different arm lengths
+    // mean (2). Measured against the 3D root, so the actor's world position does not enter into it.
+    const auto describeReach = [](void* apRoot, void* apSkeletonRoot) -> std::string
+    {
+        if (!apRoot)
+            return "none";
+
+        BoneNodes reachNodes;
+        if (!FindBones(apRoot, reachNodes))
+            return "bones not found";
+
+        const NiTransform& rootTransform = At<NiTransform>(apRoot, kWorldOffset);
+        const glm::vec3 rootPos = ToGlm(rootTransform.translate);
+
+        const auto heightOf = [&](void* apNode) -> float { return apNode ? ToGlm(At<NiTransform>(apNode, kWorldOffset).translate).z - rootPos.z : -999.f; };
+        const auto lengthBetween = [&](void* apA, void* apB) -> float
+        {
+            if (!apA || !apB)
+                return -1.f;
+            return glm::length(ToGlm(At<NiTransform>(apA, kWorldOffset).translate) - ToGlm(At<NiTransform>(apB, kWorldOffset).translate));
+        };
+
+        const float skeletonLocalZ = apSkeletonRoot ? At<NiTransform>(apSkeletonRoot, kLocalOffset).translate.z : -999.f;
+
+        return fmt::format("skelRootLocalZ {:.1f}, head {:.1f}, Lhand {:.1f}, Rhand {:.1f}, upperarm {:.1f}, forearm {:.1f}", skeletonLocalZ, heightOf(reachNodes[VRPose::kHead]),
+                           heightOf(reachNodes[VRPose::kLeftHand]), heightOf(reachNodes[VRPose::kRightHand]),
+                           lengthBetween(reachNodes[VRPose::kLeftUpperArm], reachNodes[VRPose::kLeftForearm]),
+                           lengthBetween(reachNodes[VRPose::kLeftForearm], reachNodes[VRPose::kLeftHand]));
+    };
+
     std::string renderWords;
     std::string playerWords;
     const auto dumpFloats = [](void* apNode, std::string& aOut)
@@ -1098,9 +1173,10 @@ std::string DescribeBody(Actor* apActor) noexcept
 
     return fmt::format("3D root {} with {} of {} child slots filled, root world scale {:.3f} at ({:.0f}, {:.0f}, {:.0f}), skeleton root {} world scale {:.3f}; "
                        "{} parents up to '{}' (same scene as the player: {}); spine scale {:.3f} rotation row {:.4f}, head scale {:.3f}; "
-                       "copy words [{}]; player words [{}]",
+                       "copy words [{}]; player words [{}]; copy reach [{}]; player reach [{}]",
                        pRoot, fingerprint & 0xFFFF, fingerprint >> 16, rootWorld.scale, rootWorld.translate.x, rootWorld.translate.y, rootWorld.translate.z,
-                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale, depth, pTopName, pSharesScene, spineScale, spineRowLength, headScale, renderWords, playerWords);
+                       pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale, depth, pTopName, pSharesScene, spineScale, spineRowLength, headScale, renderWords, playerWords,
+                       describeReach(pRoot, pSkeletonRoot == pRoot ? nullptr : pSkeletonRoot), describeReach(pPlayerRoot, pPlayerRoot ? FindSkeletonRoot(pPlayerRoot) : nullptr));
 }
 
 bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
@@ -1176,6 +1252,38 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
     }
 
     aOutPose.HasLegs = cLegs;
+
+    // Hips: where the pelvis sits relative to the 3D root, in root space. Crouching, leaning and hip sway all move
+    // it and none of them change a rotation, which is why a hip tracker did nothing on the other screen while the
+    // feet followed. Sent only while the legs are tracked -- without trackers the pelvis is wherever the walk
+    // animation put it, and the receiver's own copy of that animation already agrees.
+    aOutPose.HasHips = false;
+    if (cLegs && nodes[VRPose::kPelvis])
+    {
+        const NiTransform& rootWorld = At<NiTransform>(pRoot, kWorldOffset);
+        const glm::vec3 pelvis = ToGlm(At<NiTransform>(nodes[VRPose::kPelvis], kWorldOffset).translate);
+        const glm::vec3 offset = inverseRoot * (pelvis - ToGlm(rootWorld.translate));
+        // A body is a couple of hundred units tall. Anything beyond that is a bone read mid-update, and sending it
+        // would throw the copy across the room.
+        if (std::isfinite(offset.x) && std::isfinite(offset.y) && std::isfinite(offset.z) && glm::dot(offset, offset) < 512.f * 512.f)
+        {
+            aOutPose.HasHips = true;
+            aOutPose.HipOffset[0] = offset.x;
+            aOutPose.HipOffset[1] = offset.y;
+            aOutPose.HipOffset[2] = offset.z;
+
+            // Measured, not assumed. If the hips still look wrong next session, this line says whether the sender
+            // ever saw them move: crouch and stand, and the height should change by something like the distance
+            // actually crouched. If it does not move, the hip tracker is not reaching the pelvis node at all and
+            // the problem is upstream of this protocol.
+            static std::chrono::steady_clock::time_point s_lastHipLog{};
+            if (now - s_lastHipLog >= std::chrono::seconds(5))
+            {
+                s_lastHipLog = now;
+                spdlog::info("VRBodySync: local hips at ({:.1f}, {:.1f}, {:.1f}) from the root", offset.x, offset.y, offset.z);
+            }
+        }
+    }
 
     // Fingers: only when both hands' bones are known, and only when they changed since the last send or a second has
     // passed (so a player who arrives later still gets them).
@@ -1400,6 +1508,10 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
     pose.HasRootPosition = acPose.HasRootPosition;
     if (acPose.HasRootPosition)
         pose.RootPosition = glm::vec3{acPose.RootPosition[0], acPose.RootPosition[1], acPose.RootPosition[2]};
+
+    pose.HasHips = acPose.HasHips;
+    if (acPose.HasHips)
+        pose.HipOffset = glm::vec3{acPose.HipOffset[0], acPose.HipOffset[1], acPose.HipOffset[2]};
 }
 
 void LogCastOrigin(Actor* apActor, uint32_t aCastingSource) noexcept

@@ -59,6 +59,9 @@ struct BotOptions
     //! with nobody present.
     bool Standalone = false;
     float HostTimeout = 20.f; // seconds of looking for a host before giving up, with Standalone
+    //! Hard ceiling on a whole run. A bot that cannot connect retries for ever and its script never advances, so
+    //! no waitfor timeout can rescue it; unattended, that is a hang rather than a failed test. 0 disables it.
+    float MaxRuntime = 300.f;
 };
 
 //! Any character the server told us about, player or NPC. The bot cannot see a game, so this is the whole of
@@ -147,6 +150,8 @@ private:
     void SendCellEntry() noexcept;
     void SendMovement() noexcept;
     void SendHealth(float aHealth) noexcept;
+    void SendDeath(bool aDead) noexcept;
+    void SendHit(uint32_t aTargetId, float aDelta) noexcept;
     void SendEquip(uint32_t aBaseId, uint32_t aSlot, bool aUnequip, bool aSpell) noexcept;
 
     void HandleMessage(const ServerMessage& acMessage) noexcept;
@@ -179,6 +184,12 @@ private:
     uint32_t m_skyrimModId{};
     uint32_t m_cookie{};
     uint32_t m_serverId{};
+    // The server checks this on every change we ask for and silently drops the message when it does not match,
+    // including when it is left at zero. Without it the bot can ask for anything and nothing ever happens.
+    uint32_t m_ownershipEpoch{};
+    // Whether this bot has a character at all. It cannot be inferred from m_serverId: the server hands out entity
+    // ids from zero, so the first character on a freshly started server legitimately has id 0.
+    bool m_hasCharacter{false};
     std::string m_serverVersion;
 
     glm::vec3 m_position{};

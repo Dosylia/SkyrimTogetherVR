@@ -26,13 +26,27 @@
 
 namespace
 {
-void SetupLogging()
+// Every bot used to open "logs/bot.log" and truncate it, while other bots had the same file open: a two-sided
+// test runs at least two of these at once, and a self-check run cycles four through in seconds. Their lines were
+// interleaved in one file, each start threw the previous run away, and on 2026-09-25 one bot hung before it could
+// log even its first line, leaving a test that never ran and never finished. One file per bot, named after it.
+std::string LogPath(const std::string& acName)
+{
+    std::string safe;
+    for (const char c : acName)
+        safe.push_back(std::isalnum(static_cast<unsigned char>(c)) ? c : '-');
+    if (safe.empty())
+        safe = "bot";
+    return "logs/bot-" + safe + ".log";
+}
+
+void SetupLogging(const std::string& acName)
 {
     std::error_code error;
     std::filesystem::create_directories("logs", error);
 
     auto console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-    auto file = std::make_shared<spdlog::sinks::basic_file_sink_mt>("logs/bot.log", true);
+    auto file = std::make_shared<spdlog::sinks::basic_file_sink_mt>(LogPath(acName), true);
     auto logger = std::make_shared<spdlog::logger>("bot", spdlog::sinks_init_list{console, file});
     logger->set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
     logger->set_level(spdlog::level::info);
@@ -89,7 +103,13 @@ bool ReadScript(const std::string& acPath, std::vector<Command>& aOut, BotOption
 
 int main(int argc, char** argv)
 {
-    SetupLogging();
+    // The name decides the log file, so it has to be read before anything can be logged.
+    std::string logName = "bot";
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::string(argv[i]) == "--name")
+            logName = argv[i + 1];
+
+    SetupLogging(logName);
 
     BotOptions options;
     options.HostLog = "E:\\FUS\\tools\\Skyrim Together VR\\logs\\tp_client.log";
@@ -127,6 +147,10 @@ int main(int argc, char** argv)
         else if (arg == "--standalone")
         {
             options.Standalone = true;
+        }
+        else if (arg == "--max-runtime" && next(value))
+        {
+            options.MaxRuntime = std::strtof(value.c_str(), nullptr);
         }
         else if (arg == "--host-timeout" && next(value))
         {

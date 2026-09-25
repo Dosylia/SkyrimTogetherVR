@@ -198,6 +198,132 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       rather than reporting on a handle we no longer hold, so `CheckInstall` stops claiming SKSE is missing.
       Worth watching on the next merge: upstream calling a function of ours that had been dead code.
 
+## 0. Session of 2026-09-25: the bot was testing itself, and one real bug fell out of fixing that
+
+No play session. Everything here was found and proved with two bots and no headset.
+
+### The bot's own tests were not testing the server
+
+Every change the bot asked the server for -- health, and therefore death -- was **silently discarded**. The server
+checks `IsCurrentOwner(player, epoch)` on each request and rejects `epoch == 0`, and the bot never set one. The
+value it then asserted on was its own bookkeeping, recorded locally when it sent the message. Nothing crossed.
+
+That means `health-sign.txt`, `death-recovery.txt` and `auto-suite.txt` proved only that the bot could add and
+subtract, from the day they were written until today. They pass now for a better reason, but `expect health me`
+is still a local read: **the only script that tests the wire is `relay-watcher.txt`**, which asserts solely about
+the other client.
+
+- [x] **Ownership epoch.** Taken from `AssignCharacterResponse`, sent on every request, cleared on disconnect.
+- [x] **Death was never sent.** `die` set health to -4 and stopped there; `RequestDeathStateChange` went out for
+      nobody, so no other client could ever be told. Now sent on `die` and cleared on `respawn`.
+- [x] **Spawns were dropped.** A spawn carries the health and death state the server holds, and it is the only
+      way a bot joining late learns them -- the bot filed it under players and recorded no character at all.
+- [x] **`known other` answered from the player list.** It passed the instant the server mentioned somebody, so a
+      check after a reconnect ran against an empty world instead of waiting for the character to arrive. It now
+      means what it says: a character copy exists.
+- [x] **Reconnects kept the old world.** `m_actors` survived a disconnect, so a post-reconnect assertion could be
+      satisfied by a value the server never resent.
+- [x] **Server id 0 was being used as "no character".** The server hands out entity ids from zero, so the bot that
+      connects first to a freshly started server is given id 0 -- and every guard of the form `if (!m_serverId)`
+      then made its own actions do nothing at all. The first `hit` ever sent was swallowed exactly this way, with
+      the script reporting success for having asked. There is now an explicit `m_hasCharacter`, and conditions that
+      cannot resolve a name return a real sentinel instead of zero. Whichever bot connects first was the affected
+      one, which in every pair is the half doing the checking.
+
+### Now verified across the wire, having previously only been asserted
+
+- [x] **Damage lowers the health the server stores.** The sign fix of 2026-09-24 was marked untested for a day.
+      `pvp-watcher.txt` now hits the other player for 30, reconnects so the server has to rebuild that character
+      from what it holds, and requires the copy to arrive at 70. It failed at 100 while the hit was being
+      swallowed, so the check is known to be able to fail.
+
+### The bug that came out of it
+
+- [x] **A respawned player is rebuilt at the health they died on.** The server puts the body back and tells the
+      others to respawn it, but never restores the health it stores for that character. Every copy built from
+      that moment -- someone walking into range, someone reconnecting, an ownership hand-off -- is handed the
+      death value. `PlayerService::OnPlayerRespawnRequest` now restores stored health to the maximum when it is
+      at or below zero, tells everyone in range, and clears the death flag.
+
+      Proved both ways: with the fix disabled the watcher is handed `spawn health -4.0` and fails; with it
+      restored the same spawn arrives at 100. This is the first product bug the bot has caught on its own.
+
+      **This is a candidate cause of the friend's health bar being wrong** (section 3), and it needs a PvP
+      session to confirm -- but it is no longer a guess: a character can demonstrably exist at negative health
+      on another client with nothing to correct it.
+
+### Full body tracking: hips (reported 2026-09-25, feet track and hips do not)
+
+- [x] **The pose carried rotations and nothing else, so a hip tracker had nothing to travel on.** Crouching,
+      leaning and hip sway move the body relative to the root without changing any rotation. The feet followed
+      because the thigh and calf rotations did travel -- which is exactly the shape of the report.
+
+      `VRPose` now carries `HipOffset`: where the pelvis sits relative to the 3D root, in root space, sent while
+      the legs are tracked. The receiver moves the **whole** body by the difference, not the pelvis alone: the
+      spine hangs off `NPC COM` beside the pelvis rather than below it, so shifting the pelvis by itself would
+      pull the legs off the torso. With the hip joint in the right place, the thigh and calf rotations already
+      being written swing the feet from there.
+
+      **Unplayed, and it changes the wire format** -- everyone needs this build or nobody connects.
+
+      Measured on both sides rather than assumed, every five seconds while the legs are tracked:
+      - sender: `VRBodySync: local hips at (x, y, z) from the root`
+      - receiver: `VRBodySync: actor N hips wanted at (x, y, z) from its root, moving the body by D`
+
+      If the hips still look wrong, those two lines say which half is at fault. If the sender's numbers do not
+      change when you crouch, the hip tracker is not reaching the pelvis node and the problem is upstream of this
+      protocol entirely -- VRIK's own configuration, not ours. If they change and the receiver's do not match, it
+      is the send or apply path. If both match and it still looks wrong, the offset is right and the error is in
+      how the legs are being bent.
+
+### Removal and ownership churn: checked, and clean
+
+- [x] **Five join-and-leave rounds, watched from another client: every join produced exactly one spawn and every
+      leave exactly one removal, no copy left behind** (`-Pair churn2`, 2026-09-25). The 2026-09-24 audit flagged
+      that actor removal is not idempotent; whatever is true inside the server, nothing leaks out to the other
+      client's view of the world, which is where a leaked body would eventually crash somebody. This does not
+      clear the NPC case -- these are player characters, and no bot owns an NPC.
+
+### Same shape, not touched, needs evidence first
+
+- [ ] **`CharacterService::OnRequestRespawn` does not restore stored health either.** When somebody who is *not*
+      the owner asks, that handler serialises the character out of stored state and sends it as a fresh spawn --
+      the same copy-from-storage path the player respawn bug travelled on. For players it is now safe, because
+      `PlayerService` restores the health before the notify goes out. For an **NPC** resurrected by its owner
+      nothing restores it, so the copy other clients build should arrive at the health it died on.
+      Not changed: no session has shown it. What would show it -- a resurrected NPC (a follower getting back up,
+      a scripted resurrect) appearing on the other screen as a corpse or at a wrong health. If that is seen, the
+      fix is the same fifteen lines. The reason for holding off is that a respawn there is not always a death:
+      forcing full health would be a guess about every other caller.
+- [ ] **`NotifyRespawn` in `PlayerService` is sent inside the inventory lookup**, which reads as a bug and is not
+      one: `CharacterService` emplaces an `InventoryComponent` on every character unconditionally, so the lookup
+      never fails. Checked 2026-09-25, left alone deliberately. Noted so it does not get "fixed" twice.
+
+### Harness
+
+- [x] `run-bot-tests.ps1 -Pair <name>` runs a two-sided test: `<name>-watcher.txt` against `<name>-actor.txt`.
+      The watcher is the standalone half and **its** exit code decides the result, because that is where the
+      assertions live. Reporting only the acting half's exit is how a two-sided test reports success with nobody
+      having checked anything. `-Relay` is kept as a spelling of `-Pair relay`.
+- [x] The watcher's output is written to `logs\watcher.log`. It runs minimised, so until now the half that does
+      the checking was the half whose output went nowhere.
+- [x] **Every bot wrote to one `logs/bot.log`, truncating it on start.** A pair runs two at once and a self-check
+      run cycles four through in seconds, so their lines interleaved and each start threw the last run away. On
+      2026-09-25 one bot hung before logging its first line: a test that never ran, never finished, and left a
+      process behind. Each bot now writes `logs/bot-<name>.log`.
+- [x] `$hostBot.ExitCode` came back empty unless the process handle is touched first, so a **passing** watcher was
+      reported as a failure. Same class of lie as the reverse, and worth remembering for any other `Start-Process`
+      in this repo: read `$proc.Handle` once before waiting.
+- **`STServer.dll` and `SkyrimTogetherServer.exe` are version-locked.** Rebuild the DLL alone and the server exits
+      immediately, code 1, no log line, no message. Always build `SkyrimServerRunner` with it.
+- **Any tracked source edit changes the version hash**, so `STBot` must be rebuilt too or it is refused at the
+      door. The refusal is now loud, but the rebuild is still manual.
+
+### Still blocked on a play session
+
+Unchanged from 2026-09-24: the invisible-body render-word comparison, the hand-offset reach comparison, the PvP
+health-bar test (now with a named suspect), and humanoid corpse dragging. Nothing below needed a headset today.
+
 ## 0. Everything from 2026-09-24, ordered. Nothing dropped.
 
 Ordered by what costs a session first, then by how cheap the fix is. "Debug plan" means there is no fix yet and
@@ -297,9 +423,18 @@ the task is to find the cause rather than guess at one.
       carries bone **rotations only** and `PoseActor` keeps each bone's own translation, so anything VRIK does by
       moving a bone rather than turning it -- height calibration, crouch, arm length -- cannot be reproduced, and
       the arm lands at the receiver's own skeleton's height.
-      **Plan:** send the root-relative translation of a few bones, hands and head first since those are what people
-      touch, the same way the corpse root position was added. Start with two and measure the cost. Medium, and it
-      is the honest fix; nothing else closes that gap.
+      **Measurement shipped first (2026-09-25), because the cause is not known.** Three things can move the copy's
+      hand away from where the sender had it, and they need different fixes: the skeleton root sitting at a
+      different height (VRIK height calibration moves it by translation), different bone lengths (a different
+      skeleton, or a scale this does not capture), or VRIK moving the hand itself by translation, which rotations
+      can never reproduce. `CopyDiag` now prints `copy reach [...]` and `player reach [...]`: the skeleton root's
+      local Z, the head and both hands' heights above the 3D root, and the upper-arm and forearm lengths.
+      **How to read it:** same root height and same arm lengths but a different hand height means VRIK is moving
+      the hand directly, and only sending hand translations will fix it. A different root height means the body
+      is standing at a different height and the root offset is the fix -- cheaper, and it would move everything
+      consistently. Different arm lengths mean the skeletons differ and neither would fully close the gap.
+      Guessing between those three would have meant shipping a change to how every remote body looks with no way
+      to tell whether it helped.
 - [ ] **Your own sword hitting where the blade is not.** The screenshots of 2026-09-24 are a first-person view of
       the player's own weapon striking the Earth Stone with the impact well off the blade. This client never writes
       the local player's bones, it only reads them, so this is not sync and not ours: it is the weapon collision
@@ -330,12 +465,60 @@ the task is to find the cause rather than guess at one.
       Swept the rest of the client for the same shape: the two other dereferenced `find_if` results, in
       `CharacterService` and `ObjectService`, are both already guarded. `OnBeastFormChange` was the only one.
 
+- [x] **`Tools\VR\session-report.py` (2026-09-25).** Reads one session's log and says, for each fix shipped
+      since 2026-09-23, whether it fired and what that means -- corpse dragging both ways, spell and melee damage
+      to a player, NPC health correction, the naked-NPC give-up, the replay backlog, essential NPCs, levelled
+      picks, the crime alarm, the Solstheim faction search, combat with a second player. Then it lists problems
+      (crashes, unresolved addresses, starved interpolation) and does the invisible-body comparison: for every
+      `CopyDiag` line it diffs the copy's render words against the player's and reports which offset differs.
+      `--log` for the friend's bundle, `--since` for one session. Read-only.
+      It immediately corrected a wrong claim of mine, above: levelled reconciliation had run and worked.
+
+- [x] **A test that asserted nothing, fixed (2026-09-25).** `health-sign.txt` checked `health 0 <= 100`, where 0
+      was not this bot's server id: the condition could never be read, and before conditions reported failure it
+      would have passed no matter what the code did. Conditions now accept `me` for the bot's own character, and
+      the bot records its own health when it sends one -- the server relays a health change to everyone *except*
+      the sender, so nothing would otherwise have taught it what its own health was. The script now asserts the
+      exact value at each step (100, 70, 40, <= 0 on death, restored on respawn). Ten checks.
+      **Corrected 2026-09-25:** this was called a real check on the damage-sign fix and it was not. The server was
+      dropping every change the bot sent for want of an ownership epoch, so the assertions read the bot's own
+      bookkeeping back to itself. See section 0; `relay-watcher.txt` is the test that exercises the server.
+      Worth remembering: a green test that cannot fail is worse than no test.
+
+- [x] **The test suite was partly an illusion, fixed 2026-09-25.** Two faults compounded:
+      1. **Documentation was in the version hash.** Editing `VR_TODO.md` changed the string the client, server
+         and bot compare on connect, so the bot was refused at the door by a server built minutes earlier.
+         `*.md` and `Tools/VR/*.py|ps1` now join `Code/bot` in the exclusions -- none of them can change the
+         protocol. Verified: appending a line to the roadmap leaves the version untouched.
+      2. **A refused bot exited 0.** No checks ran, no failures were recorded, so the runner read success. Four
+         suites "passed" in a row having never connected. A run that completes no checks now exits 2 with
+         `the script ran no checks`.
+      **Consequence worth stating:** some earlier "suites passed" claims in this session cannot be trusted, since
+      a version refusal was indistinguishable from a clean run. Everything from `8101c40` onward is real.
+      All four suites now assert values rather than only that the connection survived: 66 checks
+      (18 + 19 + 19 + 10), and `known me` works because the bot records its own character on entering the world --
+      the server tells everyone about a character except the player it belongs to.
+
+- [x] **The harness can now prove it reports failure (2026-09-25).** Every run until now only ever demonstrated
+      that the suite *passes*, which says nothing: the week's lesson is that a green result can mean the test
+      never ran. Two faults found by checking the failure paths on purpose:
+      1. **A bot that could not connect hung for ever.** It retried the connection endlessly and its script never
+         advanced, so no `waitfor` timeout could rescue it -- unattended, that is a wedged machine rather than a
+         failed test. There is now a whole-run deadline (`--max-runtime`, default 300s) which fails the run and
+         says which phase it was stuck in. The first attempt measured against `m_lastTick`, which moves every
+         iteration, so it compared ten milliseconds to the deadline and never tripped.
+      2. Verified that a failed assertion really does exit non-zero, rather than assuming it.
+      `run-bot-tests.ps1 -SelfCheck` now runs two suites that **must** fail -- one against a dead server, one with
+      an impossible assertion -- and refuses to continue if either reports success. Use it before trusting a
+      green run after any build-system change.
+
 ### Bot coverage (2026-09-24)
 
 - [x] **Unattended test runs.** `Tools\VRun-bot-tests.ps1` starts a server, puts a standalone bot in the world
       to hold it open, runs a script and reports pass or fail, with no human and no headset.
       `-Script <name> -Repeat <n>`. Exit code 0 means every check passed.
 - [x] **Scripts so far:** `auto-suite.txt` (presence, health, death, respawn, movement, reconnect -- 8 checks),
+      `health-sign.txt` (baseline, two damage steps, death and respawn, asserting the exact health each time),
       `death-recovery.txt` (three death and respawn rounds back to back, which is where things used to come
       apart), `churn.txt` (four join and leave round trips, down to a one-second turnaround, aimed at the audit's
       duplicate-spawn and non-idempotent-removal findings), `health-sign.txt`, `suite-soak.txt`.
@@ -380,7 +563,17 @@ the task is to find the cause rather than guess at one.
 - [ ] **Superseded: NPC health has no authoritative correction.** Snapshots are ignored for NPCs in favour of accumulated
       deltas, so once a value diverges nothing repairs it. Larger work, and it interacts with the essential-NPC
       handling above.
-- [ ] **Duplicate spawn messages are discarded rather than refreshing state**, so a newer spawn carrying updated
+- [x] **[untested] A duplicate spawn now refreshes the ownership epoch (2026-09-25).** A spawn for a character
+      that already exists here was discarded whole. The server re-sends one when something about the character
+      changed, and the epoch is the part that matters: upstream's ownership rework refuses any claim whose epoch
+      does not match the server's, so a stale epoch meant every later attempt to take that actor was rejected and
+      nothing said why. It is refreshed now, and a change is logged.
+      **Position, cell and death state are deliberately still ignored** -- they arrive continuously through the
+      movement and death paths, and forcing them from a spawn message would fight those. So the audit's finding
+      is only partly addressed, on purpose.
+      `churn.txt` still passes and still does not reproduce the original symptom, so this is reasoned from the
+      code rather than from a repro.
+- [ ] **Superseded: duplicate spawn messages are discarded rather than refreshing state**, so a newer spawn carrying updated
       ownership, cell or death state is dropped. Explains some of the "already spawned" warnings.
 
 ---
@@ -490,7 +683,12 @@ the task is to find the cause rather than guess at one.
     - `TESObjectREFR::SetLeveledCreature`: **address supplied 2026-09-23**, AE 20231 -> VR 0x1402b8f10
       (SE 0x1402a77a0, SE id 19826). This is the step that actually applies the pick, so until now the feature
       could not have worked even without the crash.
-    - `TESActorBaseData::CreateTemplateActorBase`: AE 14375 -> VR 0x19c0c0. Not proven by running it, but
+    - **`CreateTemplateActorBase` is now proven by running it (2026-09-25).** The host's log shows
+      `Applied leveled NPC pick` three times on 2026-09-24 (18:52:14, 19:27:25 twice), and that line is written
+      only after both `CreateTemplateActorBase` and `SetLeveledCreature` have returned. No crash followed the
+      19:27 pair. An earlier note here said reconciliation never ran; that was read from the friend's log, not the
+      host's, and was wrong. The address is good.
+    - `TESActorBaseData::CreateTemplateActorBase`: AE 14375 -> VR 0x19c0c0. Was not proven by running it, but
       corroborated: cmpayc/TiltedEvolutionVR derived the same address independently and declares it
       `TESNPC* thiscall(TESNPC*, TESNPC*)` where upstream declares `TESActorBase* fastcall(TESActorBase*,
       TESActorBase*)`. On x64 those pass in the same registers and return the same way, and TESNPC derives from
@@ -860,7 +1058,7 @@ Its log is `logsot.log` next to the exe. The clone carries the host's face, out
       (the bot is a clone of the host, so the receiving client builds the face from data it already accepts), then
       `AssignCharacterRequest` 200 units from the host with the same worldspace and cell, Nord race, iron sword and
       Flames in the inventory, health 100. Then `EnterExteriorCellRequest` from the host's grid.
-- [x] **Never own anything:** the server makes the first player party leader, so the bot leaves any party it is
+- [x] **Never own anything:** the server makes the first player party leader, so the bot leaves any party it is
       asked to lead and stays as a plain member otherwise. Any (the leader claims every actor). Any
       `NotifyOwnershipTransfer` the server hands the bot is sent straight back (`RequestOwnershipTransfer`), otherwise
       the NPCs it would own freeze on the host's screen.

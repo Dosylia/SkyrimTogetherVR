@@ -36,7 +36,10 @@ function main (target)
 				-- and server compare: every bot change locked the bot out of the running server and needed the
 				-- server, and the player's client, rebuilt to match. That made automated testing impossible in
 				-- practice. A bot-only change is now invisible here, which is the truth of it.
-				local exclude = {":(exclude)Code/bot"}
+				-- Documentation and notes are excluded for the same reason as Code/bot: a markdown file cannot change
+				-- the protocol, and on 2026-09-25 editing VR_TODO.md moved the version and locked the test bot out of
+				-- the running server, which then reported a pass because it never connected at all.
+				local exclude = {":(exclude)Code/bot", ":(exclude)*.md", ":(exclude)Tools/VR/*.py", ":(exclude)Tools/VR/*.ps1"}
 				local diffArgs = {"diff", "HEAD", "--ignore-submodules", "--"}
 				local statusArgs = {"status", "--porcelain", "--ignore-submodules", "--"}
 				table.insert(diffArgs, ".")

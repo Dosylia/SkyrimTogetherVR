@@ -1,0 +1,7 @@
+log deliberately wrong assertion, this suite MUST fail
+waitfor connected 40
+collect none
+record negative
+expect players >= 99
+record off
+stop

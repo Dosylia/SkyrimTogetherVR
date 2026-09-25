@@ -1,0 +1,40 @@
+# The acting half of the relay test: does things to itself on a schedule the watcher waits on.
+#
+# Run it through the harness rather than by hand:
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Relay
+#
+# The respawn here is deliberately "bare": it asks the server to respawn and then says nothing more. A real client
+# sends its restored health on a later tick, and if this bot did the same it would quietly repair the server's
+# stored health before the watcher could look at it -- the bug of 2026-09-25 would never be visible.
+
+log relay actor
+waitfor connected 45
+collect health death
+record relay actor
+
+waitfor players >= 1 30
+expect known me
+
+log settle
+health 100
+wait 6
+expect health me == 100
+
+log taking damage the watcher should see
+damage 50
+wait 8
+
+log dying
+die
+wait 10
+expect health me <= 0
+
+log respawning, and saying nothing afterwards
+respawn bare
+wait 40
+expect connected
+
+record off
+report bot-relay-actor.txt
+log done
+stop

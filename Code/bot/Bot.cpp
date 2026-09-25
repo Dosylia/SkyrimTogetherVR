@@ -19,6 +19,8 @@
 #include <Messages/NotifyRespawn.h>
 #include <Messages/PlayerRespawnRequest.h>
 #include <Messages/RequestActorValueChanges.h>
+#include <Messages/RequestDeathStateChange.h>
+#include <Messages/RequestHealthChangeBroadcast.h>
 #include <Messages/RequestEquipmentChanges.h>
 #include <Messages/RequestOwnershipTransfer.h>
 #include <Messages/RequestRespawn.h>
@@ -47,6 +49,11 @@ namespace
 {
 // Actor value ids (ActorValueInfo on the client).
 constexpr uint32_t kHealth = 24;
+// "no id", for a name a script used that does not resolve to anybody yet. Zero cannot serve: it is a real server
+// id, and the bot that connects first to a fresh server is given exactly that one. Using zero as the sentinel made
+// every self-directed action of that bot silently do nothing -- a hit that was never sent, health never recorded --
+// while its script reported success for having asked.
+constexpr uint32_t kNoId = 0xFFFFFFFFu;
 constexpr uint32_t kMagicka = 25;
 constexpr uint32_t kStamina = 26;
 
@@ -151,14 +158,39 @@ int Bot::Run() noexcept
     m_lastTick = Clock::now();
     m_connectAt = m_lastTick;
 
+    // Its own reference point: m_lastTick moves every iteration, so measuring against that compares ten
+    // milliseconds to the deadline and never trips.
+    const auto runStart = Clock::now();
+
+    bool ranOutOfTime = false;
     while (m_phase != Phase::Stopped)
     {
         Update(); // network: OnConnected, OnConsume and OnDisconnected fire from here
         Tick();
+
+        if (m_options.MaxRuntime > 0.f && Seconds(Clock::now() - runStart) > m_options.MaxRuntime)
+        {
+            ranOutOfTime = true;
+            spdlog::error("[script] out of time after {:.0f}s in phase {}; the script did not finish", m_options.MaxRuntime, static_cast<int>(m_phase));
+            m_failures.push_back(fmt::format("run did not finish within {:.0f}s", m_options.MaxRuntime));
+            break;
+        }
+
         std::this_thread::sleep_for(10ms);
     }
+    (void)ranOutOfTime;
 
     // The exit code is the verdict, so a run can be checked by a script instead of read by a person.
+    //
+    // A run that never reached the world is a failure even with nothing to report: on 2026-09-25 a version
+    // mismatch refused the bot at the door, no check ever ran, and the suite reported a clean pass four times in
+    // a row. Silence is not success.
+    if (m_checksPassed == 0 && m_failures.empty())
+    {
+        spdlog::error("[script] the script ran no checks; the bot never got far enough to test anything");
+        return 2;
+    }
+
     if (!m_failures.empty())
     {
         spdlog::error("[script] {} of {} checks failed", m_failures.size(), m_failures.size() + m_checksPassed);
@@ -218,6 +250,12 @@ void Bot::OnDisconnected(EDisconnectReason aReason)
 {
     spdlog::warn("Disconnected ({})", ReasonName(aReason));
     m_serverId = 0;
+    m_ownershipEpoch = 0;
+    m_hasCharacter = false;
+    // Everything known about the world came from a connection that no longer exists. Keeping it means a check after
+    // a reconnect can be satisfied by a value the server never resent, which is the opposite of what these tests are
+    // for: after reconnecting, anything the bot knows must have arrived again.
+    m_actors.clear();
     m_players.clear();
     m_names.clear();
     m_leftParty = false;
@@ -478,16 +516,59 @@ void Bot::SendMovement() noexcept
 
 void Bot::SendHealth(const float aHealth) noexcept
 {
-    if (!m_serverId)
+    if (!m_hasCharacter)
         return;
+
+    // The server relays a health change to everyone except whoever sent it, so nothing would ever teach this bot
+    // its own health. Recording it here is what makes "expect health me <= 100" mean anything.
+    {
+        KnownActor& self = Actor(m_serverId);
+        self.Health = aHealth;
+        self.HealthKnown = true;
+        self.IsPlayer = true;
+        self.LastChange = Clock::now();
+    }
 
     RequestActorValueChanges request{};
     request.Id = m_serverId;
+    request.OwnershipEpoch = m_ownershipEpoch;
     request.Values[kHealth] = aHealth;
     SendMsg(request);
 
     spdlog::info("Health {:.0f} -> {:.0f} sent", m_health, aHealth);
     m_health = aHealth;
+}
+
+void Bot::SendDeath(const bool aDead) noexcept
+{
+    if (!m_hasCharacter)
+        return;
+
+    Actor(m_serverId).Dead = aDead;
+
+    RequestDeathStateChange request{};
+    request.Id = m_serverId;
+    request.OwnershipEpoch = m_ownershipEpoch;
+    request.IsDead = aDead;
+    SendMsg(request);
+
+    spdlog::info("Death state {} sent", aDead ? "dead" : "alive");
+}
+
+void Bot::SendHit(const uint32_t aTargetId, const float aDelta) noexcept
+{
+    if (!m_hasCharacter || aTargetId == kNoId)
+        return;
+
+    // This is the PvP path, and it is not the same message as a health change of our own: no ownership is claimed
+    // and none is checked, because the whole point is that somebody else's character is being hurt. Damage is a
+    // negative delta -- Actor::DamageActor raises HealthChangeEvent(formId, -realDamage) -- and the server adds it.
+    RequestHealthChangeBroadcast request{};
+    request.Id = aTargetId;
+    request.DeltaHealth = aDelta;
+    SendMsg(request);
+
+    spdlog::info("Hit {:X} for {:.1f}", aTargetId, aDelta);
 }
 
 void Bot::SendEquip(const uint32_t aBaseId, const uint32_t aSlot, const bool aUnequip, const bool aSpell) noexcept
@@ -629,8 +710,23 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
             if (id == message.PlayerId)
                 pPlayer->Name = name;
 
+        // A spawn carries the health and death state the server holds for that character, and it is the only place
+        // a bot joining late ever learns them. Recording it here is what lets a test ask whether a character was
+        // rebuilt correctly -- the respawn bug of 2026-09-25 was a spawn arriving at the health the player died on,
+        // and no check could see it while spawns only ever touched the player list.
+        {
+            KnownActor& actor = Actor(message.ServerId);
+            actor.IsPlayer = true;
+            actor.Health = pPlayer->Health;
+            actor.HealthKnown = health != message.InitialActorValues.ActorValuesList.end();
+            actor.Dead = message.IsDead;
+            actor.Name = pPlayer->Name;
+            actor.LastChange = Clock::now();
+        }
+
         spdlog::info("Player character {:X} of player {} '{}' at ({:.0f}, {:.0f}, {:.0f}), health {:.0f}{}", message.ServerId, message.PlayerId, pPlayer->Name, pPlayer->Position.x, pPlayer->Position.y,
                      pPlayer->Position.z, pPlayer->Health, message.IsDead ? ", dead" : "");
+        Record(Collect::Spawn, fmt::format("spawn {:X} health {:.1f}{}", message.ServerId, pPlayer->Health, message.IsDead ? " dead" : ""));
         return;
     }
 
@@ -641,8 +737,23 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
             return;
 
         m_serverId = message.ServerId;
+        m_ownershipEpoch = message.OwnershipEpoch;
+        m_hasCharacter = true;
         m_phase = Phase::InWorld;
         m_lastMovement = {};
+
+        // Record our own character the moment we have one. Nothing else will: the server tells everyone about a
+        // character except the player it belongs to, so without this the bot knows about every actor in range
+        // apart from itself, and a check like "known me" reads as though it never spawned.
+        {
+            KnownActor& self = Actor(m_serverId);
+            self.IsPlayer = true;
+            self.OwnedByUs = message.Owner;
+            self.Health = m_health;
+            self.HealthKnown = true;
+            self.Name = m_options.Name;
+            self.LastChange = Clock::now();
+        }
         spdlog::info("In the world: our character is {:X} (owner {}), player id {}", m_serverId, message.Owner ? "yes" : "no", message.PlayerId);
         SendCellEntry();
         return;
@@ -658,6 +769,27 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
                 pPlayer->Position = FromNet(entry.second.UpdatedMovement.Position);
                 pPlayer->Rotation = glm::vec2(entry.second.UpdatedMovement.Rotation.x, entry.second.UpdatedMovement.Rotation.y);
             }
+        }
+        return;
+    }
+
+    if (opcode == NotifyActorValueChanges::Opcode)
+    {
+        // Health reaches other clients two ways: as a delta (NotifyHealthChangeBroadcast, what a hit sends) and
+        // as a snapshot (this, what the owner's value tick sends). The bot only ever read the first, so a
+        // two-sided test watched a player take damage and die and concluded nothing had crossed at all -- the
+        // messages were arriving and being dropped on the floor. Nothing was wrong with the relay.
+        const auto& message = static_cast<const NotifyActorValueChanges&>(acMessage);
+        for (const auto& [key, value] : message.Values)
+        {
+            if (key != 24) // health
+                continue;
+            KnownActor& actor = Actor(message.Id);
+            actor.Health = value;
+            actor.HealthKnown = true;
+            actor.Dead = value <= 0.f;
+            actor.LastChange = Clock::now();
+            Record(Collect::Health, fmt::format("health {:X} snapshot {:.1f}", message.Id, value));
         }
         return;
     }
@@ -696,6 +828,14 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
             else
                 ++it;
         }
+
+        // The character copy goes as well. Leaving it behind meant the bot could never notice a copy that was
+        // *not* removed, which is the whole point of watching somebody join and leave over and over: a removal
+        // that misses one leaves a body nobody owns standing in the world.
+        for (auto actorIt = m_actors.begin(); actorIt != m_actors.end();)
+            actorIt = actorIt->ServerId == message.ServerId ? m_actors.erase(actorIt) : actorIt + 1;
+
+        Record(Collect::Spawn, fmt::format("removed {:X}", message.ServerId));
         return;
     }
 
@@ -905,9 +1045,37 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return true;
     }
 
+    // "hit <who> <delta>" hurts somebody else. A negative delta is damage, which is the direction the game
+    // actually sends and the direction the server got wrong until 2026-09-24.
+    if (name == "hit")
+    {
+        uint32_t target = kNoId;
+        if (!args.empty() && args[0] == "other")
+        {
+            for (const auto& player : m_players)
+                if (player.ServerId != m_serverId)
+                {
+                    target = player.ServerId;
+                    break;
+                }
+        }
+        else if (!args.empty())
+            target = static_cast<uint32_t>(std::strtoul(args[0].c_str(), nullptr, 16));
+
+        if (target == kNoId)
+        {
+            spdlog::warn("Line {}: nobody to hit", acCommand.Line);
+            return true;
+        }
+
+        SendHit(target, arg(1, -30.f));
+        return true;
+    }
+
     if (name == "die")
     {
         SendHealth(-4.f);
+        SendDeath(true);
         return true;
     }
 
@@ -916,6 +1084,17 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         // The client sends the respawn first and its restored health on its next value tick, so the server's stored
         // health is still the death value when the others rebuild the copy. Reproduced on purpose.
         SendMsg(PlayerRespawnRequest{});
+        SendDeath(false);
+
+        // "respawn bare" stops there. The point is to leave the server holding whatever health it had at the moment
+        // of death, which is what anyone building a fresh copy of this character will be handed. A bot that helpfully
+        // sends its health back afterwards repairs the very thing the test is trying to catch.
+        if (!args.empty() && args[0] == "bare")
+        {
+            spdlog::info("Respawn sent, no health follow-up");
+            return true;
+        }
+
         m_healthRestoreAt = now + 500ms;
         m_healthRestorePending = true;
         spdlog::info("Respawn sent; health back to {:.0f} in 500 ms", m_maxHealth);
@@ -1092,8 +1271,52 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
     {
         if (aIndex >= acArgs.size())
             return false;
-        aOut = static_cast<uint32_t>(std::strtoul(acArgs[aIndex].c_str(), nullptr, 16));
-        return aOut != 0;
+        // "me" is this bot's own character, which is what most checks are actually about.
+        if (acArgs[aIndex] == "me")
+        {
+            aOut = m_hasCharacter ? m_serverId : kNoId;
+            return true;
+        }
+
+        // "other" is the first other player this bot can see. A script cannot know the other side's server id in
+        // advance, and without this no test can assert that anything actually crossed between two clients --
+        // which is where the interesting bugs live.
+        if (acArgs[aIndex] == "other")
+        {
+            for (const auto& player : m_players)
+            {
+                if (player.ServerId != m_serverId)
+                {
+                    aOut = player.ServerId;
+                    return true;
+                }
+            }
+            // Nobody else is here *yet*. That is a condition which is false right now, not a condition this
+            // cannot read, and waitfor has to be able to tell those apart: a malformed condition should fail at
+            // once, an unsatisfied one should be waited on.
+            aOut = kNoId;
+            static std::chrono::steady_clock::time_point s_lastWhoLog{};
+            const auto now = Clock::now();
+            if (now - s_lastWhoLog >= std::chrono::seconds(5))
+            {
+                s_lastWhoLog = now;
+                std::string held;
+                for (const auto& player : m_players)
+                    held += fmt::format(" [{:X} p{}]", player.ServerId, player.PlayerId);
+                spdlog::info("'other' resolves to nobody: our id {:X}, {} players held{}", m_serverId, m_players.size(), held.empty() ? std::string(" (none)") : held);
+            }
+            return true;
+        }
+
+        // A literal id. Anything that is not a number at all is a malformed condition and fails at once; a number
+        // that happens to be zero is a real id and is not.
+        const char* pStart = acArgs[aIndex].c_str();
+        char* pEnd = nullptr;
+        const unsigned long parsed = std::strtoul(pStart, &pEnd, 16);
+        if (pEnd == pStart)
+            return false;
+        aOut = static_cast<uint32_t>(parsed);
+        return true;
     };
 
     if (what == "players")
@@ -1124,10 +1347,10 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
         float wanted = 0.f;
         if (!ParseFloat(acArgs[3], wanted))
             return std::nullopt;
-        const KnownActor* pActor = findActor(id);
+        const KnownActor* pActor = id != kNoId ? findActor(id) : nullptr;
         if (!pActor || !pActor->HealthKnown)
         {
-            aOutWhy = fmt::format("no health seen for {:X} yet", id);
+            aOutWhy = id != kNoId ? fmt::format("no health seen for {:X} yet", id) : std::string("nobody else is here yet");
             return false;
         }
         aOutWhy = fmt::format("{:X} health is {:.1f}", id, pActor->Health);
@@ -1145,10 +1368,10 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
         uint32_t id = 0;
         if (!parseId(1, id))
             return std::nullopt;
-        const KnownActor* pActor = findActor(id);
+        const KnownActor* pActor = id != kNoId ? findActor(id) : nullptr;
         if (!pActor)
         {
-            aOutWhy = fmt::format("nothing known about {:X}", id);
+            aOutWhy = id != kNoId ? fmt::format("nothing known about {:X}", id) : std::string("nobody else is here yet");
             return false;
         }
         aOutWhy = fmt::format("{:X} dead={}", id, pActor->Dead);
@@ -1160,9 +1383,46 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
         uint32_t id = 0;
         if (!parseId(1, id))
             return std::nullopt;
-        const bool seen = findActor(id) != nullptr;
-        aOutWhy = seen ? fmt::format("{:X} is known", id) : fmt::format("{:X} never arrived", id);
+        // "Known" means there is a character copy, not merely that the server mentioned somebody. Spawns now record
+        // one, so this no longer needs to fall back to the player list -- and it must not: that fallback let "known
+        // other" pass immediately after a reconnect, before the character had been sent, so the checks that followed
+        // read an empty world and the script never waited for the copy it was about to test.
+        const bool seen = id != kNoId && findActor(id) != nullptr;
+        if (!seen && id != kNoId)
+        {
+            static std::chrono::steady_clock::time_point s_lastKnownLog{};
+            const auto now = Clock::now();
+            if (now - s_lastKnownLog >= std::chrono::seconds(3))
+            {
+                s_lastKnownLog = now;
+                std::string held;
+                for (const auto& actor : m_actors)
+                    held += fmt::format(" {:X}", actor.ServerId);
+                spdlog::info("'known {:X}' is false; copies held:{}", id, held.empty() ? std::string(" (none)") : held);
+            }
+        }
+        aOutWhy = seen ? fmt::format("{:X} is known", id) : (id != kNoId ? fmt::format("{:X} never arrived", id) : std::string("nobody else is here yet"));
         return seen;
+    }
+
+    if (what == "actors")
+    {
+        // actors <op> <n>: how many character copies this bot is holding, its own included. A join-and-leave loop
+        // should always come back to the same number; a number that climbs is a removal that missed one.
+        if (acArgs.size() < 3)
+            return std::nullopt;
+        float wanted = 0.f;
+        if (!ParseFloat(acArgs[2], wanted))
+            return std::nullopt;
+        const auto count = static_cast<float>(m_actors.size());
+        aOutWhy = fmt::format("{} character copies held", m_actors.size());
+        const std::string& op = acArgs[1];
+        if (op == "==") return count == wanted;
+        if (op == ">=") return count >= wanted;
+        if (op == "<=") return count <= wanted;
+        if (op == ">") return count > wanted;
+        if (op == "<") return count < wanted;
+        return std::nullopt;
     }
 
     if (what == "connected")

@@ -78,4 +78,15 @@ struct VRPose
     //! renderer's frame end, and the root position is written in the same place for the same reason.
     bool HasRootPosition{false};
     float RootPosition[3]{};
+
+    //! Where the hips sit relative to the 3D root, in root space, sent while the legs are tracked (HasHips).
+    //!
+    //! The pose is otherwise rotations only, and that is why a hip tracker changed nothing on the other screen:
+    //! crouching, leaning and hip sway move the body relative to the root without changing any rotation the
+    //! protocol carried. The feet followed because the thigh and calf rotations did travel, which is the shape of
+    //! the report -- feet tracked, hips not (2026-09-25). This is the missing translation. It is applied to the
+    //! whole body rather than to the pelvis alone, because the spine hangs off NPC COM beside the pelvis and not
+    //! below it: moving the pelvis by itself would pull the legs away from the torso.
+    bool HasHips{false};
+    float HipOffset[3]{};
 };

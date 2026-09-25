@@ -763,7 +763,23 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
 
         if (hasActor)
         {
-            spdlog::warn("Character with remote id {:X} is already spawned.", acMessage.ServerId);
+            // The actor is here, so it is not respawned -- but the message is not simply thrown away either.
+            // A spawn is re-sent when something about the character changed on the server, and the ownership
+            // epoch is the part that matters: upstream's ownership rework refuses a claim whose epoch does not
+            // match the server's, so a stale epoch here means every later attempt to take this actor is rejected
+            // for reasons nothing logs. Refreshing it costs nothing and cannot move or redraw anything.
+            //
+            // Position, cell and death state are deliberately left alone. They arrive continuously through the
+            // movement and death paths, and forcing them from a spawn message would fight those.
+            auto& remoteComponent = remoteView.get<RemoteComponent>(cExisting);
+            if (remoteComponent.OwnershipEpoch != acMessage.OwnershipEpoch)
+            {
+                spdlog::info("Character {:X} is already spawned; its ownership epoch moved {} -> {}", acMessage.ServerId, remoteComponent.OwnershipEpoch, acMessage.OwnershipEpoch);
+                remoteComponent.OwnershipEpoch = acMessage.OwnershipEpoch;
+            }
+            else
+                spdlog::warn("Character with remote id {:X} is already spawned.", acMessage.ServerId);
+
             return;
         }
 

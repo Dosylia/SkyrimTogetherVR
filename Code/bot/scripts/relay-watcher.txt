@@ -1,0 +1,46 @@
+# The watching half of the relay test: sits still and asserts only what reaches it from the other client.
+#
+# Nothing here touches its own state, so every value it checks crossed the wire. Until 2026-09-25 nothing crossed
+# at all: the bot never set an ownership epoch on the changes it asked for, and the server drops those silently, so
+# the health and death tests were only ever reading the bot's own bookkeeping back to itself.
+#
+# The last round is the regression test for the respawn bug. After the other player respawns, this bot drops its
+# connection and comes back, which makes the server build it a fresh copy of that character from what it has
+# stored. Before the fix that copy arrived at the health the player died on.
+
+log relay watcher
+waitfor connected 45
+collect health death spawn
+record relay watcher
+
+waitfor known other 40
+expect known other
+
+log waiting for the other player to be damaged
+waitfor health other <= 70 60
+expect health other <= 70
+
+log waiting for the other player to die
+waitfor dead other 60
+expect dead other
+
+log waiting for the other player to come back
+waitfor alive other 60
+expect alive other
+
+log reconnecting, to be handed a fresh copy built from what the server stored
+disconnect
+wait 3
+reconnect
+waitfor connected 45
+waitfor known other 40
+expect known other
+
+log a respawned player must not be rebuilt at the health they died on
+expect alive other
+expect health other > 0
+
+record off
+report bot-relay-watcher.txt
+log done
+stop

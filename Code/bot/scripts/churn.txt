@@ -25,6 +25,10 @@ wait 3
 reconnect
 waitfor connected 45
 expect players >= 1
+expect known me
+health 100
+wait 2
+expect health me == 100
 
 log round 2, straight back out again
 disconnect
@@ -32,6 +36,10 @@ wait 2
 reconnect
 waitfor connected 45
 expect players >= 1
+expect known me
+health 100
+wait 2
+expect health me == 100
 
 log round 3, with movement so the spawn lands somewhere new
 walk rel 500 0 250
@@ -41,6 +49,10 @@ wait 3
 reconnect
 waitfor connected 45
 expect players >= 1
+expect known me
+health 100
+wait 2
+expect health me == 100
 
 log round 4, the quickest turnaround the server will take
 disconnect
@@ -48,6 +60,10 @@ wait 1
 reconnect
 waitfor connected 45
 expect players >= 1
+expect known me
+health 100
+wait 2
+expect health me == 100
 expect connected
 
 record off

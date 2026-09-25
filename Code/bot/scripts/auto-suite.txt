@@ -1,0 +1,62 @@
+# The main unattended suite: two bots, no human, no headset.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1
+#
+# Every check here asserts a value, not just that the connection survived. Until 2026-09-25 these were all
+# "players >= 1" and "connected", which pass whatever the code does; a green test that cannot fail is worse than
+# no test, because it is counted as coverage.
+
+log Automated suite: two bots, no human
+waitfor connected 45
+collect health death ownership spawn party
+record automated suite
+
+log 1. the other player is visible and this bot has a character
+waitfor players >= 1 20
+expect players >= 1
+expect known me
+
+log 2. health falls by exactly what was dealt, and does not rise
+health 100
+wait 2
+expect health me == 100
+damage 30
+wait 2
+expect health me == 70
+damage 20
+wait 2
+expect health me == 50
+
+log 3. death takes health to zero or below, respawn brings it back
+die
+wait 6
+expect health me <= 0
+respawn
+wait 6
+expect health me > 0
+expect health me <= 100
+expect connected
+
+log 4. movement does not drop the connection or the character
+walk rel 600 0 200
+wait 3
+walk rel -600 0 200
+wait 3
+expect connected
+expect known me
+expect players >= 1
+
+log 5. after a reconnect the world is whole again
+disconnect
+wait 4
+reconnect
+waitfor connected 45
+expect players >= 1
+expect known me
+health 100
+wait 2
+expect health me == 100
+
+record off
+report bot-auto-suite.txt
+stop

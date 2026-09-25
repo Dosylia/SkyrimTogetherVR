@@ -1,0 +1,43 @@
+# The attacker in the PvP damage test, and the half that does the checking.
+#
+# This is the one test that exercises the damage-sign fix of 2026-09-24 end to end. Damage travels as a *negative*
+# delta and the server adds it; it used to subtract, so every hit raised the health the server stored -- the health
+# it hands out on spawns, hand-offs and respawns. Nothing caught that, because until 2026-09-25 no test could make
+# one client hurt another.
+#
+# The check is deliberately indirect. After the hit this bot drops its connection and comes back, so the server
+# builds it a fresh copy of the victim out of what it has stored. That copy is the server's answer.
+
+log pvp attacker
+waitfor connected 45
+collect health death spawn
+record pvp attacker
+
+waitfor known other 40
+waitfor health other >= 100 30
+expect health other >= 100
+
+# The victim sets its own health once on arrival. Hitting before that lands means the victim's value overwrites the
+# damage and the test reads 100 with nothing wrong -- which is exactly what happened the first time this was run.
+log letting the other player settle before hitting it
+wait 10
+
+log hitting the other player for 30
+hit other -30
+wait 8
+
+log reconnecting, to be handed a fresh copy built from what the server stored
+disconnect
+wait 3
+reconnect
+waitfor connected 45
+waitfor known other 40
+
+log damage must have lowered the stored health, not raised it
+expect health other == 70
+expect alive other
+
+record off
+report bot-pvp-watcher.txt
+log done
+stop

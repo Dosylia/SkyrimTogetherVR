@@ -1,0 +1,27 @@
+# The victim in the PvP damage test. Sits still, gets hit, and deliberately says nothing afterwards.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Pair pvp
+#
+# Sending its own health after being hit would overwrite the server's stored value with a correct one, which is
+# the value the test exists to inspect. Standing still is the whole job.
+
+log pvp victim
+waitfor connected 45
+collect health death spawn
+record pvp victim
+
+waitfor players >= 1 30
+expect known me
+
+health 100
+wait 4
+expect health me == 100
+
+log standing still while the other player hits me
+wait 50
+expect connected
+
+record off
+report bot-pvp-actor.txt
+log done
+stop

@@ -1,0 +1,4 @@
+log unreachable server, this suite MUST fail
+waitfor connected 12
+expect connected
+stop

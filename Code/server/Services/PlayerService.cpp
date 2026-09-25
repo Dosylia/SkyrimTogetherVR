@@ -14,6 +14,13 @@
 #include <Messages/NotifyInventoryChanges.h>
 #include <Messages/NotifyPlayerRespawn.h>
 #include <Messages/NotifyRespawn.h>
+#include <Messages/NotifyActorValueChanges.h>
+
+namespace
+{
+// Skyrim's actor value index for health. The client and the bot both use the raw number; there is no shared enum.
+constexpr uint32_t kHealthValue = 24;
+}
 #include <Messages/PlayerLevelRequest.h>
 #include <Messages/NotifyPlayerLevel.h>
 #include <Messages/NotifyPlayerCellChanged.h>
@@ -213,6 +220,44 @@ void PlayerService::OnPlayerRespawnRequest(const PacketEvent<PlayerRespawnReques
         if (!GameServer::Get()->SendToPlayersInRange(notifyRespawn, *character, acMessage.GetSender()))
             spdlog::error("{}: SendToPlayersInRange failed", __FUNCTION__);
     }
+
+    // The respawn above rebuilds the body, but the health the server keeps for this character is still whatever it
+    // was when they died, and nothing here ever put it back. Every copy built from that point on -- someone walking
+    // into range, someone reconnecting, a hand-off -- is built at the death value. The bot relay test of 2026-09-25
+    // watched a respawned character arrive at health -4 this way.
+    auto valuesView = m_world.view<ActorValuesComponent>();
+    if (const auto valuesIt = valuesView.find(*character); valuesIt != valuesView.end())
+    {
+        auto& values = valuesView.get<ActorValuesComponent>(*valuesIt);
+        auto& current = values.CurrentActorValues.ActorValuesList;
+        const auto& maximums = values.CurrentActorValues.ActorMaxValuesList;
+
+        const auto maxIt = maximums.find(kHealthValue);
+        const auto curIt = current.find(kHealthValue);
+
+        // Only when it is actually a death value. A player who respawns at partial health, or a server that never
+        // stored a maximum, is left alone rather than being handed a number nobody asked for.
+        if (maxIt != maximums.end() && maxIt->second > 0.f && curIt != current.end() && curIt->second <= 0.f)
+        {
+            current[kHealthValue] = maxIt->second;
+
+            NotifyActorValueChanges notifyValues{};
+            notifyValues.Id = World::ToInteger(*character);
+            if (const auto* pOwnerComponent = m_world.try_get<OwnerComponent>(*character))
+                notifyValues.OwnershipEpoch = pOwnerComponent->OwnershipEpoch;
+            notifyValues.Values[kHealthValue] = maxIt->second;
+
+            if (!GameServer::Get()->SendToPlayersInRange(notifyValues, *character, acMessage.GetSender()))
+                spdlog::error("{}: SendToPlayersInRange failed", __FUNCTION__);
+
+            spdlog::debug("Respawn restored stored health of {:x} to {:.1f}", World::ToInteger(*character), maxIt->second);
+        }
+    }
+
+    // A respawned character is alive. Leaving the flag set means the next copy is built as a corpse.
+    auto characterView = m_world.view<CharacterComponent>();
+    if (const auto characterIt = characterView.find(*character); characterIt != characterView.end())
+        characterView.get<CharacterComponent>(*characterIt).SetDead(false);
 }
 
 void PlayerService::OnPlayerLevelRequest(const PacketEvent<PlayerLevelRequest>& acMessage) const noexcept
