@@ -2134,6 +2134,25 @@ void CharacterService::RunLocalUpdates() const noexcept
 
     lastSendTimePoint = now;
 
+#ifdef SKYRIMVR
+    // Nocked arrow, reported 2026-09-25: the arrow *leaves* fine because a shot travels as its own projectile
+    // message, but the arrow sitting on the string is an animation attachment and the other side never gets one.
+    // Before anything is built for it, this says whether VR archery moves the attack state at all -- the state the
+    // game itself uses to decide an arrow is on the bow. If it never leaves 0 through a whole draw and release,
+    // there is nothing to replicate and the arrow has to be put there by hand on the receiving side.
+    if (PlayerCharacter* pPlayer = PlayerCharacter::Get())
+    {
+        static uint32_t s_lastAttackState = 0xFFFFFFFFu;
+        const uint32_t attackState = pPlayer->actorState.AttackState();
+        if (attackState != s_lastAttackState)
+        {
+            s_lastAttackState = attackState;
+            spdlog::info("VRArchery: local attack state {} (9 bow draw, 10 arrow attached, 11 drawn, 12 releasing, 13 released), weapon drawn {}", attackState,
+                         pPlayer->actorState.IsWeaponDrawn());
+        }
+    }
+#endif
+
     const bool fullSnapshot = now - lastFullSendTimePoint >= cDelayBetweenSnapshots;
     if (fullSnapshot)
         lastFullSendTimePoint = now;

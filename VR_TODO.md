@@ -252,6 +252,92 @@ the other client.
       session to confirm -- but it is no longer a guess: a character can demonstrably exist at negative health
       on another client with nothing to correct it.
 
+### Session of 2026-09-25, 20:44-20:51 (Seen's logs)
+
+- [x] **Seen's crash: ours, found, fixed.** `EXCEPTION_ACCESS_VIOLATION` at `SkyrimVR.exe+0x495253`,
+      `lock xadd [rcx+0x08], eax` with `eax = 0xFFFFFFFF` and `rcx = 0x3EF8DA133F2D112E` -- a **reference count
+      being decremented on a pointer that is no longer an object**. No frame of ours on the stack, but the
+      timeline is ours end to end:
+
+      - 20:50:12 Seen opens the Journal, then the Console. Pause counter 2.
+      - Menus before that: `[WSEnemyMeters, HUD Menu]`.
+      - 20:50:46 he closes them. Opening and closing a pausing menu tears the HUD's sub-menus down and rebuilds
+        them, and the menu list is now `[HUD Menu]` alone -- **`WSEnemyMeters` is gone**.
+      - 20:50:47, :48, :52 our enemy-meter driver posts three `kUpdate` messages to `WSEnemyMeters` anyway, each
+        one allocating a `HUDData` from the queue's factory for a menu that cannot receive it.
+      - 20:50:52.733 access violation.
+
+      `UI::SetEnemyMeterTarget` checked the message queue and the factory and never checked that the menu it was
+      posting to existed. It now asks `UI::GetMenuOpen("WSEnemyMeters")` first and returns if it is not there.
+      A transient absence costs a frame or two of the meter and nothing else.
+
+- [ ] **The dragged Lurker was not seen (20:45).** Seen's log has **no `posing body` line anywhere on
+      2026-09-25** -- the last are from the day before -- so no dead-body pose reached him at all this session.
+      What his log cannot say is whether Emma sent any. It also shows both Lurkers 2.3 to 3.5 cells away and
+      `InterpDiag starved` (stale 3 s, then 11 s, then 16 s), so the server may simply have been withholding
+      their updates for range, in which case there was nothing to see and nothing is broken.
+      **Next:** Emma's log for the same minute. The sender's line is the other half of `posing body`. If she sent
+      and he did not receive, it is the range filter; if she never sent, it is the capture side.
+
+- [ ] **Lydia, downed, lying sideways on the floor and running (20:50, Seen's side).** Lydia (`A2C94`) is Emma's
+      actor, so Seen has a copy. Nothing in his log names her at 20:50, but the animation diagnostics for that
+      minute are loud: `moveStart 16/27 failed`, `turnStop 13/23 failed`, `CyclicCrossBlend 8/15 failed`, and
+      `(no event) 99/99 failed`. A copy playing a run while its body is prone is the shape of movement arriving
+      for an actor whose own state says it is down.
+      **Next:** log bleedout and get-up transitions for remote actors, with the state at the moment movement is
+      applied. Nothing built yet -- the fix of 2026-09-24 made bleedout behave like dying in `HookActorProcess`
+      and `InterpolationSystem`, and this may be that change's other side.
+
+- [x] **The hand-offset measurement was comparing two different people, and has been fixed.** It printed the
+      remote copy's reach beside **the local player's own**: Seen's log has the copy at `upperarm 22.8,
+      forearm 16.0` against his own `23.9, 16.8`, which is Emma's character against Seen's character. The
+      documented reading -- "same arm lengths but a different hand height means VRIK is moving the hand by
+      translation" -- could therefore never be true, and every number it produced was uninterpretable.
+      `VRPose` now carries the **owner's own** hand positions relative to their 3D root (`HasHandCheck`, about
+      once a second, measurement only -- nothing is posed from it), and the receiver logs both, in the same root
+      space, after posing:
+      `VRBodySync: actor N hands -- owner L(x, y, z) R(x, y, z); copy L(x, y, z) R(x, y, z)`.
+      Now a difference is a real difference: z is a hand at the wrong height, x or y is one too far forward or
+      out to the side.
+
+### VRIK and HIGGS interactions the other player cannot see (2026-09-25)
+
+The general complaint, and it is one problem wearing several hats: **this mod replicates the body, and the things
+the body does to the world travel only where something was built for them specifically.** Bones, fingers, scale
+and now hips cross. A shot arrow crosses because a shot is its own projectile message. A dragged corpse crosses
+because that was built by hand in September. Everything else a hand does is invisible.
+
+- [ ] **Nocked arrow not shown on the other player's bow.** Cause found 2026-09-25, not a mystery any more.
+      The arrow *leaving* works because `CombatService` sends a `ProjectileLaunchRequest` and the other side spawns
+      a projectile directly -- the bow animation is not involved at any point. The arrow *on the string* is an
+      animation attachment, and the remote copy's attack state never leaves 0 because nothing syncs it. The game's
+      own value for this is `kBowAttached`, in bits 28-31 of `ActorState::flags1`, now readable as
+      `ActorState::AttackState()`.
+
+      The open question is whether VR archery moves that state at all, since a VR player never plays the draw
+      animation. **Measurement written, not yet in a build:** `RunLocalUpdates` logs `VRArchery: local attack
+      state N` on every change.
+      - If the state does move through a draw and release, sync it and let the receiver's graph attach the arrow.
+      - If it never leaves 0, there is nothing to replicate and the arrow has to be attached on the receiving
+        side by hand, which is a much larger job -- and the state would then be wrong for bashing and blocking
+        too, which is worth knowing either way.
+
+- [ ] **Objects moved by hand are not seen moving.** `ObjectService` syncs activation, locks and script
+      animations, and **no positions at all**. Pick a cup up with HIGGS, throw it, and on the other screen it never
+      left the table. The identity and ownership machinery is already there -- objects have server ids and an
+      `ObjectComponent` -- so this is a missing message rather than a missing subsystem.
+
+      **Measurement written, not yet in a build:** `ObjectService::OnUpdate` samples every tracked object every
+      250 ms and logs `ObjectMove: <formid> moved N units in 250 ms, D from the player` for anything past 8 units,
+      at most four per sample.
+      It answers the three things a design needs: whether objects a player handles are even in the set the server
+      assigned us, how often they move, and by how much. Deliberately measured first -- the corpse-drag detector
+      of 2026-09-22 was written on an assumption instead and fired 207 times across 58 bodies that had merely
+      settled, which ended in a crash.
+
+- [~] **Dragged corpses** -- built 2026-09-22, offset fixed 2026-09-24, still unplayed. See the HIGGS grab section
+      further down. This is the one member of the family that already has an implementation.
+
 ### Full body tracking: hips (reported 2026-09-25, feet track and hips do not)
 
 - [x] **The pose carried rotations and nothing else, so a hip tracker had nothing to travel on.** Crouching,
@@ -439,6 +525,10 @@ the task is to find the cause rather than guess at one.
       the player's own weapon striking the Earth Stone with the impact well off the blade. This client never writes
       the local player's bones, it only reads them, so this is not sync and not ours: it is the weapon collision
       offset of the VR setup (VRIK or HIGGS).
+      **Checked rather than assumed, 2026-09-25:** `VRBodySync::SetRemotePose` has exactly one caller,
+      `InterpolationSystem`, which runs on remote actors; and there is no hook anywhere in this client on the melee
+      hit path -- no `HitData`, no weapon swing, no hit handler. There is no code here that could move where your
+      own blade lands.
       **Debug plan:** reproduce in solo with the mod disconnected. If it still happens it is a VRIK/HIGGS setting
       and belongs in their configuration. Do that before any time is spent here.
 

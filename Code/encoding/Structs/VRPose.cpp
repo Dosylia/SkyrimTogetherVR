@@ -22,6 +22,11 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
         return false;
     if (HasHips && !std::equal(std::begin(HipOffset), std::end(HipOffset), std::begin(acRhs.HipOffset)))
         return false;
+    if (HasHandCheck != acRhs.HasHandCheck)
+        return false;
+    if (HasHandCheck && (!std::equal(std::begin(LeftHandOffset), std::end(LeftHandOffset), std::begin(acRhs.LeftHandOffset)) ||
+                         !std::equal(std::begin(RightHandOffset), std::end(RightHandOffset), std::begin(acRhs.RightHandOffset))))
+        return false;
     if (HasRootPosition && !std::equal(std::begin(RootPosition), std::end(RootPosition), std::begin(acRhs.RootPosition)))
         return false;
     const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
@@ -57,6 +62,22 @@ void VRPose::Serialize(TiltedPhoques::Buffer::Writer& aWriter) const noexcept
         // Raw bits, as Quaternion_NetQuantize does: world coordinates run to six figures, so quantising them
         // would move the body further than the drag being sent.
         for (const float value : RootPosition)
+        {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            aWriter.WriteBits(bits, 32);
+        }
+    }
+    aWriter.WriteBits(HasHandCheck ? 1 : 0, 1);
+    if (HasHandCheck)
+    {
+        for (const float value : LeftHandOffset)
+        {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            aWriter.WriteBits(bits, 32);
+        }
+        for (const float value : RightHandOffset)
         {
             uint32_t bits = 0;
             std::memcpy(&bits, &value, sizeof(bits));
@@ -113,6 +134,26 @@ void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
     if (HasRootPosition)
     {
         for (float& value : RootPosition)
+        {
+            uint64_t bits = 0;
+            aReader.ReadBits(bits, 32);
+            const uint32_t raw = static_cast<uint32_t>(bits);
+            std::memcpy(&value, &raw, sizeof(value));
+        }
+    }
+    uint64_t hasHandCheck = 0;
+    aReader.ReadBits(hasHandCheck, 1);
+    HasHandCheck = hasHandCheck != 0;
+    if (HasHandCheck)
+    {
+        for (float& value : LeftHandOffset)
+        {
+            uint64_t bits = 0;
+            aReader.ReadBits(bits, 32);
+            const uint32_t raw = static_cast<uint32_t>(bits);
+            std::memcpy(&value, &raw, sizeof(value));
+        }
+        for (float& value : RightHandOffset)
         {
             uint64_t bits = 0;
             aReader.ReadBits(bits, 32);

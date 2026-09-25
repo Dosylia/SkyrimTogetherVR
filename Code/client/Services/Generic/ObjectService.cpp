@@ -1,6 +1,7 @@
 #include <Services/ObjectService.h>
 
 #include <World.h>
+#include <Components.h>
 #include <Events/DisconnectedEvent.h>
 #include <Events/UpdateEvent.h>
 #include <Events/CellChangeEvent.h>
@@ -25,6 +26,9 @@
 #include <Games/TES.h>
 
 #include <inttypes.h>
+#include <array>
+#include <cmath>
+#include <unordered_map>
 
 ObjectService::ObjectService(World& aWorld, entt::dispatcher& aDispatcher, TransportService& aTransport)
     : m_world(aWorld)
@@ -39,6 +43,7 @@ ObjectService::ObjectService(World& aWorld, entt::dispatcher& aDispatcher, Trans
     m_assignObjectConnection = aDispatcher.sink<AssignObjectsResponse>().connect<&ObjectService::OnAssignObjectsResponse>(this);
     m_scriptAnimationConnection = aDispatcher.sink<ScriptAnimationEvent>().connect<&ObjectService::OnScriptAnimationEvent>(this);
     m_scriptAnimationNotifyConnection = aDispatcher.sink<NotifyScriptAnimation>().connect<&ObjectService::OnNotifyScriptAnimation>(this);
+    m_updateConnection = aDispatcher.sink<UpdateEvent>().connect<&ObjectService::OnUpdate>(this);
 
     EventDispatcherManager::Get()->activateEvent.RegisterSink(this);
 }
@@ -105,6 +110,86 @@ bool ShouldSyncObject(const TESObjectREFR* apObject, const Set<const TESObjectRE
         return false;
     default:
         return true;
+    }
+}
+
+namespace
+{
+float Separation(const std::array<float, 3>& acLhs, const std::array<float, 3>& acRhs) noexcept
+{
+    const float dx = acLhs[0] - acRhs[0];
+    const float dy = acLhs[1] - acRhs[1];
+    const float dz = acLhs[2] - acRhs[2];
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+} // namespace
+
+void ObjectService::OnUpdate(const UpdateEvent&) noexcept
+{
+    // Measurement only: nothing here changes what anyone sees.
+    //
+    // This service syncs activation, locks and script animations, and no positions at all. So when a VR player
+    // picks something up with their hands and moves or throws it, the other player sees it sitting where it was.
+    // That is the general shape of "VRIK interactions are not seen by others" (2026-09-25), and the corpse-drag
+    // work of 2026-09-22 is the same problem solved once, for one kind of object.
+    //
+    // Before building that, this says whether it is even reachable: are the objects a player handles in the set
+    // the server assigned us, how often do they move, and by how much. The corpse detector was written on an
+    // assumption instead and fired 207 times across 58 bodies that had merely settled, so this time the numbers
+    // come first.
+    static std::chrono::steady_clock::time_point s_nextSample{};
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_nextSample)
+        return;
+    s_nextSample = now + std::chrono::milliseconds(250);
+
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer)
+        return;
+
+    // Where each object was when it was last looked at. Local to the measurement, so nothing about the service
+    // changes shape for something that only writes to the log.
+    static std::unordered_map<uint32_t, std::array<float, 3>> s_lastPositions;
+
+    // Objects leave the assigned set when a cell is left, and their entries here would outlive them: one that came
+    // back somewhere else would read as having moved there in 250 ms. Dropping the lot occasionally costs one
+    // missed sample per object and keeps the numbers honest.
+    if (s_lastPositions.size() > 4096)
+        s_lastPositions.clear();
+
+    // Enough to name what moved and how far without filling the log if a shelf of clutter goes over.
+    uint32_t reported = 0;
+    auto view = m_world.view<ObjectComponent, FormIdComponent>();
+    for (auto entity : view)
+    {
+        const auto& formIdComponent = view.get<FormIdComponent>(entity);
+        TESObjectREFR* pObject = Cast<TESObjectREFR>(TESForm::GetById(formIdComponent.Id));
+        if (!pObject)
+            continue;
+
+        const std::array<float, 3> position{pObject->position.x, pObject->position.y, pObject->position.z};
+        const auto it = s_lastPositions.find(formIdComponent.Id);
+        if (it == s_lastPositions.end())
+        {
+            s_lastPositions[formIdComponent.Id] = position;
+            continue;
+        }
+
+        const std::array<float, 3> previous = it->second;
+        it->second = position;
+
+        const float moved = Separation(position, previous);
+
+        // Below this is settling and physics jitter, which is exactly what fooled the corpse detector.
+        if (moved < 8.f)
+            continue;
+
+        if (reported++ >= 4)
+            break;
+
+        const std::array<float, 3> playerAt{pPlayer->position.x, pPlayer->position.y, pPlayer->position.z};
+        const float toPlayer = Separation(position, playerAt);
+        spdlog::info("ObjectMove: {:X} moved {:.1f} units in 250 ms, {:.0f} from the player", formIdComponent.Id, moved, toPlayer);
     }
 }
 

@@ -364,6 +364,18 @@ void UI::SetEnemyMeterTarget(uint32_t aHandle, uint16_t aLevel)
     if (!pQueue || !s_createData.Get() || !UIMessageQueue__AddMessage_Real)
         return;
 
+    // The meter menu has to actually be there. Opening the journal or the console tears the HUD's sub-menus down
+    // and builds them again, and for a moment "WSEnemyMeters" is gone while this driver keeps posting updates to
+    // it -- each one allocating a HUDData from the queue's factory for a menu that cannot receive it. Seen's
+    // session on 2026-09-25 is the shape of that: journal and console open for 33 s, closed at 20:50:46 leaving
+    // the menu list as [HUD Menu] alone, three enemy-meter updates sent into the gap, and six seconds later an
+    // access violation on `lock xadd [rcx+8], eax` with a junk pointer -- a reference count being decremented on
+    // something already gone.
+    BSFixedString meterMenu("WSEnemyMeters");
+    UI* pUI = UI::Get();
+    if (!pUI || !pUI->GetMenuOpen(meterMenu))
+        return;
+
     BSFixedString dataName("HUDData");
     void* pData = TiltedPhoques::ThisCall(s_createData, pQueue, &dataName);
     if (!pData)
@@ -374,9 +386,8 @@ void UI::SetEnemyMeterTarget(uint32_t aHandle, uint16_t aLevel)
     *reinterpret_cast<uint16_t*>(pBytes + 0x22) = 0x0101;
     *reinterpret_cast<uint32_t*>(pBytes + 0x28) = aHandle;
 
-    BSFixedString menuName("WSEnemyMeters");
     s_sendingEnemyMeter = true;
-    UIMessageQueue__AddMessage_Real(pQueue, &menuName, UIMessage::kUpdate, pData);
+    UIMessageQueue__AddMessage_Real(pQueue, &meterMenu, UIMessage::kUpdate, pData);
     s_sendingEnemyMeter = false;
 #endif
 }

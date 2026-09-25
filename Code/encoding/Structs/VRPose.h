@@ -89,4 +89,16 @@ struct VRPose
     //! below it: moving the pelvis by itself would pull the legs away from the torso.
     bool HasHips{false};
     float HipOffset[3]{};
+
+    //! Where the sender's own hands are relative to its 3D root, in root space. Sent about once a second
+    //! (HasHandCheck), for the measurement only -- nothing is posed from it.
+    //!
+    //! The hand-offset diagnostic of 2026-09-24 compared a remote copy against **the local player's own body**,
+    //! which is a different character: Seen's log of 2026-09-25 has the copy's arms at 22.8 and 16.0 against his
+    //! own 23.9 and 16.8, so "same arm lengths, different hand height" could never be true and the test could not
+    //! fire. These are the sender's own numbers, so the receiver can compare like with like: what the owner has,
+    //! against what their copy is showing.
+    bool HasHandCheck{false};
+    float LeftHandOffset[3]{};
+    float RightHandOffset[3]{};
 };

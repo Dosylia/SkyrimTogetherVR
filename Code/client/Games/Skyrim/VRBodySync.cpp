@@ -422,6 +422,9 @@ struct RemotePose
     // trackers stop driving the legs the body should go back to its own animation rather than hold the last crouch.
     bool HasHips = false;
     glm::vec3 HipOffset{};
+    // The owner's own hand positions, for the measurement only (see VRPose::HasHandCheck). Never posed from.
+    bool HasHandCheck = false;
+    glm::vec3 HandOffsets[2]{};
 };
 
 std::shared_mutex s_posesLock;
@@ -1032,6 +1035,28 @@ void OnFrameEnd() noexcept
         }
 
         PoseActor(rig, pose, worldOffset);
+
+        // Hands, measured after posing so it reports what is actually being shown, and against the owner's own
+        // numbers. Both sides are the distance from the same person's 3D root in that root's own space, so the
+        // three axes are directly comparable: a difference in z is a hand held at the wrong height, a difference
+        // in x or y is one held too far forward or out to the side.
+        if (pose.HasHandCheck && (rig.Bones[VRPose::kLeftHand].pNode || rig.Bones[VRPose::kLeftHand].pEntry))
+        {
+            static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextHandLog;
+            auto& nextHandLog = s_nextHandLog[formId];
+            if (now >= nextHandLog)
+            {
+                nextHandLog = now + std::chrono::seconds(5);
+                const NiTransform& rootWorld = At<NiTransform>(pRoot, kWorldOffset);
+                const glm::mat3 inverseRoot = glm::transpose(ToGlm(rootWorld.rotate));
+                const glm::vec3 rootAt = ToGlm(rootWorld.translate);
+                const glm::vec3 copyLeft = inverseRoot * (ToGlm(rig.Bones[VRPose::kLeftHand].World().translate) - rootAt);
+                const glm::vec3 copyRight = inverseRoot * (ToGlm(rig.Bones[VRPose::kRightHand].World().translate) - rootAt);
+                spdlog::info("VRBodySync: actor {:X} hands -- owner L({:.1f}, {:.1f}, {:.1f}) R({:.1f}, {:.1f}, {:.1f}); copy L({:.1f}, {:.1f}, {:.1f}) R({:.1f}, {:.1f}, {:.1f})", formId,
+                             pose.HandOffsets[0].x, pose.HandOffsets[0].y, pose.HandOffsets[0].z, pose.HandOffsets[1].x, pose.HandOffsets[1].y, pose.HandOffsets[1].z, copyLeft.x, copyLeft.y,
+                             copyLeft.z, copyRight.x, copyRight.y, copyRight.z);
+            }
+        }
     }
 }
 
@@ -1257,6 +1282,31 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
     // it and none of them change a rotation, which is why a hip tracker did nothing on the other screen while the
     // feet followed. Sent only while the legs are tracked -- without trackers the pelvis is wherever the walk
     // animation put it, and the receiver's own copy of that animation already agrees.
+    // The owner's own hands, about once a second, so the receiver can compare its copy against the person it is a
+    // copy of rather than against whoever happens to be looking. See VRPose::HasHandCheck.
+    aOutPose.HasHandCheck = false;
+    if (nodes[VRPose::kLeftHand] && nodes[VRPose::kRightHand])
+    {
+        static std::chrono::steady_clock::time_point s_nextHandCheck{};
+        if (now >= s_nextHandCheck)
+        {
+            s_nextHandCheck = now + std::chrono::seconds(1);
+            const glm::vec3 rootAt = ToGlm(At<NiTransform>(pRoot, kWorldOffset).translate);
+            const glm::vec3 left = inverseRoot * (ToGlm(At<NiTransform>(nodes[VRPose::kLeftHand], kWorldOffset).translate) - rootAt);
+            const glm::vec3 right = inverseRoot * (ToGlm(At<NiTransform>(nodes[VRPose::kRightHand], kWorldOffset).translate) - rootAt);
+            if (std::isfinite(left.z) && std::isfinite(right.z) && glm::dot(left, left) < 512.f * 512.f && glm::dot(right, right) < 512.f * 512.f)
+            {
+                aOutPose.HasHandCheck = true;
+                aOutPose.LeftHandOffset[0] = left.x;
+                aOutPose.LeftHandOffset[1] = left.y;
+                aOutPose.LeftHandOffset[2] = left.z;
+                aOutPose.RightHandOffset[0] = right.x;
+                aOutPose.RightHandOffset[1] = right.y;
+                aOutPose.RightHandOffset[2] = right.z;
+            }
+        }
+    }
+
     aOutPose.HasHips = false;
     if (cLegs && nodes[VRPose::kPelvis])
     {
@@ -1512,6 +1562,13 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
     pose.HasHips = acPose.HasHips;
     if (acPose.HasHips)
         pose.HipOffset = glm::vec3{acPose.HipOffset[0], acPose.HipOffset[1], acPose.HipOffset[2]};
+
+    pose.HasHandCheck = acPose.HasHandCheck;
+    if (acPose.HasHandCheck)
+    {
+        pose.HandOffsets[0] = glm::vec3{acPose.LeftHandOffset[0], acPose.LeftHandOffset[1], acPose.LeftHandOffset[2]};
+        pose.HandOffsets[1] = glm::vec3{acPose.RightHandOffset[0], acPose.RightHandOffset[1], acPose.RightHandOffset[2]};
+    }
 }
 
 void LogCastOrigin(Actor* apActor, uint32_t aCastingSource) noexcept
