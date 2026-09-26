@@ -458,7 +458,29 @@ template <class T> struct VersionDbPtr
                 if (!m_reported)
                 {
                     m_reported = true;
-                    spdlog::warn("Address id {} did not resolve on this build; whatever uses it does nothing", m_id);
+
+                    // Four ids do not resolve on VR and none of them costs anything. They were each chased down
+                    // on 2026-09-26, and left as bare warnings they would be chased again -- worse, a genuinely
+                    // missing address would be one of thirty-six identical lines instead of the only one.
+                    // Named here with the reason, so a warning means "look at this" again.
+                    //
+                    // Two others, 37313 (Actor::ForceState) and 104359 (SignaturesMatch), are absent from this
+                    // list because their hooks were deleted the same day: both were a commented-out body and a
+                    // call through to the real function, which is what not hooking them already did.
+                    const char* pHarmless = nullptr;
+                    switch (m_id)
+                    {
+                    case 36564: pHarmless = "Main::MainLoop; the hook is an empty placeholder"; break;
+                    case 40412: pHarmless = "the Papyrus VM destructor; the hook is an empty placeholder"; break;
+                    case 104788: pHarmless = "RegisterPapyrusFunction; hooked from the VM vtable instead, see HookBindEverythingToScript"; break;
+                    case 0: pHarmless = "BSTaskletManager thread naming, deliberately disabled on VR"; break;
+                    default: break;
+                    }
+
+                    if (pHarmless)
+                        spdlog::info("Address id {} does not resolve on VR, as expected: {}", m_id, pHarmless);
+                    else
+                        spdlog::warn("Address id {} did not resolve on this build; whatever uses it does nothing", m_id);
                 }
             }
         }

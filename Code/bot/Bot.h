@@ -76,6 +76,9 @@ struct KnownActor
     bool IsPlayer{};
     bool OwnedByUs{};
     std::chrono::steady_clock::time_point LastChange{};
+    //! What this actor was last seen equipping, by base form id. Empty once it unequips. Last, so that
+    //! KnownActor{serverId} still initialises the id.
+    std::vector<uint32_t> Equipped;
 };
 
 //! What a run is allowed to record. A test that collects everything drowns in movement, so a script says what it
@@ -89,6 +92,7 @@ enum class Collect : uint32_t
     Spawn = 1 << 3,
     Party = 1 << 4,
     Movement = 1 << 5,
+    Equipment = 1 << 6,
     All = 0xFFFFFFFF
 };
 
@@ -160,6 +164,8 @@ private:
     //! One line of the report, kept only while recording and only for an enabled kind.
     void Record(Collect aKind, const std::string& acText) noexcept;
     KnownActor& Actor(uint32_t aServerId) noexcept;
+    //! Update-only: never invents a character. Only a spawn may do that.
+    KnownActor* FindActor(uint32_t aServerId) noexcept;
     //! Shared by waitfor and expect. Returns nothing when the condition cannot be parsed.
     std::optional<bool> Evaluate(const std::vector<std::string>& acArgs, std::string& aOutWhy) const noexcept;
     void WriteReport(const std::string& acPath) const noexcept;
@@ -190,6 +196,12 @@ private:
     // Whether this bot has a character at all. It cannot be inferred from m_serverId: the server hands out entity
     // ids from zero, so the first character on a freshly started server legitimately has id 0.
     bool m_hasCharacter{false};
+    //! The grid square last reported to the server, so a walk that crosses one says so.
+    int32_t m_reportedGridX{};
+    int32_t m_reportedGridY{};
+    bool m_gridReported{false};
+    //! True when the cell id is one this bot invented for its grid square rather than a real one from a host.
+    bool m_standaloneCell{false};
     std::string m_serverVersion;
 
     glm::vec3 m_position{};

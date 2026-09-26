@@ -1,4 +1,5 @@
 #include <Services/InventoryService.h>
+#include <EpochMiss.h>
 #include <PerfScope.h>
 
 #include <Messages/RequestObjectInventoryChanges.h>
@@ -184,6 +185,16 @@ void InventoryService::OnNotifyInventoryChanges(const NotifyInventoryChanges& ac
 
             if (localIt != localView.end())
                 pActor = Cast<Actor>(TESForm::GetById(localView.get<FormIdComponent>(*localIt).Id));
+        }
+
+        // Before giving up: was the character here all along, with an epoch one behind? That is a dropped
+        // equipment change rather than an unknown character, and the two look identical from here.
+        if (!pActor)
+        {
+            const auto byIdIt = std::find_if(remoteView.begin(), remoteView.end(), [remoteView, &acMessage](const entt::entity aEntity)
+            { return remoteView.get<RemoteComponent>(aEntity).Id == acMessage.ServerId; });
+            if (byIdIt != remoteView.end())
+                ReportEpochMiss("an equipment change", acMessage.ServerId, acMessage.OwnershipEpoch, remoteView.get<RemoteComponent>(*byIdIt).OwnershipEpoch);
         }
 
         if (!pActor)
@@ -453,6 +464,7 @@ void InventoryService::RunEquipmentSnapshotUpdates() noexcept
         return;
 
     const uint32_t serverId = view.get<LocalComponent>(*it).Id;
+    const uint32_t ownershipEpoch = view.get<LocalComponent>(*it).OwnershipEpoch;
 
     Inventory equipment;
     {
@@ -483,6 +495,13 @@ void InventoryService::RunEquipmentSnapshotUpdates() noexcept
 
     RequestEquipmentChanges request;
     request.ServerId = serverId;
+    // Without this the server drops the message and says nothing: InventoryService::OnEquipmentChanges refuses
+    // any equipment change whose epoch does not match the owner's, and an unset one never does. This snapshot is
+    // the safety net that reconciles equipment when a change event has been missed -- which is exactly what
+    // happens while a player is out of range, since equipment travels in range only -- and it has never once
+    // reached the server. Found on 2026-09-26 by checking the client against the same rule that had caught the
+    // bot four times.
+    request.OwnershipEpoch = ownershipEpoch;
     request.CurrentInventory = equipment;
 
     m_transport.Send(request);

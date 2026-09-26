@@ -1,5 +1,394 @@
 # Skyrim Together VR: TODO
 
+## Goals, in the order they are worth fixing (set 2026-09-25)
+
+1. **No more crashes.**
+2. **The game completely in sync between all players.**
+3. **VRIK interactions seen by everyone.**
+4. **Dead bodies in sync at all times** -- dragging first, then handling another player's body and living NPCs.
+5. **NPCs below floor level** -- they should always be in sync.
+6. **VR weapon hits land where the weapon is.**
+
+Everything below is ordered against these. An item that is shipped but has not been played is marked
+`[x] [untested]` and is **not** finished; it is owed a session. Items that the people playing have confirmed are
+deleted outright, not ticked -- the git history keeps them.
+
+### Where the crash work stands (2026-09-25, end of night)
+
+- [ ] **Correction (2026-09-26): there were no mid-session timeouts, and the churn was not a fault.**
+      The reading of Seen's 21:26 bundle that said "his client dropped five times and that is what broke the
+      world" was wrong, and the fixes that came out of that night stand on their own evidence rather than on it.
+      What the reason codes actually mean, read from `TiltedConnect/Client.cpp`:
+      - `0 kTimeout` is reported only when the **old state was `Connecting`** -- a connection attempt that never
+        completed. His two at 21:16:01 and 21:16:16 are failed attempts to connect after loading a save, not a
+        live connection dropping.
+      - `4 kAborted` comes from `Client::Close()` -- **this client closing the connection itself**. All three of
+        his were deliberate local closes.
+
+      And the 45 actors handed back at 21:19:01 were not a fault either. His grid changes run
+      (5,7) -> (6,7) -> (7,7) -> (8,6) -> (9,6) -> (10,7) -> (11,7) between 21:16 and 21:19: about 25,000 units
+      across Solstheim in three minutes. The game unloaded the cells behind him and the client relinquished what
+      was in them, which is what it is supposed to do. **Lydia was four cells behind him**, at x~29000 while he
+      stood at x~47000, which is the whole of "Seen does not see Lydia at all" at 21:21.
+
+      So: no timeout problem is established, and one reported symptom is explained as correct behaviour. What
+      remains genuinely unexplained from that session is the bandit launched into the sky (21:19), the dead body
+      in the wrong place (21:20) and the spriggan that never lands a hit (21:25) -- all of which happened while he
+      was crossing cells fast, which is worth treating as the common thread instead.
+
+      The `Silence:` line added on 2026-09-25 is kept: it costs nothing and a client that stops talking is still
+      worth knowing about. Its justification is now curiosity rather than a diagnosis.
+
+
+### Goal 1, continued: the diagnostics were a stall source of their own (2026-09-25)
+
+Counted in Seen's 21:26 bundle. A client that stalls stops talking; a client that stops talking is timed out; a
+timeout hands 45 actors away at once, and that churn is where the crashes and the nonsense live. So the cost of
+watching had become part of what was being watched.
+
+
+  What is deliberately kept: the `MessageBoxMenu` probe, because it only fires for a message box and the level-up
+  and respawn boxes are still open questions; `AnimDiag` and `InterpDiag`, which are periodic summaries rather
+  than per-event work; and the new `Silence`, `SinkDiag` and `BodyGrabDiag` lines, which are cheap and are the
+  only evidence for three open goals.
+
+### What is still listed here
+
+Only this week's work is still ticked. 44 items shipped between 2026-09-14 and 2026-09-23 were deleted on
+2026-09-26: they have survived many sessions without being re-reported, which is as close to "confirmed" as an
+unplayed item gets, and the git history keeps every word of them. What is left ticked is from 2026-09-25 and
+-26 and is genuinely unplayed -- that is the list to confirm on the next session.
+
+### Goal 1: the "drives a game menu directly" class is closed (2026-09-26)
+
+The enemy-meter crash was not a null pointer, it was **building a UI message by hand and posting it to a menu
+that was not there**. Swept for others of the same shape: `SetEnemyMeterTarget` is the only place in the client
+that constructs a `HUDData` and posts it. Everything else that talks to the HUD goes through
+`Utils::ShowHudMessage`, which calls the game's own notification function -- the sanctioned path every mod on the
+list uses, and not ours to second-guess. One member, fixed, class closed.
+
+### Goal 2: a copy that goes out of range is never put right when you come back (2026-09-26)
+
+Found by a new bot test rather than by a session, and confirmed in the server's own log.
+
+**The chain.** The server range-filters updates by grid: `uGridsToLoad` is 5, so `IsCellInGridCell` allows two
+cells. A bot walked five cells away and the server reported `0 character updates sent, 321 withheld` -- correct,
+and the point of range filtering. Meanwhile the real actor carries on being moved by its owner. Walk back, and
+the server re-sends the spawn to put the copy right. **The client threw that away**: the copy had never stopped
+existing, so the spawn hit "Character with remote id N is already spawned" and nothing moved. Those warnings are
+all over Seen's logs.
+
+A copy left where it was last seen, while the real thing moved, is a body in the wrong place and a follower that
+looks frozen -- which is two of the four reports from 21:19-21:25 on 2026-09-25.
+
+- [x] **Proved on the server side (2026-09-26).** `-Pair range` now has one bot lose health *while out of
+      range*, where nothing can be sent about it, and requires the other side to know the new value once it walks
+      back. It does: the watcher's record shows `spawn 1 health 55.0` on the return. So the server re-sends a
+      character with its **current** values when it comes back into range, and the only thing standing between
+      that and a correct copy was the client throwing the message away.
+
+- [ ] **The server's two range paths are asymmetric, and the other half is still open.**
+      - When the **character** moves out of a viewer's grid, `OnCharacterExteriorCellChange` sends that viewer a
+        removal. That half works.
+      - When the **viewer** moves, `PlayerService::OnShiftGridCellRequest` re-sends what is now in range and
+        simply `continue`s past what is now out of it -- **no removal is ever sent**.
+
+      So a viewer keeps copies of everything it walked away from. For a player that self-corrects, because the
+      other player moving fires the first path. For anything that stays put -- a corpse above all -- it never
+      does. The client-side refresh above makes the stale copy correct itself on return, which is the safe half of
+      the fix; sending removals is the other half and is **not** done yet, because removals are entity churn and
+      churn is where the crashes have been.
+
+### Goal 2 / the flying bandit: two points that are not a journey (2026-09-26)
+
+**Correction to the entry written earlier today.** That one said `delta` could go negative and walk an actor
+backwards without bound. It cannot: `aTick - first.Tick` is **unsigned**, so a playback tick behind the oldest
+point wraps to an enormous positive value and the existing upper clamp catches it. `Lerp` with delta in [0, 1]
+can only ever place an actor *between* the two points it is given. The lower clamp was added anyway and is
+harmless, but it fixed nothing, and the explanation that came with it was wrong.
+
+Which leaves the real question: if the actor can only be placed between two points, then two points were
+875,458 units apart.
+
+They were. **The buffer records no worldspace and nothing clears it when one changes.** A point from before a
+worldspace change and one from after sit side by side, and the actor is walked between them -- Solstheim to
+somewhere else, two hundred cells, in a tenth of a second. 195 actors displaced at once, at 19:04:11 on
+2026-09-23, is every actor in the world at the moment somebody crossed a boundary.
+
+- [x] **[untested] `AddPoint` drops what is buffered when the next point is more than a cell away.** A cell is
+      4096 units and points arrive about a tenth of a second apart, so nothing legitimate moves that far between
+      two of them: a worldspace change, a fast travel, or bad data. The actor arrives at the new place instead of
+      flying to it. One rule covers all three, and it needs no new field on the wire.
+- [x] **The guard says when it fires (2026-09-26), because the reason for it is a hypothesis.**
+      `JumpDiag: a buffered point was N units from the one before it, at (x, y, z); dropped the buffer so the
+      actor arrives instead of flying. K since the last line.`
+      **How to read it:** cross-check the times against somebody changing worldspace. If they line up, the cause
+      is confirmed. If they do not, the guard is still right -- two points no actor could travel between should
+      never be interpolated -- but the reason written here is not, and the real one is still out there.
+- **What was checked and did not hold up.** The save load at 19:04:20 on 2026-09-23 was suggested as the trigger;
+      it came **nine seconds after** the report, which covers the preceding ten. So the load did not cause it.
+      The window itself shows a flood of "Death sync: health broadcast killed actor 39FB7 (now dead: false)" and
+      an ownership transfer carrying `worldspace: 0, cell: 0, position: (0, 0, 0)` -- a null position, which the
+      new guard also catches, since Solstheim to the origin is about 47,000 units. Whether the 875,458 was a
+      worldspace change, a null position or something else is **not established**, and the guard does not depend
+      on knowing.
+- **Not bot-testable.** The bug is in the client's interpolation, which the bot does not implement -- it reads
+      positions, it does not smooth between them. The suite confirms the guard does not disturb ordinary movement
+      (the range test walks 20,000 units in ~300-unit steps), and that is all it can say.
+
+### The next session's logs read themselves now (2026-09-26)
+
+Eight measurements were shipped this week and none of them was worth much if reading them meant grepping for an
+hour. `Tools\VR\session-report.py` now knows all of them and, more to the point, says what each **number**
+means rather than whether the line appeared.
+
+Running it on the 21:26 bundle immediately paid for itself twice:
+
+- [ ] **An actor was found 875,458 units below where it had last been placed** (2026-09-23, character 30195BD;
+      2,348 units on Lydia in the same session). Goal 5 has had evidence sitting in the logs for three days.
+- [x] **And it caught me writing a false conclusion.** The report first announced that VR archery never sets the
+      attack state -- states 0 and 2 only -- which would have meant the nocked arrow must be attached by hand.
+      Then: whose projectiles were those? The player's own launches in that window are `weapon 0, ammo 0,
+      spell 12FD0`. **Seen cast spells and never drew a bow.** The absent bow states meant nothing at all.
+      The analyser now checks for a bow shot before drawing that conclusion and says INCONCLUSIVE otherwise. A
+      tool that states a verdict the data does not support is worse than no tool, because it is believed.
+
+- [x] **I had also duplicated a diagnostic without checking.** A `SinkDiag` has existed since 2026-09-23,
+      measuring the same thing with different words; mine, added on 2026-09-26, sat five lines below it. The
+      original survives -- its numbers are comparable across sessions, which is the whole point of a measurement
+      -- and has gained the `has controller` field that mine had.
+
+### Goal 2: a corpse that still walks, and why (2026-09-26)
+
+A death is broadcast to **every** player rather than only those in range, deliberately, so that nobody holding
+the actor can miss it. The receiving client then applies it only when the copy's ownership epoch matches the
+message's -- and `NotifyOwnershipTransfer` **is** range-filtered (`SendToPlayersInRange`). So:
+
+1. A player walks out of range.
+2. The actor changes hands. That player never learns the new epoch.
+3. The actor dies. The death reaches them, and their own handler throws it away, because their copy's epoch is
+   one behind.
+4. They walk back. The epoch is refreshed by the re-sent spawn -- but the death is long gone.
+
+They are left with a corpse still walking around, for the rest of the session.
+
+- [x] **[untested] The stale-copy repair now applies death state.** The spawn is the last thing that still knows,
+      and it carries `IsDead`. Position, health, weapon state, factions and death are all repaired now; inventory
+      is still only compared.
+- [x] **The arrival-side drops are counted now (2026-09-26), so the next session decides this instead of me.**
+      A dropped message and a character we simply do not have were indistinguishable from inside those handlers:
+      both ended in the same `return`. The id lookup and the epoch test are separate now, and a message for a
+      character this client *does* hold, refused only for its epoch, says so:
+      `EpochMiss: dropped a death state change for character N -- the message is epoch 3 and this copy is epoch 2.
+      K of these since the last line.` Wired into actor values, the health broadcast, death and equipment.
+      **How to read it:** none at all means the equality test is harmless and should stay. A steady drip -- above
+      all on death -- means copies are going stale in normal play and the test should become "not older" rather
+      than "equal".
+- [ ] **The receiving-side epoch equality check is the underlying issue and is left alone for now.** Six handlers
+      require the copy's epoch to equal the message's -- health, death, equipment, inventory. The server has
+      already checked the sender's ownership before broadcasting, so re-checking on arrival mostly provides a way
+      to drop valid state. A monotonic test (accept anything not *older*, and take the newer epoch) would be
+      better than equality. Not changed without evidence: the equality check presumably exists to reject messages
+      that overtake a transfer, and the spawn refresh does heal the gap on return.
+- [x] **`-Pair deadfar`**: one bot walks five cells out, dies where nobody can watch, and walks back. The other
+      must have it dead. Passes.
+
+### Goal 2: factions are the third thing repaired on a stale copy (2026-09-26)
+
+- [x] **[untested] A copy that comes back into range now gets its factions put right.** Faction changes are
+      range-filtered like health and equipment, so a character that turned hostile while this client was away is
+      still friendly on the copy -- and a copy in the wrong faction is a creature that squares up to somebody and
+      never swings. That is the shape of the Burned Spriggan of 2026-09-25, which spent a fight trying to attack
+      Lydia and never landing one. The stale-copy gate now repairs position, health, weapon state and factions;
+      inventory is still only compared.
+
+### The pairs run five at a time now: 400 s to 277 s (2026-09-26)
+
+- [x] **`Tools\VRun-all-pairs.ps1`.** The pairs ran one after another because a watcher resolves "other" to
+      whoever else is in the world, so two pairs on one server would see four bots. They do not have to share a
+      world: the server's range check returns false for a different worldspace before it looks at anything else,
+      so a pair in its own worldspace is invisible to the others. Same scripts, same assertions, wall time only.
+      Batched three pairs at a time, because `GameServer:uMaxPlayerCount` is 8 and its own description says going
+      above that is not recommended -- that setting belongs to the server people play on, so the batch is sized to
+      it rather than the other way round. **Whole suite: 277 s for ten scripts, from 400 s for nine.**
+
+- [x] **The bot was inventing characters out of other people's deaths.** Running five pairs at once turned up a
+      third copy in `churn2` -- `1 health unknown`, no name. A death is broadcast to **every** player rather than
+      only those in range, deliberately, so that nobody holding the actor can miss it; a client that does not hold
+      it is meant to ignore the message. The bot's handlers called `Actor(id)`, which *creates*, so every death
+      anywhere in the world conjured a character it had never been given. Same for value and equipment notifies.
+      Only a spawn may invent a character now; the rest update or return.
+      Worth noting what this nearly became: the first reading was "a removal is being missed under load", which
+      would have been a product bug reported on the strength of a test artifact. The three copies were named in
+      the report, and their names said otherwise.
+
+- [x] **The version pre-flight is real now.** It was added on 2026-09-25 and never wired in, and skew cost time
+      twice more the same day -- a client built mid-change while the server stayed behind. Both harnesses now
+      compare the bot against the server's log before running and say exactly what to rebuild.
+
+### The silent drop is now impossible to miss (2026-09-26)
+
+Five bugs of one shape in a fortnight -- four in the bot, one in the client -- all invisible for the same
+structural reason: **the protocol has no negative acknowledgement.** The send succeeds, the server discards the
+message, and the only symptom is that the world quietly disagrees. Fixing each instance does nothing about the
+sixth, so the shape itself is what got fixed.
+
+- [x] **The server says when it throws a message away.** `ReportEpochDrop` in `Code/server/EpochDrop.h`, rate
+      limited per kind: *"Dropped an actor value change for actor 1: the sender's ownership epoch is 2 and this
+      server holds 1. Nothing was applied and the sender was not told."* Wired into actor values, max values,
+      death state and equipment.
+      The equipment one already logged -- at `spdlog::debug`, which never reaches the file. A silent drop whose
+      only record is an invisible log line is not a diagnostic.
+
+- [x] **The harness fails a run in which the server threw anything away.** This is the part that matters.
+      Proved by breaking the bot on purpose: with a deliberately wrong epoch, **`health-sign.txt` still reported
+      "1 of 1 runs passed"** while every health change was being rejected, because the script asserts on the
+      bot's own bookkeeping rather than on what arrived. The harness now reads the server's log for the run and
+      calls that a failure. Restored, and the whole suite is clean.
+
+      So a test can no longer pass while the server is discarding the very messages it is meant to be exercising.
+      That was true of `health-sign.txt` from the day it was written, and it is the third time this month a green
+      result has turned out to mean nothing.
+
+### Swept and clean, so nobody looks again
+
+- Every `Notify*` the server sends has a client sink, except `NotifySetTimeResult` (an admin command's reply,
+  nobody listens, harmless).
+- No `Request*` the client sends is unhandled by the server. `RequestObjectInventoryChanges` is vestigial: an
+  `#include` in the client and a forward declaration on the server, never constructed.
+
+### The same rule, turned on the real client -- and it found one (2026-09-26)
+
+The epoch trap caught the bot four times, which made it worth asking whether the **client** has the same hole
+anywhere. It does, or did: one of the seven request messages that carry an epoch.
+
+- [x] **[untested] The periodic equipment snapshot has never reached the server.**
+      `InventoryService` sends `RequestEquipmentChanges` from two places. The event-driven one, when the player
+      equips something, sets the epoch. The **snapshot** -- the safety net that sends the whole worn inventory
+      when it notices it has drifted -- did not, and `OnEquipmentChanges` refuses any equipment change whose epoch
+      does not match the owner's. It logged "Equipment snapshot sent: N worn entries" every time and the server
+      threw every one away.
+
+      This is the mechanism that is supposed to repair equipment when a change event has been missed, and missing
+      change events is exactly what happens while a player is out of range, because equipment travels in range
+      only. So the repair for the "not swapping weapons" family existed, ran, logged that it had run, and did
+      nothing at all.
+
+      The other six are correct; each was checked individually rather than counted.
+
+### The epoch rule, swept to the end (2026-09-26)
+
+Every `Request*` message the bot sends was checked against the rule rather than waiting for the next one to bite.
+Seven request messages carry an `OwnershipEpoch`; the bot sends four of them.
+
+- [x] `RequestActorValueChanges` -- was dropped, fixed 2026-09-25.
+- [x] `RequestDeathStateChange` -- added with the epoch, 2026-09-25.
+- [x] `RequestEquipmentChanges` -- was dropped, fixed 2026-09-26.
+- [x] **`RequestOwnershipTransfer` -- was dropped, fixed 2026-09-26.** The bot logged "Server handed us actor X;
+      handing it back (a bot never owns anything)" and the hand-back was refused every time, so the bot went on
+      owning every actor it had just announced it was refusing. **Not exercised by the suite**: a world of bots has
+      no NPCs, so the server never hands one over. The fix is right -- `OnOwnershipTransferRequest` demonstrably
+      requires the epoch -- but it is unproven until a bot runs beside real players.
+- `RequestHealthChangeBroadcast` carries no epoch by design: the whole point is hurting somebody else's actor.
+- `RequestInventoryChanges`, `RequestActorMaxValueChanges` and `RequestOwnershipClaim` carry one, and the bot does
+  not send them. Anything that starts sending one needs the epoch first.
+
+### The harness now names a version skew instead of calling it a failure
+
+- [x] A bot refused at the door exits 2 with no checks run, and the summary said "0 of 1 runs passed" -- which
+      reads as a broken test and is a stale build. It cost time twice. Exit 2 now says so explicitly, and says
+      what to do: rebuild the server, the runner and the bot together.
+      The cause both times was binaries built minutes apart while the working tree moved between them. The
+      version is a hash of the uncommitted diff, so it is only stable while nothing changes -- which means the
+      three binaries have to be built in one go, not one at a time as the work proceeds.
+
+### Bot: equipment, and the same silent-drop trap for the third time (2026-09-26)
+
+- [x] **Every equipment change the bot ever sent was discarded by the server.** `RequestEquipmentChanges` carries
+      an `OwnershipEpoch` and the bot did not set it, exactly as with `RequestActorValueChanges` on 2026-09-25.
+      That is the same trap in a third message, and it is worth naming as a pattern: **anything the bot asks the
+      server to change needs the epoch, and the server drops it silently when it is missing.** Any new bot command
+      that sends a Request* message should be checked against that before it is believed.
+- [x] **The bot can hear equipment now.** It could send changes and never receive one, so nothing could be
+      asserted about whether they arrive. `NotifyEquipmentChanges` is tracked per actor and scripts can ask
+      `equipped <who> <baseId>`.
+- [x] **Conditions can be negated: `not <condition>`.** Without it a script could say "the sword appeared" but
+      never "the sword was put away", which is half a test -- and the equip test had exactly that hole in it,
+      complete with a log line claiming to check something it did not.
+- [x] **`-Pair equip`**: one bot draws a sword and sheathes it, the other must be told about both. Equipment
+      travels in range only, the same filter that made a returning player come back with the wrong health, and
+      nothing had ever checked that it arrives even at close range. It does.
+
+### Bot: it can finally test range at all
+
+
+### Goal 4: dead bodies. The cause is known and needs no further logs.
+
+- [ ] **Dragging a body you do not own is invisible to everyone, by construction.**
+      The send path is gated on ownership -- `AnimationSystem` reads a dead actor's bones only for "a body this
+      machine owns". The thing that used to claim a body you had grabbed, `RunBodyGrabUpdates`, was **removed on
+      2026-09-24** because its test ("a dead body more than 32 units from its network position") is true of
+      corpses that have merely settled: it fired 207 times across 58 bodies in one session and crashed the
+      receiver. Nothing replaced it. So a corpse owned by the other player can be dragged all night and nobody
+      else will see a thing.
+      This is the 20:45 Lurker of 2026-09-25, and it explains it without Emma's log: Seen joined first and owned
+      most of the world, including, in all likelihood, that Lurker.
+
+      **The fix is a claim, and the claim needs a test that cannot false-positive.** A settling ragdoll comes to
+      rest in a second or two; a body being dragged keeps moving for as long as someone drags it. So the
+      candidate is *sustained* motion within arm's reach, not distance from a network position.
+      **Measurement shipped, claims nothing:** `VRBodySync::ObserveRemoteBodyMotion` watches dead bodies this
+      client does not own, within 400 units, and logs
+      `BodyGrabDiag: remote body N has been moving here for M ms, D units travelled, P from the player`
+      after a full second of continuous movement. One session says how often that is true when nobody is
+      grabbing anything -- which is the number the old version never had -- and the threshold follows from it.
+      Only then does a claim go in, and it goes in rate limited.
+
+### Goal 5: NPCs below floor level
+
+- [ ] **Never measured until now.** `ForcePosition` puts a remote actor exactly where the network says on every
+      frame, so an actor found *below* that target on the way in has sunk locally between frames -- which is the
+      bug exactly: the owner sees an NPC on the floor, the other player sees it in the cellar. An owner genuinely
+      falling drags the target down too, so a real fall shows no gap; only a local divergence does.
+      **Measurement shipped:** `SinkDiag: N remote actors were below where the network put them; worst X (name)
+      by D units, has controller yes/no`, every 10 s.
+      **Second measurement, 2026-09-26.** `Actor::ForcePosition` gives up on moving the character controller when
+      physics step timing is not ready yet, on the stated assumption that "interpolation will catch the controller
+      up once physics timing becomes available". That is an assumption, and an actor below the floor is what it
+      looks like when it is false: the reference sits where the network says while the controller, which is what
+      keeps a body on the ground, is somewhere else. `ControllerDiag: N of M remote placements could not move the
+      character controller with the reference`, every 10 s. Occasional is a controller waiting a frame for its
+      first step, which is what the code expects. Consistently high is the assumption failing, and then SinkDiag's
+      `has controller` field says for which actors.
+
+      **The other suspect is already in the code.** `HookSetPosition` moves every non-player actor with
+      `aUpdateCharController = false`, under a comment reading "It just works TM". The character controller is
+      what keeps a body standing on the ground; moving the reference without it is a good way to end up under the
+      floor. The `has controller` field in the line above is there to test that idea against a real session
+      before anything is changed, because that flag is upstream code and flipping it blind is how a night gets
+      lost.
+
+### Test suite
+
+- [x] **Faster again, and steadier with it (2026-09-26).** The two long fixed waits are gone: a watcher that
+      sits for 42 seconds and then looks is slower *and* flakier than one that waits for the thing it came to see.
+      - `range`: the health the other bot lost while out of range can only arrive on the spawn the server re-sends
+        when it walks back, so waiting for that value **is** waiting for the round trip.
+      - `churn2`: "present" looks the same mid-churn as after it, so the two halves now agree on a marker -- the
+        acting bot sets health 77 when its last round is done, and the watcher waits for that. 65 s to 47 s.
+      - `--host-timeout` is 2 in the harness rather than 8: that timeout is how long a bot looks for a **human**
+        host before going in standalone, and in a harness run there is never a human.
+
+      Nine scripts including five two-sided ones: **410 s**, against 415 s for seven before. `range` and `churn2`
+      were each run three times in a row afterwards to confirm the tighter timing did not buy flakiness.
+
+- [x] **Faster with no loss of coverage (2026-09-25).** The harness waited a fixed 5 s for the server and 14 s for
+      the watching bot; both are polls now -- the port, and the bot's own "In the world" line. `-Script` takes a
+      list, so `-Script "a.txt,b.txt"` runs both against one server and one watching bot instead of standing the
+      whole thing up again per script. Whole suite, seven scripts including three two-sided ones: **345 s**.
+      The rest is scripted scenario time, which is the coverage itself, so nothing further was trimmed.
+
+
 Plan for getting from "co-op works" to "smooth, and easy for other people to set up".
 Items are ordered by priority inside each section. Details on existing bugs are in
 `KNOWN_ISSUES.md`.
@@ -19,28 +408,6 @@ and pdb from there. Both players run `collect-logs.bat` after each session and n
 hand; spell casting and the held spell in the hands; arrows seen leaving the other player's bow; Lydia follows,
 fights, and attacks the other player; sync of same-kind levelled bandits.
 
-- [x] **[untested] Same symptom on 2026-09-19 evening, second half of the cause.** Three logs (host, Seen, Elbios)
-      side by side: every reconnect was manual (`Disconnected from server 4` is the client closing on purpose), the
-      other copies were fed and at the right height until each one, and "the player is still here, we can hurt each
-      other, we just can't see him" is a copy in its unrecoverable bleedout. Two paths still put it there: the
-      owner's own death arrives in `OnActorValueChanges` as a health at or below zero and was applied as is
-      (`corrected from 30 to the owner's -4`, 19:52:54), and his respawn gives everyone a fresh copy built from the
-      server's stored values, which are the ones from his death (`corrected from -4 to the owner's 125` on the
-      copy spawned one second earlier, on both other clients, 19:52:58 and 19:53:03). A copy born down never gets
-      up when the real health arrives. Now: `StandingValues` clamps a player copy's spawn health to 1, and the
-      owner-health path clamps to 1 (`kept at 1 health instead of the owner's -4; a copy never goes down`). Built
-      pinned to the friend's server string (`v1.8.0-62-g9163b26b-dirty.db0f49e`) so all three could swap the exe
-      without touching the server; the pin is a one-off in `modules/version.lua`, reverted after each build.
-      Still unexplained: Seen's reconnect at 19:44:08 (nobody had died yet), and Elbios's game ending five
-      seconds after his second respawn (19:57:39) with no crash log in his bundle.
-- [x] **[untested] One player stops seeing the other until "he reconnects".** The reconnect was the cure the
-      players applied, not the cause. His copy on the other side was in the data the whole time (3D, actions,
-      equipment, even taking an arrow) but lying in the grass: `OnActorValueChanges` skipped health for every remote
-      actor, so a player's copy only ever *lost* health (damage deltas arrive, healing never did), and copies are
-      essential with no bleedout recovery, so at zero the copy went down for good. Since 2026-09-19 the owner's
-      broadcast health is applied to remote player copies, a delta can't take a copy below 1, and a local hit never
-      reports a kill on a copy. Log: `Remote player X copy health corrected ...`, `... kept at 1 health ...`,
-      `... would have been downed by a local hit`. Seen 09-18 21:56, 09-19 09:14 and 10:26, always after fights.
 - [ ] **Different animals on each screen.** The owner's base form now travels on both spawn paths
       (`CharacterSpawnRequest.BaseId`, `AssignCharacterResponse.BaseId`). Same name or same race: synced normally.
       A different creature (fox at a rabbit's reference, spider at a bear's): adopted and positioned by its owner,
@@ -48,14 +415,6 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       instead was tried on 2026-09-18 and gave each player private bandits; never again. What remains is
       ownership: the bear the friend was fighting vanished when the host walked out of range and dropped it
       (see the ownership rework below). Levels differ between variants; cosmetic.
-- [x] **[untested] Sliding instead of walking: wrong function skipped on VR.** `MotionDiag` settled it on 2026-09-20:
-      every moving remote NPC copy on the receiving side had bones that never changed (201 of 201 samples at
-      07:58), so the animation graph was not advancing. Cause: the remote-actor skip (`HookActorProcess`) hooks
-      SE id 37356, the actor's AI step; TiltedEvolutionVR's VR table mapped that id to `0x5e0e20`, which the
-      public VR database identifies as SE 36365, the actor's whole per-frame update. Skipping it froze the graph.
-      The override now points at `0x6226a0`, the database's address for 37356 (it sits 0x40 after 37354 exactly
-      as in SE). Watch for: remote NPC copies fighting their network position (AI now runs on them locally, as
-      on SE upstream where the interpolation wins), and ragdolls of remote corpses.
 - [ ] **NPC under the ground for one player only** (Durak, a rabbit; last seen 2026-09-19). Not seen since, and
       nothing was changed for it on purpose. Two changes since then could have taken it away by accident: the AI
       step fix (remote actors' animation graphs advance again, so their ground snap runs) and the health clamp on
@@ -86,21 +445,12 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       pose keeps writing the sender's bone rotations over it, so every bone jerks between the two each frame.
       Worth checking against `VRBodySync` whether the copy is in a hit, ragdoll or "drop" animation state during
       those frames and skipping the pose then, as it already does for dead and bleeding-out bodies.
-- [x] **[untested] VR tab Disconnect reconnects by itself.** Now routed through `VRConnectService::Toggle`. Was: It closes the socket through the overlay client, which the
-      auto-reconnect treats as a dropped line (`attempt 2` five seconds later, 01:55:37). Route it through
-      `VRConnectService` so a chosen disconnect stays disconnected.
 - [ ] **[untested] Whiterun gate: is the second vanish cause the worldspace change?** Logging in place on both
       sides (`WorldDiag` on the server for every remove and re-send of a player's copy on a cell or worldspace
       change, and for every grid shift; `WorldDiag: server removed player copy` on the client with our worldspace
       and cell). Test: run `STBot.exe scripts\stand.txt`, then walk through the Whiterun gate and back out. The
       copy must go when you are inside and come back when you are out. If it does not come back, the server
       log names the decision that withheld it.
-- [x] **[untested] Invisible attacker (2026-09-20 14:50).** A reference the owner drives but this game cannot find
-      (`Failed to retrieve Actor 10DE94`, a Novice Conjurer, five times while "something" attacked) was simply
-      not spawned. Now a copy of the owner's base stands in (`Stand-in: reference ...`), registered as a ghost;
-      if the local reference loads later it is disabled (`Ghost: reference ... loaded after its stand-in`).
-- [x] **[untested] Hand-off flips a creature's kind (troll on one side, wolf on the other, 14:50).** A client
-      refuses a hand-off for a reference that has a ghost here (`Hand-off ... declined`).
 - [ ] **Level-up and death end at the main menu, connected only (07:58, 11:46, 11:55, 14:42 x2, 15:08).** Solo
       the level-up is fine (15:35 test): the attribute box closes from the level-up code itself
       (`SkyrimVR.exe+0x8d93d2`) and play goes on. Connected, the box is closed by `SkyrimVR.exe+0xf207f7`
@@ -149,30 +499,12 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       `last move sent N ms ago`; a value over 3000 on a paused player would confirm the silence. Also needed:
       the server log from the host (`Handoff: ... silent` vs `out of its range`), which lives in the host's
       Server folder.
-- [x] **[untested] Empty hands at spawn ("spawn weapon not displayed", "we always spawn with empty hands").**
-      The copy's hands were compared by the container's worn flags, and SetInventory sets those (it equips worn
-      entries before the copy has its 3D), so every arrival logged "1 hand items wanted, 1 held now" and skipped
-      the equip; the weapon only showed once the owner re-equipped it and a real equip event arrived. The client
-      now keeps its own record of what it put in each copy's hands (empty on arrival) and equips from that
-      (`hands on arrival: ... put there by us`). Real equip events update the record. Spells unchanged.
-- [x] **[untested] Full body tracking (SkyrimVR FBT, Nexus 185070) shown to the other player.** The pose now
-      carries seven lower-body bones (pelvis, thighs, calves, feet) behind a HasLegs bit. They are captured only
-      while the FBT plugin is loaded on the sender (module name containing "fbt" or "fullbody", logged as
-      `VRBodySync: full body tracking plugin ... is loaded`); everyone else sends the upper body as before and the
-      copy's legs stay on the walk animation. The receiver needs nothing installed. Rotations only: a crouch that
-      lowers the pelvis shows as bent legs on a body that does not sink. Encoding change, so client and server
-      both change. Not tested: nobody here has trackers yet. The plugin is `SkyrimVR-FBT.dll` (1.0.3 download
-      checked). Its fbt.ini also moves the pelvis (WaistMode 1, position + rotation) and bends the lower spine
-      (SpineBridge); neither position is sent, so a tracked crouch shows as bent legs on a body that does not
-      sink. The mod's kick damage on an NPC the other player owns is a separate test.
 - [ ] **Quest dialogue heard twice (15:05).** Upstream syncs the other player's dialogue lines and subtitles; with
       both in the same conversation each hears both. Decide: only the speaker's own conversation.
 - [ ] **Grey hills (15:01).** Missing distant terrain textures; a screenshot exists. Likely the game's LOD stream
       under memory pressure, not sync. Check once with the game alone.
 - [ ] **Nocked arrow not shown** on the other player's bow (the arrow leaves fine). The nocked arrow is an
       animation attachment and VR players never play the draw animation.
-- [x] **[untested] Bandits naked.** `Actor::IsWearingBodyPiece` answers from the container entries on VR (a worn
-      armour flagged as a body piece), so the once-a-second re-equip check is on again (2026-09-19).
 - [ ] **[untested] Crash when quitting.** Read from the DLL's disassembly (2026-09-19): Enchantment Art Extender's
       equip handler reads the `UI` singleton (`SkyrimVR+0x1F83200`, our id 400327) and tests `numPausesGame`
       (`+0x160`); at quit the singleton is already destroyed while our disconnect handler was still deleting remote
@@ -183,20 +515,6 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       with inverted polarity and as a dword (TiltedEvolutionVR, checked against the VR prologue); ours passed bools
       through, so the death fade did nothing and the respawn fade-in faded to black ("bright light, then black
       screen", 10:39 on the 19th). Fixed 2026-09-19, untested.
-- [x] **[untested] Game died at startup on the first build after the upstream merge (2026-09-22 21:33).** The
-      merge made the VR build load SKSE itself. Upstream added a `LoadScriptExtender()` call to `RunTiltedInit`;
-      before the merge that function existed but was spelled `LoadScriptExender`, a typo, and nothing ever called
-      it, so VR had always let the `d3dx9_42` preloader FUS ships bring SKSE VR up once the game was ready.
-      SKSE VR initializes from its DllMain, so calling it there loads every SKSE plugin against a game that has
-      not finished starting: `sksevr.log` stops at `checking plugin CombatMusicFixNG.dll`, that plugin logged its
-      version at 21:33:01.561 and the process died 7 ms later on a null write in ntdll, with only SKSE and that
-      plugin on the stack. No mod on this machine had changed in days. The call is now `#ifndef SKYRIMVR`, which
-      restores exactly what worked before the merge and leaves SE on upstream's path. It also stops
-      `g_ScriptExtenderStarting` being flipped, which is the flag that keeps EngineFixesVR out of this launcher
-      (our own comment in `FileMapping.cpp` says it crashes under it), so that was a second failure waiting a few
-      plugins later in the alphabet. `IsScriptExtenderLoaded` on VR now asks the process for the sksevr module
-      rather than reporting on a handle we no longer hold, so `CheckInstall` stops claiming SKSE is missing.
-      Worth watching on the next merge: upstream calling a function of ours that had been dead code.
 
 ## 0. Session of 2026-09-25: the bot was testing itself, and one real bug fell out of fixing that
 
@@ -213,44 +531,12 @@ subtract, from the day they were written until today. They pass now for a better
 is still a local read: **the only script that tests the wire is `relay-watcher.txt`**, which asserts solely about
 the other client.
 
-- [x] **Ownership epoch.** Taken from `AssignCharacterResponse`, sent on every request, cleared on disconnect.
-- [x] **Death was never sent.** `die` set health to -4 and stopped there; `RequestDeathStateChange` went out for
-      nobody, so no other client could ever be told. Now sent on `die` and cleared on `respawn`.
-- [x] **Spawns were dropped.** A spawn carries the health and death state the server holds, and it is the only
-      way a bot joining late learns them -- the bot filed it under players and recorded no character at all.
-- [x] **`known other` answered from the player list.** It passed the instant the server mentioned somebody, so a
-      check after a reconnect ran against an empty world instead of waiting for the character to arrive. It now
-      means what it says: a character copy exists.
-- [x] **Reconnects kept the old world.** `m_actors` survived a disconnect, so a post-reconnect assertion could be
-      satisfied by a value the server never resent.
-- [x] **Server id 0 was being used as "no character".** The server hands out entity ids from zero, so the bot that
-      connects first to a freshly started server is given id 0 -- and every guard of the form `if (!m_serverId)`
-      then made its own actions do nothing at all. The first `hit` ever sent was swallowed exactly this way, with
-      the script reporting success for having asked. There is now an explicit `m_hasCharacter`, and conditions that
-      cannot resolve a name return a real sentinel instead of zero. Whichever bot connects first was the affected
-      one, which in every pair is the half doing the checking.
 
 ### Now verified across the wire, having previously only been asserted
 
-- [x] **Damage lowers the health the server stores.** The sign fix of 2026-09-24 was marked untested for a day.
-      `pvp-watcher.txt` now hits the other player for 30, reconnects so the server has to rebuild that character
-      from what it holds, and requires the copy to arrive at 70. It failed at 100 while the hit was being
-      swallowed, so the check is known to be able to fail.
 
 ### The bug that came out of it
 
-- [x] **A respawned player is rebuilt at the health they died on.** The server puts the body back and tells the
-      others to respawn it, but never restores the health it stores for that character. Every copy built from
-      that moment -- someone walking into range, someone reconnecting, an ownership hand-off -- is handed the
-      death value. `PlayerService::OnPlayerRespawnRequest` now restores stored health to the maximum when it is
-      at or below zero, tells everyone in range, and clears the death flag.
-
-      Proved both ways: with the fix disabled the watcher is handed `spawn health -4.0` and fails; with it
-      restored the same spawn arrives at 100. This is the first product bug the bot has caught on its own.
-
-      **This is a candidate cause of the friend's health bar being wrong** (section 3), and it needs a PvP
-      session to confirm -- but it is no longer a guess: a character can demonstrably exist at negative health
-      on another client with nothing to correct it.
 
 ### Session of 2026-09-25, 21:15-21:26 (Seen's logs): one cause behind most of it
 
@@ -258,45 +544,6 @@ Reported: a bandit launched into the sky (21:19), a dead body in the wrong place
 all and frozen (21:21), a Burned Spriggan trying to attack and never landing one (21:25), and the health bar
 working perfectly. Almost all of it is downstream of one thing.
 
-- [x] **Seen's client dropped five times and that is what broke the world.**
-      `Disconnected from server 0` (kTimeout) at 21:16:01 and 21:16:16, then `4` (kAborted) at 21:16:24, 21:22:39
-      and 21:23:55. At **21:19:01.484 his client handed back 45 actors in one burst** -- "Transferring ownership
-      of local actor" 45 times, each followed by "Actor removed" -- with no cell change anywhere near it.
-      Lydia (`A2C94`) was one of them: removed 21:19:01, **not spawned again until 21:24:30**, a gap of five and a
-      half minutes that contains the 21:21 report exactly. The bandit through the sky (21:19), the body in the
-      wrong place (21:20) and the spriggan that cannot land a hit (21:25) all sit on the same churn: an actor
-      whose owner changes mid-action, or whose updates stop arriving, is an actor doing nonsense.
-      He had **loaded a save at 21:15:38** and the first timeout followed 23 seconds later. "Seenfront joined
-      first" matches too: joining first means owning the most, so a drop costs the most.
-
-- [x] **A second crash, and it was ours: mimalloc handed a pointer it never allocated.**
-      `_mi_free_delayed_block + 0x27d`, reached through **`Hook_aligned_free`**, dereferencing `0x7ffa2f938d28` --
-      an address in the region where **DLLs are mapped**, not where any heap lives.
-      `Code/client/Games/Memory.cpp` hooks the game's imports of `malloc`/`free`/`_aligned_malloc`/`_aligned_free`
-      and sends them all to mimalloc. The game is not the only thing in the process: a block allocated before
-      those hooks went in, or by a DLL carrying its own CRT, is still freed through the game's imports, and
-      mimalloc walks it as though it were one of its own. The exit-time guard right above it was written for this
-      exact failure ("a plugin string that isn't a heap block"); it was simply never true that it only happens
-      while quitting.
-      `free`, `_aligned_free` and `_msize` now ask `mi_is_in_heap_region` first and hand anything else to the real
-      CRT entry, resolved once at startup.
-
-- [x] **A diagnostic of ours was making it worse.** 128 "Mod update took ..." warnings in eleven minutes, and
-      **54 of them name `CharacterService::RunRemotePlayerDiag`** at 20 to 30 ms a time -- a dropped frame or two
-      every five seconds, on a client that was already timing out. The cost is `VRBodySync::DescribeBody`, which
-      walks the whole skeleton by name and measures it. The measuring now runs every 30 s; the cheap corrective
-      pass that clears an invisible copy keeps its five seconds. (Worst single stall was 316 ms in
-      `OverlayService::OnUpdate`, once, at overlay creation after the save load -- not chased.)
-
-- [x] **"SKSE VR is not loaded" was a lie.** Logged twice on 2026-09-25 while his crash dump lists
-      `sksevr_1_4_15.dll` as loaded. `GetSKSEStyleExeVersion` trimmed a trailing empty patch number with
-      `find_last_of("_0")`, which matches an underscore as happily as a zero: a version string without that
-      trailing ".0" was cut down to "1_" and the module searched for became `sksevr_1_.dll`. Only a real trailing
-      "_0" is removed now. The flag also travels to the server, but the server only refuses when SKSE is *active*
-      and disallowed, so the false negative cost nothing beyond a frightening message in the headset.
-
-- [x] **The health bar is confirmed working**, by the people playing. That is the respawn-health fix and the
-      damage-sign fix landing together.
 
 - [ ] **Why does a fresh connection time out at all?** This is now the top question. A client that has just
       joined takes the whole world at once -- 30 to 40 `Spawn Actor` lines land in a single millisecond -- and the
@@ -308,22 +555,6 @@ working perfectly. Almost all of it is downstream of one thing.
 
 ### Session of 2026-09-25, 20:44-20:51 (Seen's logs)
 
-- [x] **Seen's crash: ours, found, fixed.** `EXCEPTION_ACCESS_VIOLATION` at `SkyrimVR.exe+0x495253`,
-      `lock xadd [rcx+0x08], eax` with `eax = 0xFFFFFFFF` and `rcx = 0x3EF8DA133F2D112E` -- a **reference count
-      being decremented on a pointer that is no longer an object**. No frame of ours on the stack, but the
-      timeline is ours end to end:
-
-      - 20:50:12 Seen opens the Journal, then the Console. Pause counter 2.
-      - Menus before that: `[WSEnemyMeters, HUD Menu]`.
-      - 20:50:46 he closes them. Opening and closing a pausing menu tears the HUD's sub-menus down and rebuilds
-        them, and the menu list is now `[HUD Menu]` alone -- **`WSEnemyMeters` is gone**.
-      - 20:50:47, :48, :52 our enemy-meter driver posts three `kUpdate` messages to `WSEnemyMeters` anyway, each
-        one allocating a `HUDData` from the queue's factory for a menu that cannot receive it.
-      - 20:50:52.733 access violation.
-
-      `UI::SetEnemyMeterTarget` checked the message queue and the factory and never checked that the menu it was
-      posting to existed. It now asks `UI::GetMenuOpen("WSEnemyMeters")` first and returns if it is not there.
-      A transient absence costs a frame or two of the meter and nothing else.
 
 - [ ] **The dragged Lurker was not seen (20:45).** Seen's log has **no `posing body` line anywhere on
       2026-09-25** -- the last are from the day before -- so no dead-body pose reached him at all this session.
@@ -342,17 +573,6 @@ working perfectly. Almost all of it is downstream of one thing.
       applied. Nothing built yet -- the fix of 2026-09-24 made bleedout behave like dying in `HookActorProcess`
       and `InterpolationSystem`, and this may be that change's other side.
 
-- [x] **The hand-offset measurement was comparing two different people, and has been fixed.** It printed the
-      remote copy's reach beside **the local player's own**: Seen's log has the copy at `upperarm 22.8,
-      forearm 16.0` against his own `23.9, 16.8`, which is Emma's character against Seen's character. The
-      documented reading -- "same arm lengths but a different hand height means VRIK is moving the hand by
-      translation" -- could therefore never be true, and every number it produced was uninterpretable.
-      `VRPose` now carries the **owner's own** hand positions relative to their 3D root (`HasHandCheck`, about
-      once a second, measurement only -- nothing is posed from it), and the receiver logs both, in the same root
-      space, after posing:
-      `VRBodySync: actor N hands -- owner L(x, y, z) R(x, y, z); copy L(x, y, z) R(x, y, z)`.
-      Now a difference is a real difference: z is a hand at the wrong height, x or y is one too far forward or
-      out to the side.
 
 ### VRIK and HIGGS interactions the other player cannot see (2026-09-25)
 
@@ -394,35 +614,9 @@ because that was built by hand in September. Everything else a hand does is invi
 
 ### Full body tracking: hips (reported 2026-09-25, feet track and hips do not)
 
-- [x] **The pose carried rotations and nothing else, so a hip tracker had nothing to travel on.** Crouching,
-      leaning and hip sway move the body relative to the root without changing any rotation. The feet followed
-      because the thigh and calf rotations did travel -- which is exactly the shape of the report.
-
-      `VRPose` now carries `HipOffset`: where the pelvis sits relative to the 3D root, in root space, sent while
-      the legs are tracked. The receiver moves the **whole** body by the difference, not the pelvis alone: the
-      spine hangs off `NPC COM` beside the pelvis rather than below it, so shifting the pelvis by itself would
-      pull the legs off the torso. With the hip joint in the right place, the thigh and calf rotations already
-      being written swing the feet from there.
-
-      **Unplayed, and it changes the wire format** -- everyone needs this build or nobody connects.
-
-      Measured on both sides rather than assumed, every five seconds while the legs are tracked:
-      - sender: `VRBodySync: local hips at (x, y, z) from the root`
-      - receiver: `VRBodySync: actor N hips wanted at (x, y, z) from its root, moving the body by D`
-
-      If the hips still look wrong, those two lines say which half is at fault. If the sender's numbers do not
-      change when you crouch, the hip tracker is not reaching the pelvis node and the problem is upstream of this
-      protocol entirely -- VRIK's own configuration, not ours. If they change and the receiver's do not match, it
-      is the send or apply path. If both match and it still looks wrong, the offset is right and the error is in
-      how the legs are being bent.
 
 ### Removal and ownership churn: checked, and clean
 
-- [x] **Five join-and-leave rounds, watched from another client: every join produced exactly one spawn and every
-      leave exactly one removal, no copy left behind** (`-Pair churn2`, 2026-09-25). The 2026-09-24 audit flagged
-      that actor removal is not idempotent; whatever is true inside the server, nothing leaks out to the other
-      client's view of the world, which is where a leaked body would eventually crash somebody. This does not
-      clear the NPC case -- these are player characters, and no bot owns an NPC.
 
 ### Same shape, not touched, needs evidence first
 
@@ -441,19 +635,6 @@ because that was built by hand in September. Everything else a hand does is invi
 
 ### Harness
 
-- [x] `run-bot-tests.ps1 -Pair <name>` runs a two-sided test: `<name>-watcher.txt` against `<name>-actor.txt`.
-      The watcher is the standalone half and **its** exit code decides the result, because that is where the
-      assertions live. Reporting only the acting half's exit is how a two-sided test reports success with nobody
-      having checked anything. `-Relay` is kept as a spelling of `-Pair relay`.
-- [x] The watcher's output is written to `logs\watcher.log`. It runs minimised, so until now the half that does
-      the checking was the half whose output went nowhere.
-- [x] **Every bot wrote to one `logs/bot.log`, truncating it on start.** A pair runs two at once and a self-check
-      run cycles four through in seconds, so their lines interleaved and each start threw the last run away. On
-      2026-09-25 one bot hung before logging its first line: a test that never ran, never finished, and left a
-      process behind. Each bot now writes `logs/bot-<name>.log`.
-- [x] `$hostBot.ExitCode` came back empty unless the process handle is touched first, so a **passing** watcher was
-      reported as a failure. Same class of lie as the reverse, and worth remembering for any other `Start-Process`
-      in this repo: read `$proc.Handle` once before waiting.
 - **`STServer.dll` and `SkyrimTogetherServer.exe` are version-locked.** Rebuild the DLL alone and the server exits
       immediately, code 1, no log line, no message. Always build `SkyrimServerRunner` with it.
 - **Any tracked source edit changes the version hash**, so `STBot` must be rebuilt too or it is refused at the
@@ -471,39 +652,8 @@ the task is to find the cause rather than guess at one.
 
 ### Shipped today, all unplayed. Confirm these before anything new goes in.
 
-- [x] **[untested] Essential NPCs hammered with Kill().** 236 attempts on Commander Caius in two minutes, 38 on
-      another actor, every one returning `dead: false`, each re-entering the death transition. Bleeding-out actors
-      are no longer killed at all, and after three refusals an actor is left alone with one warning.
-- [x] **[untested] Downed NPCs lay on the floor and never got up.** Bleedout is neither dead nor alive, and two
-      places only tested `IsDeadOrDying()`: `HookActorProcess` suppressed a downed remote actor so it could not
-      play its get-up, and `InterpolationSystem` force-positioned it to follow its standing owner. Both now treat
-      bleedout like dying.
-- [x] **[untested] The server stored damage as healing.** Damage is a negative delta and the server subtracted it,
-      so the health it hands out on spawns, hand-offs and respawns drifted upward.
-- [x] **[untested] Animation replay backlog.** One action is played per frame and nothing bounded the queue, so a
-      looping owner built a backlog that could never drain: 717 refused `Unequip` replays on one guard while 30
-      other actors starved. Capped at 96, oldest dropped.
-- [x] **[untested] Dragging a corpse was invisible.** `PoseActor` writes bone *world* transforms and the renderer
-      follows the bones, so writing the root position alone moved nothing. The offset now reaches every bone.
-- [x] **[untested] Ownership churn crashed the receiver.** The grab detector claimed any dead body more than 32
-      units from its network position; corpses sit that far apart routinely, so it fired 207 times across 58
-      bodies in one session and the entity churn left `AnimationSystem::Update` casting a freed form. Removed.
 
 ### 1. Costs a session, cause known, do next
-
-- [x] **[untested] The `Unequip` loop: found and stopped (2026-09-24).** `InventoryService::RunNakedNPCBugChecks`
-      walks every actor once a second and calls `ResetInventory` on any it thinks is naked. Re-equipping emits
-      equip and unequip animation events, which travel to the other players as actions to replay, and nothing
-      ever stopped: if `IsWearingBodyPiece()` stays false -- a body slot the check does not understand, an outfit
-      a mod manages itself -- the same actor is reset every second for as long as it is loaded. One per second
-      matches the 717 refused replays on a single Redoran Guard almost exactly. It now gives up after three
-      attempts per actor and says which actor it gave up on. Capping the replay queue treated the symptom; this
-      is the source.
-- [x] **[untested] The receiver could replay the wrong spell (2026-09-24).** It read `magicItems[CastingSource]`
-      first -- whatever is staged in that hand on the receiving side -- and only fell back to the transmitted id
-      when the slot was empty, so a quick spell switch or a late equip message replayed the previous spell. The
-      transmitted id is now tried first, with the staged item as the fallback for a spell this game cannot
-      resolve, and the fallback says so in the log.
 
 
 - [ ] **The `Unequip` loop itself.** Capping the queue treats the symptom. Something makes one actor emit the same
@@ -512,17 +662,6 @@ the task is to find the cause rather than guess at one.
       **Plan:** on the owner's side, log each time the re-equip check acts on an actor, with what it saw and what
       it did. One session then says whether our check is the source. Cheap, and it is the last known cause of the
       stream starving.
-- [x] **[untested] Spell hits are now authoritative against another player (2026-09-24).** A damaging spell on a
-      remote player used to end in `MagicTarget::AddTarget` applying nothing and sending nothing, so whether it
-      hurt was decided entirely by the target's own game re-simulating the projectile. A sword already avoids
-      this: the attacker's game is the only one that knows the swing connected, so it sends the hit as a health
-      change. Spells now do the same, under the same conditions -- PvP on, cast by this player, never applied
-      locally -- and only for **instant** damage-health effects, because a damage-over-time effect arrives once
-      and then ticks on its own. Anything not recognised as damage-health keeps today's behaviour of sending
-      nothing, so the failure mode is the status quo rather than a wrong number.
-      **Known inaccuracy:** the magnitude sent is the effect's, before the target's resistances, where a sword
-      sends damage the attacker's game has already mitigated. Spells will therefore hit a little harder than they
-      should until the target's side applies resistance. Watch `PvP: spell X hit remote player Y for N`.
 - [ ] **Superseded: spell hits are not authoritative.** The caster sends the cast and the projectile; whether it *hit* is
       decided separately on each machine, so a spell can land on one screen and miss on the other. Sword hits
       already avoid this by sending the damage. **Plan:** do the same for spells against a remote player, reusing
@@ -609,65 +748,9 @@ the task is to find the cause rather than guess at one.
       Swept the rest of the client for the same shape: the two other dereferenced `find_if` results, in
       `CharacterService` and `ObjectService`, are both already guarded. `OnBeastFormChange` was the only one.
 
-- [x] **`Tools\VR\session-report.py` (2026-09-25).** Reads one session's log and says, for each fix shipped
-      since 2026-09-23, whether it fired and what that means -- corpse dragging both ways, spell and melee damage
-      to a player, NPC health correction, the naked-NPC give-up, the replay backlog, essential NPCs, levelled
-      picks, the crime alarm, the Solstheim faction search, combat with a second player. Then it lists problems
-      (crashes, unresolved addresses, starved interpolation) and does the invisible-body comparison: for every
-      `CopyDiag` line it diffs the copy's render words against the player's and reports which offset differs.
-      `--log` for the friend's bundle, `--since` for one session. Read-only.
-      It immediately corrected a wrong claim of mine, above: levelled reconciliation had run and worked.
-
-- [x] **A test that asserted nothing, fixed (2026-09-25).** `health-sign.txt` checked `health 0 <= 100`, where 0
-      was not this bot's server id: the condition could never be read, and before conditions reported failure it
-      would have passed no matter what the code did. Conditions now accept `me` for the bot's own character, and
-      the bot records its own health when it sends one -- the server relays a health change to everyone *except*
-      the sender, so nothing would otherwise have taught it what its own health was. The script now asserts the
-      exact value at each step (100, 70, 40, <= 0 on death, restored on respawn). Ten checks.
-      **Corrected 2026-09-25:** this was called a real check on the damage-sign fix and it was not. The server was
-      dropping every change the bot sent for want of an ownership epoch, so the assertions read the bot's own
-      bookkeeping back to itself. See section 0; `relay-watcher.txt` is the test that exercises the server.
-      Worth remembering: a green test that cannot fail is worse than no test.
-
-- [x] **The test suite was partly an illusion, fixed 2026-09-25.** Two faults compounded:
-      1. **Documentation was in the version hash.** Editing `VR_TODO.md` changed the string the client, server
-         and bot compare on connect, so the bot was refused at the door by a server built minutes earlier.
-         `*.md` and `Tools/VR/*.py|ps1` now join `Code/bot` in the exclusions -- none of them can change the
-         protocol. Verified: appending a line to the roadmap leaves the version untouched.
-      2. **A refused bot exited 0.** No checks ran, no failures were recorded, so the runner read success. Four
-         suites "passed" in a row having never connected. A run that completes no checks now exits 2 with
-         `the script ran no checks`.
-      **Consequence worth stating:** some earlier "suites passed" claims in this session cannot be trusted, since
-      a version refusal was indistinguishable from a clean run. Everything from `8101c40` onward is real.
-      All four suites now assert values rather than only that the connection survived: 66 checks
-      (18 + 19 + 19 + 10), and `known me` works because the bot records its own character on entering the world --
-      the server tells everyone about a character except the player it belongs to.
-
-- [x] **The harness can now prove it reports failure (2026-09-25).** Every run until now only ever demonstrated
-      that the suite *passes*, which says nothing: the week's lesson is that a green result can mean the test
-      never ran. Two faults found by checking the failure paths on purpose:
-      1. **A bot that could not connect hung for ever.** It retried the connection endlessly and its script never
-         advanced, so no `waitfor` timeout could rescue it -- unattended, that is a wedged machine rather than a
-         failed test. There is now a whole-run deadline (`--max-runtime`, default 300s) which fails the run and
-         says which phase it was stuck in. The first attempt measured against `m_lastTick`, which moves every
-         iteration, so it compared ten milliseconds to the deadline and never tripped.
-      2. Verified that a failed assertion really does exit non-zero, rather than assuming it.
-      `run-bot-tests.ps1 -SelfCheck` now runs two suites that **must** fail -- one against a dead server, one with
-      an impossible assertion -- and refuses to continue if either reports success. Use it before trusting a
-      green run after any build-system change.
 
 ### Bot coverage (2026-09-24)
 
-- [x] **Unattended test runs.** `Tools\VRun-bot-tests.ps1` starts a server, puts a standalone bot in the world
-      to hold it open, runs a script and reports pass or fail, with no human and no headset.
-      `-Script <name> -Repeat <n>`. Exit code 0 means every check passed.
-- [x] **Scripts so far:** `auto-suite.txt` (presence, health, death, respawn, movement, reconnect -- 8 checks),
-      `health-sign.txt` (baseline, two damage steps, death and respawn, asserting the exact health each time),
-      `death-recovery.txt` (three death and respawn rounds back to back, which is where things used to come
-      apart), `churn.txt` (four join and leave round trips, down to a one-second turnaround, aimed at the audit's
-      duplicate-spawn and non-idempotent-removal findings), `health-sign.txt`, `suite-soak.txt`.
-      `churn.txt` passes 11 checks and the server logs nothing during it, so those two findings are **not**
-      reproducible this way yet -- it stands as a regression guard rather than a reproduction.
 - [ ] **What the bot still cannot cover, and what to do about it.** It has no game behind it, so nothing visual is
       testable: invisible bodies, dragged corpses, hand positions, the health bar. Those need a headset. What
       could be added without one: an NPC-ownership churn test (two bots taking turns owning an actor), a test that
@@ -681,14 +764,6 @@ the task is to find the cause rather than guess at one.
       40412 as either handled or harmless.
 - [ ] **The crime alarm guard is installed but has never fired.** Address confirmed at `0x1405e5dc0`; no crime has
       been committed since it landed. Needs one session of actual crime.
-- [x] **[untested] `This isn't a crime faction! 4018279` (fixed 2026-09-24).** The Solstheim crime faction was
-      written as the form id `0x04018279`, which is only right when Dragonborn.esm loads fourth. On this modlist
-      it loads second, so the lookup failed on both deaths logged that day -- meaning every co-op death. There is
-      no plugin-name lookup bound in this client, so the load index is now found by trying them (256 form lookups,
-      once, cached), and the log says which index it found. The nine Skyrim.esm factions were always fine: their
-      index is 0x00.
-      **Still a decision, not a bug:** every multiplayer death clears bounties in every hold. Nobody asked for
-      that, and it is a real gameplay change. Worth deciding whether co-op death should pay fines at all.
 - [ ] **Superseded: `This isn't a crime faction! 4018279`.** Every multiplayer death calls `PayCrimeGoldToAllFactions` with a
       hard-coded faction id that depends on load order, and it failed on both deaths logged. Clearing bounties on
       every co-op death is also a gameplay decision nobody asked for. Small fix, worth a decision first.
@@ -766,60 +841,9 @@ the task is to find the cause rather than guess at one.
       minimal element of our own. The last one was refused before on immersion grounds, so it only comes back if
       the game's own widget is proven incapable.
 
-- [x] **[untested] NPCs only fight the player who angered them.** Built 2026-09-23, never played. Mechanism, not mystery: combat targets belong to whoever
-      owns the NPC. A crime makes the guards hostile to that player on that player's machine. The other player's
-      hits arrive as `RequestHealthChangeBroadcast`, which carries only the actor id and a health delta and
-      **no attacker**, so the owner never learns who hit its NPC and never puts them in combat.
-    - **Fix, and it needs no new addresses.** The server already knows which player sent the broadcast: add that
-      player's id to `NotifyHealthChangeBroadcast`, and on the owner's client, when an NPC we own takes real
-      damage attributed to player X, call `Actor::StartCombatEx(copy of X)`. That function is already written
-      (Papyrus `StartCombat` plus `CombatController::SetTarget`) and is currently dead code, never called.
-    - **Cost:** one field in one message, so client and server both rebuild, and one call site.
-    - **Care:** gate it on an actual health decrease, or an NPC will turn on a player who healed or buffed it,
-      and rate limit it so a flurry of arrows does not restart combat every frame.
-    - **Built as planned.** `NotifyHealthChangeBroadcast` carries `AttackerPlayerId`, filled in by the server from
-      the sending player. `ActorValueService::StartCombatWithAttacker` on the owner's client resolves it to that
-      player's copy and calls `StartCombatEx`. Damage only (the client adds the delta, so a hit is negative),
-      never on a player or a dead or downed actor, only on an actor this client owns, and at most once every
-      three seconds per actor. Logged as `Combat: actor X now also fights player N`, so one session says whether
-      it fires. Protocol change, so client and server both move to `036b42a`.
 
 ---
 
-- [x] **[untested] Two of the merge's missing VR addresses turned out not to be addresses (2026-09-23.)** Checked
-      against the local `CommonLibVR` checkout and a fresh clone of `cmpayc/TiltedEvolutionVR`:
-    - **`AIProcess::GetCharController` (AE 39856) needs no address.** In CommonLibVR it is a field read, not a
-      call: `middleHigh ? middleHigh->charController.get() : nullptr`, with `middleHigh` at +0x08 and
-      `charController` at +0x250. Our `MiddleProcess` now exposes that field and the function reads it. The offset
-      is confirmed three ways: CommonLibVR's VR headers, the note from TiltedEvolutionVR (`aaf5d83`), and the fact
-      that every neighbouring offset this struct already asserts matches that header exactly (rotation 0B0,
-      activeEffects 1A0, commandingActor 218, leftHand 220, rightHand 260).
-    - **The physics timestep global (AE 389089) is not needed either.** `hkStepInfo::UpdateDeltaTime` is our own
-      code and only *prefers* it: it falls back to the movement delta the caller passes, then to the stored step,
-      rejecting anything non-finite or <= 0.0001s. `HookActorProcess` already passes the frame delta, so VR now
-      calls it with a zero first argument and gets a valid step from the fallback.
-      Together these make upstream's havok fix (#901) live on VR, which is the sliding-NPC fix. Watch for: remote
-      NPCs that now stand still correctly but fight their network position, and `ForcePosition` taking its
-      "no usable step yet" branch for freshly created controllers, which it could not do before.
-      **Both addresses arrived on 2026-09-23 anyway** and are now in `VRAddressOverrides`: AE 39856 ->
-      VR 0x140685270 (`AIProcess::GetCharController`) and AE 389089 -> VR 0x141ec8278 (the timestep global,
-      SE id 512261). Both builds now use the engine's own function and the real global rather than the
-      reconstructions above. The field read stays behind `GetCharController` as a fallback and as a check: if the
-      engine and `MiddleProcess+0x250` ever disagree, the client says so once, which is the only thing that would
-      catch a wrong `charController` offset. **Still missing: AE 20231 (`TESObjectREFR::SetLeveledCreature`)**,
-      which is what levelled-NPC reconciliation needs before it can be turned back on at all.
-    - **`GarbageCollector::Add`: the ids were mismatched overloads.** CommonLibVR has
-      `RELOCATION_ID(35492, 36459)` for `Add(TESObjectREFR*, bool)`. Upstream calls AE **36460**, the
-      `TESBoundObject*` overload, and the merge paired that with SE 35492, so we called the reference overload
-      with a base form and a junk second argument. The singleton is right, though: CommonLibVR gives
-      `RELOCATION_ID(514180, 400329)`, exactly what we have.
-    - **`cmpayc/TiltedEvolutionVR` does not have the ones still missing.** Its generated map covers the 3086 AE
-      ids its own client uses; 39856, 389089, 20231, 36460 and 36459 are all absent, because that fork never calls
-      them either. The one hit is AE 14375, which it derives (auto-diff) to VR `0x19C0C0` and names
-      `s_SetLeveledNpc` from its own `TESNPC.cpp` call site, while upstream calls the same id
-      `CreateTemplateActorBase`. Same address, two names, still unverified as the same function.
-      What that fork does have is the toolkit that derives these (`Tools/vr_addresses`: derive, match, callgraph,
-      candidates, pe), which is the route to the remaining three rather than hand-reading the disassembly.
 
 - [x] **[untested] Levelled NPC reconciliation is back on for VR (2026-09-23), after being off since it crashed
       Seen on 2026-09-22.** All three engine calls are now accounted for. Watch the next join closely: this is the
@@ -894,22 +918,12 @@ spawn, reconnect after a drop, shouts (ported, untested), PvP sword hits (new, u
 
 ### From TiltedEvolutionVR and upstream, not done yet (decisions)
 
-- [x] **[untested] Body sync on one thread, at frame end** (done 2026-09-14, see section 0 and
-      `KNOWN_ISSUES.md`).
-- [x] **[untested] Shouts and powers reach the other player.** Ported from TiltedEvolutionVR `20a62f9` on
-      2026-09-18: `SpellItem` spell type (the `unk6C[3]` block is costOverride, flags, spellType), POWER /
-      LESSER_POWER / VOICE_POWER pass the concentration filter, voice casts resolve from the sent form id.
 - [ ] **TiltedEvolutionVR `aaf5d83`, item and body drift.** A remote body is moved by teleporting, and a teleport
       into a loose object makes havok fling it (their collision-layer table patch stops that); an NPC's capsule can
       be shoved 54 units off its body by a player and stay there (they read the capsule and warp it back). 1200
       lines, address-heavy; take it when under-the-ground or item drift is next.
 - [ ] **TiltedEvolutionVR `1660eb0`, ownership blacklists and former-owner updates.** Read 2026-09-19: a follow-up
       to upstream #887 (ownership epochs); every change needs the epoch fields, so it only comes with the rework.
-- [x] **[untested] Server hand-off of abandoned actors** (2026-09-19, `HandOffAbandonedActors`): every 2 s, an actor
-      whose owner is out of its range while another player is in range goes to that player (two sweeps in a row
-      required; owner told to relinquish, candidate told to claim). Log: `Handoff:` on the server. A paused or
-      loading owner is covered too: the mod's update runs off the Papyrus VM, which a pause suspends, so a paused
-      client goes silent, and an owner silent for 3 s counts as away (a silent player is never a candidate).
 - [ ] **TiltedEvolutionVR `29f99ed`, two havok crash guards** (`SkyrimVR.exe+0AB1ABA` ragdoll add,
       `+03AD7B1` shadow scene listener on a temporary with no 3D). None of our dumps have those addresses; port
       them the day one does, they name the reference.
@@ -973,11 +987,6 @@ What we know:
 
 ### 1.1 Measure first [measure]
 
-- [x] **[untested]** `World::ReportPerformance` writes a summary every 30 s: average, 95th and 99th
-      percentile frame time, frames over 50 ms, mod update average and max.
-- [x] **[untested]** Thread-safe counters (`PerfCounterScope`) around the VRBodySync pose apply,
-      `SetActorInventory` and `CreateCharacterForEntity`, reported in the same line. Still to add if the
-      numbers point there: `BehaviorVar::Patch` and the equip hooks.
 - [ ] Benchmark 60 s at the same save and spot, standing still and then walking, in four setups:
     1. FUS without Skyrim Together;
     2. with Skyrim Together, not connected;
@@ -991,13 +1000,6 @@ What we know:
 
 ### 1.2 Likely wins (do after 1.1 confirms them)
 
-- [x] **Logging:** the console window only gets warnings and errors, and the per-actor behavior variable
-      dumps, the ambiguous-signature list (120+ lines per launch), the per-second `Perf spike` lines and the
-      spawn bookkeeping lines are at debug level or replaced by the 30 s summary. The file logger stays
-      synchronous on purpose: crash reports depend on it being flushed.
-- [x] **VRBodySync searches for bones every frame.** Remote bodies were already cached per 3D (the Rig); the
-      local capture still walked the whole skeleton at every send. Cached since 2026-09-20 (dropped when the root
-      or a node's vtable changes, or after 5 s).
 - [ ] **Spawn bursts on cell change.** Entering an area creates dozens of actors in one frame, each
       with a full inventory rebuild (remove everything, then add and equip item by item).
     - Fix: limit spawns and inventory applies to a few per frame, and queue the rest.
@@ -1011,7 +1013,6 @@ What we know:
       only rebuild when an equip hook fired or the hand/spell pointers changed.
 - [ ] Look for other per-frame costs: linear `find_if` searches over all entities in hot paths, and
       `TESForm::GetById` inside loops.
-- [x] Host PC: `host-server.ps1` starts the server at below-normal priority (2026-09-20) and says why.
 
 ---
 
@@ -1019,16 +1020,9 @@ What we know:
 
 ### 2.1 Combat and NPCs
 
-- [x] **[untested] Remote NPCs run their AI on both clients.** `Actor::Process` (37356) now has an
-      address from the TiltedEvolutionVR table.
-- [x] **[untested] NPCs don't pick targets properly in co-op.** `SortTargetSelectors` now resolves too.
-- [x] **[untested] Kill sync is a coin flip.** Deaths now go to every player, and remote bodies play the
-      death animation and ragdoll. Read the `Death sync:` logs after the next session.
 - [ ] **Hits from VR weapons.** A VR sword hit lands on the attacker's copy of the NPC. Check that
       damage reaches the NPC's owner, and that the health change is sent back when the NPC is owned by
       the other player.
-- [x] **[untested] Dragons on the remote side.** `CharacterSpawnRequest.IsDragon` travels with the spawn and the
-      client grid check uses it (2026-09-19).
 - [ ] **Actor ownership warnings.** Look into `Actor for ownership transfer not found` and
       `OnNotifyActorTeleport: failed to retrieve actor` once the churn fix is confirmed.
 - [ ] **Shared follower loops** (the Lydia case). A follower owned by one player gets pulled by the
@@ -1039,26 +1033,11 @@ What we know:
 
 ### 2.2 Items and inventory
 
-- [x] **[untested] Item pickups by NPCs and players** (37521, 40533) are hooked again.
-- [x] **[untested] Items added to actors and containers** (37525, 19708) are hooked again.
 
 ### 2.3 VR body
 
-- [x] **[untested] Finger and grip pose.** Since 2026-09-20 the pose carries the 30 finger bones (five fingers of
-      three bones per hand) as rotations relative to the parent bone, sent only when they change or once a second
-      (HasFingers); the receiver keeps the last set and writes them below the posed hand. Finger bones are
-      flattened (no node), so they are found by shape in the flat bone array: a chain of three entries under the
-      hand, five per hand, in array order. Both sides log whether that shape was found (`local finger bones
-      found` / `finger bones not found by shape`). If a skeleton mod hangs other three-deep chains off the hand,
-      the search gives up and the hands stay on the animation. Encoding change: client and server.
 - [ ] **Legs when moving.** Check that smooth locomotion plays a walk or run on the remote copy,
       rather than sliding.
-- [x] **[untested] Player height and scale** differences between VR players. Since 2026-09-20 the pose carries
-      the skeleton root's world scale (times 1000, on change and once a second), which folds in the actor's own
-      scale and VRIK's body scale; the receiver sets "NPC Root [Root]" local scale so the copy's world scale
-      matches. No menu: VRIK already holds the number. Logged on both sides (`local body scale ...`, `body scale
-      of remote actor ...`). VRIK's separate arm and hand scales are not carried; a second pass on those nodes if
-      they show. Encoding change: client and server.
 - [ ] **Face "looks off"** (FaceGen on VR). Parked earlier, still open.
 
 ### 2.4 World, quests, dialogue
@@ -1067,9 +1046,7 @@ What we know:
       No code syncs message boxes. The likely path is activation sync: the other client replays the activation
       with the remote player as activator, and the object's script shows its message. Note which object it was
       next time before changing activation sync.
-- [x] **[untested] Dialogue voice and subtitles** (37542, 52626) are on again.
 - [ ] **Quest NPCs out of sync** (Bastianus Axius). Check quest sync with a party on the next test.
-- [x] **[untested] Waypoint sharing** (40535/40536) is on again.
 - [ ] **Weather and time.** `WeatherService` and `CalendarService` exist; confirm they work on VR.
 - [ ] **[untested] Mount sync on** (InitiateMountPackage, address found by the friend and checked). Mount a horse:
   the other player sees you ride it, and only one player sits on it. `Rider not found` or `Mount not found`
@@ -1093,14 +1070,6 @@ the headset off.
 
 ### 4.1 No keyboard needed in VR
 
-- [x] **[untested] Auto-connect on game load** when `connect.txt` exists (`VRConnectService`). F6 still
-      toggles; the F6/F7 keys are debug keys and don't exist in a release (master) build.
-- [x] **[untested] Auto-party:** the server creates a party for the first player (`bAutoPartyCreate`,
-      default on) and `bAutoPartyJoin` adds everyone else.
-- [x] **[untested] HUD notifications:** connecting, connected (with the build), connection lost and
-      retrying, refused (in plain words: wrong version with both builds, wrong password, plugins,
-      uGridsToLoad), player joined (with the location) or left, party joined or left.
-- [x] **[untested] Reconnect automatically** after a drop: 5, 10, 20, 30, then every 60 s.
 - [ ] **In-headset menu:** the normal Skyrim Together UI as a SteamVR dashboard tab
       (`Systems/VRDashboard.cpp`). Renders for the friend, still blank for the host; top of section 0.
     - [ ] Adapt the page layout for the dashboard (large text, no empty full-screen areas).
@@ -1108,15 +1077,8 @@ the headset off.
 
 ### 4.2 Versions and compatibility
 
-- [x] **Version string per build** (2026-09-19): `git describe` plus a hash of the uncommitted changes, set as
-      the `BUILD_COMMIT` compile define in the root `xmake.lua` `on_load`, so one build always carries it
-      (`build/BuildInfo.h` only holds fallbacks now). A client-only change still forces a server rebuild, since the
-      string must match; restart the server after every deploy.
 - [ ] Add a protocol number that changes with every message change, so unrelated client changes stop forcing
       server restarts.
-- [x] **Build version** in the first log line and in the connected notification.
-- [x] **[untested] Mod list comparison on connect:** the server logs the plugins that differ between the new
-      player and each player already there. Showing it on the joiner's HUD needs a new message.
 - [ ] **Startup checks with plain-language HUD errors:**
     - [x] uGridsToLoad = 5 (stops the automatic connection);
     - [x] SKSE VR loaded (warning only);
@@ -1127,20 +1089,11 @@ the headset off.
 
 ### 4.3 Packaging and install
 
-- [x] **Release zip:** `Tools\VR\make-release.ps1` packages the client folder (exe from the build), the
-      server with a password-free `STServer.ini`, the game files as an MO2 mod, the scripts and the guide.
 - [ ] **Install script** (PowerShell):
     - finds the MO2 instance and copies the tool into it;
     - adds the MO2 executable entry;
     - creates `%LOCALAPPDATA%\SkyrimTogetherVR\connect.txt` from a template on first run;
     - checks the requirements listed in 4.2.
-- [x] **Update script:** `update.bat` (drag the zip onto it) swaps client and server files with the rename-aside
-      trick, refuses while the game runs, finds a `Server` folder next to the client folder. Tested with a held-open
-      exe. GitHub release check: not done.
-- [x] **Host script:** `host-server.bat` starts one server from its folder and prints the address to give.
-- [x] **Connect setup:** `setup-connect.bat` writes `connect.txt` (no byte order mark, port added if missing).
-- [x] **Log collector:** `collect-logs.bat` zips the client and CEF logs, the newest Crash Logger file and
-      crash dump from the last day, and the build, onto the Desktop.
 - [ ] **Guide for non-FUS modlists:** what's required, what's known to conflict, and the plugin
       limit.
 - [ ] **Licensing before sharing.** Tilted Online is GPL-3: publish the source for every shared
@@ -1151,16 +1104,6 @@ the headset off.
 
 ## 5. Polish
 
-- [x] **[untested] Friend's name and health above their head, on the game's own enemy meter.** The message was
-      read off the game's own sends on 2026-09-20 18:56: an update for WSEnemyMeters carrying a HUDData with type
-      0xB, the actor's level at +0x20, two flag bytes 1,1 at +0x22 and the actor handle at +0x28 (0 clears), sent
-      from SE 0x1408D5130+0x284; EnemyHealth::Update then draws it. Proven in play that evening (Seen saw Emma's
-      bar once), but rarely: the first rules held off for 8 s after any target the game set, and the game
-      re-points on every hit, so in a dungeon it almost never got a turn. Since 21:5x the friend's bar comes up
-      when you look at them (18 degrees to acquire, 32 to hold, out to 3000 units) or whenever they are under 60%
-      health however you are facing, the hold-off after the game's own target is 2 s, and it refreshes four times
-      a second so it does not fade. One line per change of target says which rule brought it up and how far off
-      centre they were.
 - [ ] Clean remote spawn: fade in instead of popping or falling. Place on the ground if the
       interpolated Z is invalid ("mammoth fell from the sky").
 - [ ] Death and bleedout: HUD message "X is down", and optionally revive by activating the downed
@@ -1178,9 +1121,6 @@ the headset off.
 - [ ] **[big] A test bot client:** a small headless tool that connects to the server and replays
       movement, equips and attacks. Much of the sync could then be tested with one headset, without
       waiting for the friend.
-- [x] Every build goes straight into `E:\FUS\tools\Skyrim Together VR` (rename the old exe aside); the friend
-      gets the exe and pdb from there. The server must be rebuilt and restarted with every deploy for now (the
-      version string covers both).
 - [ ] No debugger attached by default (see 1.1).
 
 ### 6.1 Test bot: a second player without a second headset (planned 2026-09-20)
@@ -1196,21 +1136,10 @@ movement, death and respawn paths are **[untested]** until a headset is in the g
 password from `config\STServer.ini` via `--password`, `--hostlog` the host's `tp_client.log`, `--spacing 200`).
 Its log is `logsot.log` next to the exe. The clone carries the host's face, outfit and in-game name.
 
-- [x] **Handshake:** `AuthenticationRequest` with the tree's `BUILD_COMMIT`, the password, a name, `Skyrim.esm` as
-      the mod list (form ids below come from it), level, time. The server's mod policy is off for us.
 - [ ] **[untested] Character:** wait for the host's own `CharacterSpawnRequest`, reuse its `AppearanceBuffer` and `ChangeFlags`
       (the bot is a clone of the host, so the receiving client builds the face from data it already accepts), then
       `AssignCharacterRequest` 200 units from the host with the same worldspace and cell, Nord race, iron sword and
       Flames in the inventory, health 100. Then `EnterExteriorCellRequest` from the host's grid.
-- [x] **Never own anything:** the server makes the first player party leader, so the bot leaves any party it is
-      asked to lead and stays as a plain member otherwise. Any (the leader claims every actor). Any
-      `NotifyOwnershipTransfer` the server hands the bot is sent straight back (`RequestOwnershipTransfer`), otherwise
-      the NPCs it would own freeze on the host's screen.
-- [x] **Script primitives** (a text file, one line each): `log`, `wait s`, `walk x y [speed]`, `walk rel dx dy [speed]`,
-      `follow distance seconds`, `equip hexid [left|both] [spell]`, `unequip hexid`, `health n`, `damage n`, `die`,
-      `respawn` (`PlayerRespawnRequest`, health restored 500 ms later, like the client), `disconnect`, `reconnect`,
-      `loop`, `stop`, `start x y`. Not yet: `cast`, interiors. Movement is `ClientReferencesMoveRequest` at 20 Hz with
-      positions only: the copy slides, which is enough for spawn, range, hand-off, death and health tests.
 - [ ] **[untested] First scenario, the bug of 2026-09-19** (`Code/bot/scripts/copy-respawn.txt`): spawn, walk past the host, take damage to -4, respawn, keep walking.
       Pass: the host's log shows `copy would have spawned with the owner's health -4 ... started at 1` and the copy
       stays visible after the respawn.

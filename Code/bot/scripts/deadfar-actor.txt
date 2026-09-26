@@ -1,0 +1,34 @@
+# Dies where the other side cannot watch it happen, then comes back as a corpse.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Pair deadfar
+
+log deadfar actor
+waitfor connected 45
+collect health death spawn
+record deadfar actor
+
+waitfor players >= 1 30
+expect known me
+wait 8
+
+log walking five cells east, out of everyone's range
+walk rel 20000 0 3000
+wait 10
+
+log dying out here
+die
+wait 6
+expect health me <= 0
+
+log and coming back as a corpse
+walk rel -20000 0 3000
+wait 10
+expect connected
+
+wait 12
+expect connected
+
+record off
+report bot-deadfar-actor.txt
+log done
+stop

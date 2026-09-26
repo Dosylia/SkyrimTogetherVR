@@ -1,4 +1,5 @@
 #include <Components.h>
+#include <EpochDrop.h>
 #include <Messages/RequestActorValueChanges.h>
 #include <Messages/RequestActorMaxValueChanges.h>
 #include <Messages/RequestHealthChangeBroadcast.h>
@@ -10,6 +11,7 @@
 #include <Messages/NotifyActorMaxValueChanges.h>
 #include <Messages/NotifyHealthChangeBroadcast.h>
 #include <Messages/NotifyDeathStateChange.h>
+
 
 ActorValueService::ActorValueService(World& aWorld, entt::dispatcher& aDispatcher) noexcept
     : m_world(aWorld)
@@ -28,8 +30,13 @@ void ActorValueService::OnActorValueChanges(const PacketEvent<RequestActorValueC
 
     auto it = actorValuesView.find(static_cast<entt::entity>(message.Id));
 
-    if (it == actorValuesView.end() || !actorValuesView.get<OwnerComponent>(*it).IsCurrentOwner(acMessage.pPlayer, message.OwnershipEpoch))
+    if (it == actorValuesView.end())
         return;
+    if (!actorValuesView.get<OwnerComponent>(*it).IsCurrentOwner(acMessage.pPlayer, message.OwnershipEpoch))
+    {
+        ReportEpochDrop("an actor value change", message.Id, message.OwnershipEpoch, actorValuesView.get<OwnerComponent>(*it).OwnershipEpoch);
+        return;
+    }
 
     auto& actorValuesComponent = actorValuesView.get<ActorValuesComponent>(*it);
     for (auto& [id, value] : message.Values)
@@ -55,8 +62,13 @@ void ActorValueService::OnActorMaxValueChanges(const PacketEvent<RequestActorMax
 
     auto it = actorValuesView.find(static_cast<entt::entity>(message.Id));
 
-    if (it == actorValuesView.end() || !actorValuesView.get<OwnerComponent>(*it).IsCurrentOwner(acMessage.pPlayer, message.OwnershipEpoch))
+    if (it == actorValuesView.end())
         return;
+    if (!actorValuesView.get<OwnerComponent>(*it).IsCurrentOwner(acMessage.pPlayer, message.OwnershipEpoch))
+    {
+        ReportEpochDrop("an actor max value change", message.Id, message.OwnershipEpoch, actorValuesView.get<OwnerComponent>(*it).OwnershipEpoch);
+        return;
+    }
 
     auto& actorValuesComponent = actorValuesView.get<ActorValuesComponent>(*it);
     for (auto& [id, value] : message.Values)
@@ -112,8 +124,13 @@ void ActorValueService::OnDeathStateChange(const PacketEvent<RequestDeathStateCh
 
     const auto it = characterView.find(static_cast<entt::entity>(message.Id));
 
-    if (it == characterView.end() || !characterView.get<OwnerComponent>(*it).IsCurrentOwner(acMessage.pPlayer, message.OwnershipEpoch))
+    if (it == characterView.end())
         return;
+    if (!characterView.get<OwnerComponent>(*it).IsCurrentOwner(acMessage.pPlayer, message.OwnershipEpoch))
+    {
+        ReportEpochDrop("a death state change", message.Id, message.OwnershipEpoch, characterView.get<OwnerComponent>(*it).OwnershipEpoch);
+        return;
+    }
 
     auto& characterComponent = characterView.get<CharacterComponent>(*it);
     characterComponent.SetDead(message.IsDead);

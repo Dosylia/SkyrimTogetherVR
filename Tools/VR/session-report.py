@@ -51,6 +51,26 @@ CHECKS = [
      'a spell id could not be resolved and the staged one was used'),
 ]
 
+# The questions this week's measurements were shipped to answer. Presence alone is not an answer for any of them,
+# so each has an analyser below that reports the numbers instead.
+MEASURED = [
+    ('Hips (sender)', r'local hips at'),
+    ('Hips (receiver)', r'hips wanted at'),
+    ('Hands compared', r'hands -- owner L\('),
+    ('VR archery state', r'VRArchery: local attack state'),
+    ('Objects moved by hand', r'ObjectMove:'),
+    ('Actors below the floor', r'SinkDiag:'),
+    ('Character controller', r'ControllerDiag:'),
+    ('A body handled here', r'BodyGrabDiag:'),
+    ('Client went silent', r'Silence: sent nothing'),
+    ('Arrival-side drops', r'EpochMiss: dropped'),
+    ('Stale copy moved', r'without an update and the server has re-sent it'),
+    ('Stale copy: factions', r'came back in different factions'),
+    ('Stale copy: death', r'and this copy had it the other way'),
+    ('Stale copy: inventory', r'came back with a different inventory'),
+    ('Impossible jumps caught', r'JumpDiag:'),
+]
+
 PROBLEMS = [
     ('Crashes',                    r'VectoredExceptionHandler: crash occurred'),
     ('Unresolved addresses',       r'did not resolve on this build'),
@@ -74,6 +94,145 @@ def read(path, since):
             yield line
 
 
+HIPS_LOCAL = re.compile(r'local hips at \(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\)')
+HANDS = re.compile(r'hands -- owner L\(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\) R\(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\); '
+                   r'copy L\(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\) R\(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\)')
+SINK = re.compile(r'SinkDiag: (\d+) placements found a remote actor lower .* worst ([0-9.]+) units on ([0-9A-F]+)')
+CONTROLLER = re.compile(r'ControllerDiag: (\d+) of (\d+) remote placements')
+EPOCH_MISS = re.compile(r'EpochMiss: dropped (.+?) for character ([0-9A-F]+) .* epoch (\d+) and this copy is epoch (\d+)\. (\d+) of these')
+ARCHERY = re.compile(r'VRArchery: local attack state (\d+)')
+# The player is form 14; a bow shot carries ammo, a spell does not.
+BOW_SHOT = re.compile(r'Projectile launch: shooter 14, base [0-9A-F]+, weapon [0-9A-F]+, ammo (?!0,)[0-9A-F]+')
+SILENCE = re.compile(r'Silence: sent nothing for (\d+) ms; menus \[([^\]]*)\]')
+OBJECT_MOVE = re.compile(r'ObjectMove: ([0-9A-F]+) moved ([0-9.]+) units')
+JUMP = re.compile(r'JumpDiag: a buffered point was ([0-9.]+) units from the one before it, at \(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\).*?(\d+) since')
+BACKLOG = re.compile(r'newest buffered tick (-?\d+) to (-?\d+) ms ahead of playback, (\d+) updates had no future point')
+BODY_GRAB = re.compile(r'BodyGrabDiag: remote body ([0-9A-F]+) has been moving here for (\d+) ms, ([0-9.]+) units')
+
+
+def analyse(lines):
+    """The numbers behind this week's measurements, and what each one decides.
+
+    Every entry says what the number means, because a count on its own has never settled anything here.
+    """
+    hips = [tuple(float(v) for v in m.groups()) for m in (HIPS_LOCAL.search(l) for l in lines) if m]
+    hands = [tuple(float(v) for v in m.groups()) for m in (HANDS.search(l) for l in lines) if m]
+    sinks = [m.groups() for m in (SINK.search(l) for l in lines) if m]
+    ctrl = [tuple(int(v) for v in m.groups()) for m in (CONTROLLER.search(l) for l in lines) if m]
+    misses = [m.groups() for m in (EPOCH_MISS.search(l) for l in lines) if m]
+    archery = [int(m.group(1)) for m in (ARCHERY.search(l) for l in lines) if m]
+    silences = [(int(m.group(1)), m.group(2)) for m in (SILENCE.search(l) for l in lines) if m]
+    objects = [(m.group(1), float(m.group(2))) for m in (OBJECT_MOVE.search(l) for l in lines) if m]
+    grabs = [(m.group(1), int(m.group(2)), float(m.group(3))) for m in (BODY_GRAB.search(l) for l in lines) if m]
+
+    out = []
+
+    if hips:
+        zs = [h[2] for h in hips]
+        spread = max(zs) - min(zs)
+        verdict = ('the hips moved, so the tracker does reach the pelvis and this protocol is the right place to carry it'
+                   if spread > 10 else
+                   'the hips barely moved: either nobody crouched, or the hip tracker never reaches the pelvis and the fix is upstream of us')
+        out.append(('Hips, sender', '%d samples, height %.1f to %.1f (spread %.1f). %s'
+                    % (len(hips), min(zs), max(zs), spread, verdict)))
+
+    if hands:
+        dl = [abs(h[2] - h[8]) for h in hands]
+        dr = [abs(h[5] - h[11]) for h in hands]
+        worst = max(max(dl), max(dr))
+        mean = (sum(dl) + sum(dr)) / (len(dl) + len(dr))
+        verdict = ('the copy holds its hands where the owner holds theirs, so the offset is not in this protocol'
+                   if worst < 8 else
+                   'the copy holds its hands somewhere else; that difference is the hand offset, measured against the right person at last')
+        out.append(('Hands, owner against copy', '%d comparisons, mean %.1f units apart, worst %.1f. %s'
+                    % (len(hands), mean, worst, verdict)))
+
+    if sinks:
+        worst = max(float(s[1]) for s in sinks)
+        worst_actor = max(sinks, key=lambda s: float(s[1]))[2]
+        out.append(('Actors below the floor',
+                    '%d reports, worst %.0f units below where it was last placed, on character %s. '
+                    'Anything here at all means copies sink locally after being placed.'
+                    % (len(sinks), worst, worst_actor)))
+
+    if ctrl:
+        skipped = sum(c[0] for c in ctrl)
+        total = sum(c[1] for c in ctrl)
+        share = (100.0 * skipped / total) if total else 0.0
+        verdict = ('a controller waiting a frame or two for its first step, which is what the code expects'
+                   if share < 5 else
+                   'the assumption that interpolation catches the controller up is false, and that is the likely floor bug')
+        out.append(('Character controller', '%d of %d placements (%.1f%%) could not move it. %s'
+                    % (skipped, total, share, verdict)))
+
+    if misses:
+        by_kind = {}
+        for what, _who, _msg, _mine, since in misses:
+            by_kind[what] = by_kind.get(what, 0) + int(since) + 1
+        detail = ', '.join('%s x%d' % (k, v) for k, v in sorted(by_kind.items(), key=lambda kv: -kv[1]))
+        out.append(('Messages refused on arrival',
+                    '%s. A steady count, above all on death, means the epoch test should become "not older" instead of "equal".'
+                    % detail))
+
+    if archery:
+        states = sorted(set(archery))
+        # Absence of the bow states only means something if a bow was actually drawn. The player's own launches
+        # are "shooter 14"; a bow shot carries ammo, a spell does not. Without one of those in the window, states
+        # of 0 and 2 say nothing at all -- and on 2026-09-26 this analyser cheerfully concluded the opposite from
+        # a session in which Seen cast spells and never touched a bow.
+        drew_bow = any(BOW_SHOT.search(l) for l in lines)
+        if any(s >= 9 for s in states):
+            verdict = 'the attack state moves, so a nocked arrow can be replicated by syncing it'
+        elif drew_bow:
+            verdict = ('a bow was fired and the attack state still never left the melee values, so VR archery does not set it '
+                       'and the arrow has to be attached by hand on the other side')
+        else:
+            verdict = 'INCONCLUSIVE: no bow was fired while this was logging, so the missing bow states prove nothing. Draw a bow and look again.'
+        out.append(('VR archery', 'states seen: %s. %s' % (', '.join(str(s) for s in states), verdict)))
+
+    if silences:
+        worst = max(s[0] for s in silences)
+        inmenu = sum(1 for s in silences if s[1] and s[1] != 'none')
+        out.append(('Client went quiet',
+                    '%d times, longest %d ms, %d of them with a menu open (so a menu rather than a stall).'
+                    % (len(silences), worst, inmenu)))
+
+    if objects:
+        out.append(('Objects moved by hand',
+                    '%d moves over 8 units across %d objects, largest %.0f units. This is the traffic an object-position sync would have to carry.'
+                    % (len(objects), len(set(o[0] for o in objects)), max(o[1] for o in objects))))
+
+    backlog = [tuple(int(v) for v in m.groups()) for m in (BACKLOG.search(l) for l in lines) if m]
+    if backlog:
+        worst_behind = min(b[0] for b in backlog)
+        starved = sum(b[2] for b in backlog)
+        if worst_behind < -1000:
+            out.append(('Interpolation backlog',
+                        'the buffer was %d ms BEHIND playback at worst, and %d updates arrived with nothing after them. '
+                        'Positions interpolated across a gap like that are nonsense -- this is what made SinkDiag report '
+                        '875,458 units on 2026-09-23 -- and to a player it looks like everything lagging and then teleporting.'
+                        % (worst_behind, starved)))
+        else:
+            out.append(('Interpolation backlog', 'worst %d ms behind playback, %d updates with nothing after them: healthy.' % (worst_behind, starved)))
+
+    jumps = [(float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4)), int(m.group(5))) for m in (JUMP.search(l) for l in lines) if m]
+    if jumps:
+        total = sum(j[4] for j in jumps)
+        worst = max(j[0] for j in jumps)
+        out.append(('Impossible jumps caught',
+                    '%d of them, worst %.0f units. Each one is a pair of buffered points no actor could have travelled between, and before 2026-09-26 the actor was walked across that gap. '
+                    'Cross-check the times against somebody changing worldspace: if they line up, the cause is confirmed; if they do not, the guard is still right but the reason is not.'
+                    % (total, worst)))
+
+    if grabs:
+        longest = max(g[1] for g in grabs)
+        out.append(('A body handled here',
+                    '%d reports, longest continuous movement %d ms, across %d bodies. A claim rule has to tell this apart from a settling ragdoll.'
+                    % (len(grabs), longest, len(set(g[0] for g in grabs)))))
+
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--log', default=DEFAULT_LOG)
@@ -95,6 +254,20 @@ def main():
         hits = len(re.findall(pattern, text))
         mark = 'yes' if hits else ' no'
         print('  [%s] %-28s %5d   %s' % (mark, name, hits, meaning if hits else ''))
+
+    print("")
+    print("=== this week's measurements: did they fire? ===")
+    for name, pattern in MEASURED:
+        hits = len(re.findall(pattern, text))
+        print('  [%s] %-24s %5d' % ('yes' if hits else ' no', name, hits))
+
+    findings = analyse(lines)
+    if findings:
+        print("")
+        print("=== and what they say ===")
+        for name, verdict in findings:
+            print('  %s:' % name)
+            print('    %s' % verdict)
 
     print('\n=== problems ===')
     for name, pattern in PROBLEMS:
@@ -141,3 +314,4 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
+

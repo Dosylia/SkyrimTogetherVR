@@ -1,0 +1,42 @@
+# The watching half of the range test, and the one that does the checking.
+#
+# The question is not whether the copy goes away while the other player is far off -- the server may keep it or
+# drop it, and either is a defensible design. The question is what is left when they come back: **exactly one**
+# copy of them, and a current one. A second copy left behind by a removal that missed is a body nobody owns
+# standing in the world, which is how a session fills up with actors in the wrong place.
+#
+# "actors" counts the character copies this bot holds, its own included, so two is right: itself and the other.
+
+log range watcher
+waitfor connected 45
+collect spawn ownership death
+record range watcher
+
+waitfor known other 40
+expect known other
+expect actors == 2
+
+# No fixed wait here. The health they lost while out of range can only reach this bot on the spawn the server
+# re-sends when they walk back, so waiting for it *is* waiting for the round trip -- and the test ends the moment
+# the work is done instead of at the end of a timer someone guessed.
+log waiting for them to come back
+waitfor health other <= 55 90
+
+log they are back: one copy of them, and it is alive
+waitfor known other 40
+expect known other
+expect alive other
+expect actors == 2
+expect connected
+
+# They were hurt while out of range, so nothing could be sent about it. If this reads 55 the server re-sent the
+# character with its **current** values on the way back in, which is what makes a stale copy repairable at all.
+# If it still reads 100 the copy is being welcomed back with the health it had when it left.
+log and the health they lost while out of range came back with them
+waitfor health other <= 55 30
+expect health other == 55
+
+record off
+report bot-range-watcher.txt
+log done
+stop

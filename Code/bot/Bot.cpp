@@ -22,6 +22,7 @@
 #include <Messages/RequestDeathStateChange.h>
 #include <Messages/RequestHealthChangeBroadcast.h>
 #include <Messages/RequestEquipmentChanges.h>
+#include <Messages/NotifyEquipmentChanges.h>
 #include <Messages/RequestOwnershipTransfer.h>
 #include <Messages/RequestRespawn.h>
 #include <Messages/ServerMessageFactory.h>
@@ -252,6 +253,7 @@ void Bot::OnDisconnected(EDisconnectReason aReason)
     m_serverId = 0;
     m_ownershipEpoch = 0;
     m_hasCharacter = false;
+    m_gridReported = false;
     // Everything known about the world came from a connection that no longer exists. Keeping it means a check after
     // a reconnect can be satisfied by a value the server never resent, which is the opposite of what these tests are
     // for: after reconnecting, anything the bot knows must have arrived again.
@@ -333,6 +335,24 @@ void Bot::Tick() noexcept
         }
         break;
     case Phase::InWorld:
+        // A real client tells the server every time it crosses into a new grid square, and the server decides who
+        // is in range of whom from that. The bot said it once, on arriving, and then never again -- so a bot that
+        // walked ten cells was still, as far as the server was concerned, standing where it started. Nothing that
+        // depends on range could be tested at all, which is most of what happens when players separate.
+        {
+            const auto grid = GridCellCoords::CalculateGridCellCoords(m_position.x, m_position.y);
+            if (!m_gridReported || grid.X != m_reportedGridX || grid.Y != m_reportedGridY)
+            {
+                if (m_gridReported)
+                    spdlog::info("Grid change: ({}, {}) -> ({}, {})", m_reportedGridX, m_reportedGridY, grid.X, grid.Y);
+                m_reportedGridX = grid.X;
+                m_reportedGridY = grid.Y;
+                m_gridReported = true;
+                if (m_standaloneCell)
+                    m_cell = GameId{};  // recomputed for the new square by SendCellEntry
+                SendCellEntry();
+            }
+        }
         if (now - m_lastMovement >= kMovementPeriod)
             SendMovement();
         if (m_healthRestorePending && now >= m_healthRestoreAt)
@@ -479,6 +499,18 @@ void Bot::SendCellEntry() noexcept
 {
     const auto grid = GridCellCoords::CalculateGridCellCoords(m_position.x, m_position.y);
 
+    // A standalone bot has no real cell, and an empty one is indistinguishable from "no cell at all": the server's
+    // CellIdComponent is truthy only when its Cell is set, and HandleExteriorCellEnter raises the cell-change
+    // event -- the one that re-sends a character to everyone still in range of it -- only for a player that
+    // already had a cell. So a bot with an empty cell could walk the length of Solstheim and the server would
+    // never tell anybody. A synthetic id per grid square fixes that; nothing reads it except interior comparisons,
+    // and a bot standing in a worldspace is never in an interior.
+    if (m_cell == GameId{})
+    {
+        m_standaloneCell = true;
+        m_cell = GameId{0, 0x100000u | ((static_cast<uint32_t>(grid.X) & 0xFFFu) << 12) | (static_cast<uint32_t>(grid.Y) & 0xFFFu)};
+    }
+
     EnterExteriorCellRequest enter{};
     enter.WorldSpaceId = m_worldSpace;
     enter.CellId = m_cell;
@@ -599,6 +631,9 @@ void Bot::SendEquip(const uint32_t aBaseId, const uint32_t aSlot, const bool aUn
 
     RequestEquipmentChanges request{};
     request.ServerId = m_serverId;
+    // Same trap as the health changes: the server checks the epoch on this message too and drops it silently when
+    // it does not match, so every equipment change this bot ever sent was discarded before anyone could see it.
+    request.OwnershipEpoch = m_ownershipEpoch;
     request.ItemId = Skyrim(aBaseId);
     request.EquipSlotId = Skyrim(aSlot);
     request.Count = 1;
@@ -784,7 +819,10 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         {
             if (key != 24) // health
                 continue;
-            KnownActor& actor = Actor(message.Id);
+            KnownActor* pActor = FindActor(message.Id);
+            if (!pActor)
+                continue; // a value for a character the server never gave us
+            KnownActor& actor = *pActor;
             actor.Health = value;
             actor.HealthKnown = true;
             actor.Dead = value <= 0.f;
@@ -808,10 +846,40 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
     if (opcode == NotifyDeathStateChange::Opcode)
     {
         const auto& message = static_cast<const NotifyDeathStateChange&>(acMessage);
-        KnownActor& actor = Actor(message.Id);
+        KnownActor* pActor = FindActor(message.Id);
+        if (!pActor)
+            return; // a death for somebody we were never given; the game's clients ignore these too
+        KnownActor& actor = *pActor;
         actor.Dead = message.IsDead;
         actor.LastChange = Clock::now();
         Record(Collect::Death, fmt::format("death {:X} dead={}", message.Id, message.IsDead));
+        return;
+    }
+
+    // Equipment travels as its own message and **in range only**, which is why a character that drew a sword
+    // while this client was away comes back holding the wrong thing. The bot could send equipment changes and
+    // never hear one, so nothing could be asserted about whether they arrive at all.
+    if (opcode == NotifyEquipmentChanges::Opcode)
+    {
+        const auto& message = static_cast<const NotifyEquipmentChanges&>(acMessage);
+        KnownActor* pActor = FindActor(message.ServerId);
+        if (!pActor)
+            return; // equipment for a character the server never gave us
+        KnownActor& actor = *pActor;
+        const uint32_t baseId = message.ItemId.BaseId;
+
+        auto& equipped = actor.Equipped;
+        const auto it = std::find(equipped.begin(), equipped.end(), baseId);
+        if (message.Unequip)
+        {
+            if (it != equipped.end())
+                equipped.erase(it);
+        }
+        else if (it == equipped.end())
+            equipped.push_back(baseId);
+
+        actor.LastChange = Clock::now();
+        Record(Collect::Equipment, fmt::format("{} {:X} on {:X}", message.Unequip ? "unequipped" : "equipped", baseId, message.ServerId));
         return;
     }
 
@@ -845,6 +913,10 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         spdlog::info("Server handed us actor {:X}; handing it back (a bot never owns anything)", message.ServerId);
         RequestOwnershipTransfer request{};
         request.ServerId = message.ServerId;
+        // The epoch the server just gave us, echoed back. Without it the server rejects the hand-back --
+        // OnOwnershipTransferRequest requires the epoch to match -- and this bot went on owning every actor it had
+        // just announced it was refusing. Third message in this family to be caught the same way (2026-09-26).
+        request.OwnershipEpoch = message.OwnershipEpoch;
         SendMsg(request);
         return;
     }
@@ -1132,6 +1204,7 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
             else if (kind == "death") mask |= static_cast<uint32_t>(Collect::Death);
             else if (kind == "ownership") mask |= static_cast<uint32_t>(Collect::Ownership);
             else if (kind == "spawn") mask |= static_cast<uint32_t>(Collect::Spawn);
+            else if (kind == "equipment") mask |= static_cast<uint32_t>(Collect::Equipment);
             else if (kind == "party") mask |= static_cast<uint32_t>(Collect::Party);
             else if (kind == "movement") mask |= static_cast<uint32_t>(Collect::Movement);
             else spdlog::warn("Line {}: unknown collect kind '{}'", acCommand.Line, kind);
@@ -1238,6 +1311,16 @@ void Bot::Record(const Collect aKind, const std::string& acText) noexcept
     m_events.push_back(fmt::format("[{:8.3f}] {}", at, acText));
 }
 
+KnownActor* Bot::FindActor(const uint32_t aServerId) noexcept
+{
+    for (auto& actor : m_actors)
+    {
+        if (actor.ServerId == aServerId)
+            return &actor;
+    }
+    return nullptr;
+}
+
 KnownActor& Bot::Actor(const uint32_t aServerId) noexcept
 {
     for (auto& actor : m_actors)
@@ -1254,6 +1337,20 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
 {
     if (acArgs.empty())
         return std::nullopt;
+
+    // "not <condition>": every condition can be waited on for going away as well as for arriving. Without it a
+    // script can say "the sword appeared" but never "the sword was put away", which is half a test.
+    if (acArgs[0] == "not")
+    {
+        if (acArgs.size() < 2)
+            return std::nullopt;
+        const std::vector<std::string> rest(acArgs.begin() + 1, acArgs.end());
+        const std::optional<bool> held = Evaluate(rest, aOutWhy);
+        if (!held.has_value())
+            return std::nullopt;
+        aOutWhy = fmt::format("not: {}", aOutWhy);
+        return !*held;
+    }
 
     const std::string& what = acArgs[0];
 
@@ -1403,6 +1500,34 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
         }
         aOutWhy = seen ? fmt::format("{:X} is known", id) : (id != kNoId ? fmt::format("{:X} never arrived", id) : std::string("nobody else is here yet"));
         return seen;
+    }
+
+    if (what == "equipped")
+    {
+        // equipped <who> <baseId hex>: is that actor holding that item, as far as this bot has been told.
+        uint32_t id = 0;
+        if (!parseId(1, id) || acArgs.size() < 3)
+            return std::nullopt;
+
+        const char* pStart = acArgs[2].c_str();
+        char* pEnd = nullptr;
+        const uint32_t wanted = static_cast<uint32_t>(std::strtoul(pStart, &pEnd, 16));
+        if (pEnd == pStart)
+            return std::nullopt;
+
+        const KnownActor* pActor = id != kNoId ? findActor(id) : nullptr;
+        if (!pActor)
+        {
+            aOutWhy = id != kNoId ? fmt::format("nothing known about {:X}", id) : std::string("nobody else is here yet");
+            return false;
+        }
+
+        const bool holding = std::find(pActor->Equipped.begin(), pActor->Equipped.end(), wanted) != pActor->Equipped.end();
+        std::string held;
+        for (const uint32_t item : pActor->Equipped)
+            held += fmt::format("{}{:X}", held.empty() ? "" : " ", item);
+        aOutWhy = fmt::format("{:X} holds [{}]", id, held.empty() ? std::string("nothing") : held);
+        return holding;
     }
 
     if (what == "actors")

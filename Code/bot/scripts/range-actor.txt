@@ -1,0 +1,45 @@
+# Walks several cells away and comes back, the way a player crossing Solstheim does.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Pair range
+#
+# Seen crossed seven grid squares in three minutes on 2026-09-25, and the bandit through the sky, the body in the
+# wrong place and the spriggan that could not land a hit all happened during it. A grid square is 4096 units, so
+# the trip below is about five of them each way -- far enough for the server to take this bot out of range of the
+# other one and put it back.
+
+log range actor
+waitfor connected 45
+collect spawn ownership
+record range actor
+
+waitfor players >= 1 30
+expect known me
+
+log settling where the other player can see me
+wait 8
+
+log walking five cells east
+walk rel 20000 0 3000
+wait 10
+
+# Changing health out here is the point. Health travels in range only, so the watcher cannot be told about this
+# one: the only way it can ever learn the new value is the spawn the server re-sends when this bot comes back.
+log taking damage where the other side cannot be told about it
+health 55
+wait 6
+
+log and back again
+walk rel -20000 0 3000
+wait 10
+
+expect known me
+expect connected
+
+log standing still while the other side counts what it has
+wait 10
+expect connected
+
+record off
+report bot-range-actor.txt
+log done
+stop

@@ -780,6 +780,88 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
             else
                 spdlog::warn("Character with remote id {:X} is already spawned.", acMessage.ServerId);
 
+            // ...but "they arrive continuously through the movement path" stops being true the moment the server
+            // withholds them, and that is exactly when this re-send happens.
+            //
+            // The server range-filters updates by grid (uGridsToLoad 5, so two cells). Walk out of that and the
+            // updates stop: on 2026-09-26 a bot five cells away produced "0 character updates sent, 321 withheld".
+            // Meanwhile the real actor carries on being moved by its owner. Walk back and the server re-sends this
+            // spawn to put the copy right -- and the copy, which never stopped existing, ignored it and stayed
+            // where it was last seen. That is a body in the wrong place and a follower that looks frozen.
+            //
+            // So: apply the spawn's position only when nothing has been arriving for this character. If updates
+            // are flowing the interpolation is fresh and is left alone, which is what the note above is protecting.
+            if (auto* pInterpolation = m_world.try_get<InterpolationComponent>(cExisting))
+            {
+                constexpr uint64_t cStaleAfterMs = 2000;
+                const uint64_t currentTick = m_transport.GetClock().GetCurrentTick();
+                const uint64_t newestTick = pInterpolation->TimePoints.empty() ? 0 : pInterpolation->TimePoints.back().Tick;
+                const bool stale = newestTick == 0 || (currentTick > newestTick && currentTick - newestTick > cStaleAfterMs);
+
+                if (stale && pFormIdComponent)
+                {
+                    if (Actor* pActor = Cast<Actor>(TESForm::GetById(pFormIdComponent->Id)))
+                    {
+                        const glm::vec3 wanted{acMessage.Position.x, acMessage.Position.y, acMessage.Position.z};
+                        spdlog::info("Character {:X} was {} ms without an update and the server has re-sent it; moving the copy to where the server says ({:.0f}, {:.0f}, {:.0f})", acMessage.ServerId,
+                                     newestTick == 0 ? currentTick : currentTick - newestTick, wanted.x, wanted.y, wanted.z);
+
+                        // Drop what is buffered: every point in it predates the silence and would drag the copy
+                        // back through where it used to be.
+                        pInterpolation->TimePoints.clear();
+                        pInterpolation->Position = wanted;
+                        pActor->ForcePosition(NiPoint3(wanted));
+
+                        // Position is not the only thing that went stale. Health travels as
+                        // NotifyActorValueChanges and equipment as its own message, and **both are sent in range
+                        // only** -- so a character that healed, took a beating or drew a sword while this client
+                        // was away comes back wrong in all of those too. That is "she seems frozen, not swapping
+                        // weapons" (2026-09-25). The spawn carries the right values; under this staleness gate
+                        // there is nothing fresher to fight with, which is what made applying them unsafe before.
+                        pActor->SetActorValues(acMessage.IsPlayer ? StandingValues(acMessage.InitialActorValues, pActor->formID) : acMessage.InitialActorValues);
+                        if (pActor->actorState.IsWeaponDrawn() != acMessage.IsWeaponDrawn)
+                            pActor->SetWeaponDrawnEx(acMessage.IsWeaponDrawn);
+
+                        // Death, which is the worst of them to miss. A death is broadcast to every player rather
+                        // than only those in range, precisely so that nobody can miss it -- but the receiving
+                        // handler only applies it when the copy's ownership epoch matches the message's, and
+                        // `NotifyOwnershipTransfer` **is** range-filtered. So a player who was away while the
+                        // actor changed hands has a stale epoch, drops the death on arrival, and is left with a
+                        // corpse still walking around. The epoch is refreshed a few lines above, but the death
+                        // that was already thrown away does not come back on its own; the spawn is the only place
+                        // left that still knows.
+                        if (pActor->IsDead() != acMessage.IsDead)
+                        {
+                            spdlog::info("Character {:X} came back {} and this copy had it the other way; correcting", acMessage.ServerId, acMessage.IsDead ? "dead" : "alive");
+                            acMessage.IsDead ? pActor->Kill() : pActor->Respawn();
+                        }
+
+                        // Factions, for the same reason and with more at stake than they look: a character that
+                        // turned hostile while this client was away is still friendly on this copy, and a copy in
+                        // the wrong faction is a creature that squares up to somebody and never swings. That is
+                        // the shape of the Burned Spriggan of 2026-09-25, which spent a fight trying to attack
+                        // Lydia and never landing one. Faction changes are range-filtered like everything else
+                        // here, so being away is exactly when they are missed.
+                        if (auto* pCache = m_world.try_get<CacheComponent>(cExisting))
+                        {
+                            if (!(pCache->FactionsContent == acMessage.FactionsContent))
+                            {
+                                spdlog::info("Character {:X} came back in different factions from the server's; applying them", acMessage.ServerId);
+                                pCache->FactionsContent = acMessage.FactionsContent;
+                                pActor->SetFactions(pCache->FactionsContent);
+                            }
+                        }
+
+                        // Inventory is deliberately **not** applied yet, only compared. SetActorInventory is what
+                        // the naked-NPC check calls, and that is the path that produced 717 refused Unequip
+                        // replays on a single guard; doing it on every return from out of range, unprompted, is
+                        // how that comes back. One session's worth of this line says whether it is worth the risk.
+                        if (!(pActor->GetActorInventory() == acMessage.InventoryContent))
+                            spdlog::info("Character {:X} also came back with a different inventory from the server's; not applied, only noticed", acMessage.ServerId);
+                    }
+                }
+            }
+
             return;
         }
 
@@ -2132,6 +2214,36 @@ void CharacterService::RunLocalUpdates() const noexcept
     if (now - lastSendTimePoint < cDelayBetweenPlayerSnapshots)
         return;
 
+    // How long this client was silent, named at the moment it stops being silent.
+    //
+    // A timeout is the server deciding nobody is home, and it is the single most destructive thing that happens to
+    // a session: Seen's client dropped five times on 2026-09-25 and handed back 45 actors in one burst, which is
+    // where the launched bandit, the body in the wrong place, the frozen follower and the spriggan that could not
+    // land a hit all came from. Every log so far shows the aftermath and never the gap itself. This is the gap: if
+    // the pause counter is up it was a menu, if a load was running it was the load, and if it was neither then the
+    // client stalled and the section timings above say on what.
+    if (lastSendTimePoint.time_since_epoch().count() != 0)
+    {
+        const auto silence = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSendTimePoint).count();
+        if (silence >= 1000)
+        {
+            UI* pUI = UI::Get();
+            std::string menus;
+            if (pUI)
+            {
+                for (IMenu* pMenu : pUI->menuStack)
+                {
+                    if (!pMenu)
+                        continue;
+                    if (BSFixedString* pName = pUI->LookupMenuNameByInstance(pMenu))
+                        menus += fmt::format("{}{}", menus.empty() ? "" : ", ", pName->AsAscii());
+                }
+            }
+            spdlog::warn("Silence: sent nothing for {} ms; menus [{}]. The server drops a client that stops talking, and a drop hands its actors away.", silence,
+                         menus.empty() ? "none" : menus);
+        }
+    }
+
     lastSendTimePoint = now;
 
 #ifdef SKYRIMVR
@@ -2375,6 +2487,11 @@ void CharacterService::RunRemoteUpdates() noexcept
         }
 
         InterpolationSystem::Update(pActor, interpolationComponent, tick, poseTick);
+
+#ifdef SKYRIMVR
+        // Measurement only, and cheap: it returns at once unless this is a dead body within arm's reach.
+        VRBodySync::ObserveRemoteBodyMotion(pActor);
+#endif
     }
 
     auto animatedView = m_world.view<RemoteComponent, RemoteAnimationComponent, FormIdComponent>();

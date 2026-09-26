@@ -1,6 +1,7 @@
 #include "InventoryService.h"
 
 #include <Components.h>
+#include <EpochDrop.h>
 #include <World.h>
 #include <GameServer.h>
 
@@ -113,9 +114,12 @@ void InventoryService::OnEquipmentChanges(const PacketEvent<RequestEquipmentChan
         if (pOwnerComponent->GetOwner() != acMessage.pPlayer || pOwnerComponent->OwnershipEpoch != message.OwnershipEpoch)
         {
             const uint32_t ownerId = pOwnerComponent->GetOwner() ? pOwnerComponent->GetOwner()->GetId() : 0;
-            spdlog::debug(
-                "Rejected equipment change from player {:X} for actor {:X}; current owner is {:X} and requested epoch {} does not match {}",
-                acMessage.pPlayer->GetId(), message.ServerId, ownerId, message.OwnershipEpoch, pOwnerComponent->OwnershipEpoch);
+            // This was spdlog::debug, which never reaches the log file, and that is exactly why the client's
+            // equipment snapshot could be rejected on every single send for weeks while its own log line said
+            // "Equipment snapshot sent". A silent drop that is also an invisible log is not a diagnostic.
+            spdlog::debug("Rejected equipment change from player {:X} for actor {:X}; current owner is {:X} and requested epoch {} does not match {}", acMessage.pPlayer->GetId(), message.ServerId,
+                          ownerId, message.OwnershipEpoch, pOwnerComponent->OwnershipEpoch);
+            ReportEpochDrop("an equipment change", message.ServerId, message.OwnershipEpoch, pOwnerComponent->OwnershipEpoch);
             return;
         }
     }

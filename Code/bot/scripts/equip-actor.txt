@@ -1,0 +1,33 @@
+# Equips and unequips, so the other side can say whether it was told.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Pair equip
+#
+# 12EB7 is the Iron Sword. Nothing here needs the item to be real to this bot -- the id is data the server
+# relays -- but a plausible one keeps the logs readable.
+
+log equip actor
+waitfor connected 45
+collect equipment spawn
+record equip actor
+
+waitfor players >= 1 30
+expect known me
+
+log settling
+wait 6
+
+log drawing a sword
+equip 12EB7
+wait 8
+
+log putting it away again
+unequip 12EB7
+wait 8
+
+expect connected
+wait 10
+
+record off
+report bot-equip-actor.txt
+log done
+stop

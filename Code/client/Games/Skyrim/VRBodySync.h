@@ -24,6 +24,8 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept;
 //! lie, slump and get dragged around the way it does here (HIGGS grabs, spell pushes, a foot in the ribs).
 //! Upper-body bones only. Returns false, leaving the pose empty, when the body has not moved since the last send.
 bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept;
+//! Measurement only: watch a dead body this client does **not** own for signs of being handled here.
+void ObserveRemoteBodyMotion(Actor* apActor) noexcept;
 
 //! A pose without data clears the actor's pose.
 void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept;

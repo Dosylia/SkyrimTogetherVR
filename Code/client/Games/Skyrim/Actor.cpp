@@ -199,6 +199,36 @@ void Actor::ForcePosition(const NiPoint3& acPosition) noexcept
         }
     }
 
+#ifdef SKYRIMVR
+    // TEMPORARY (2026-09-26): "interpolation will catch the controller up once physics timing becomes available"
+    // is an assumption, and NPCs standing below the floor is what it would look like if it were false. The
+    // character controller is what keeps a body on the ground; if it is never caught up, the reference sits where
+    // the network says while the controller is somewhere else, and the two disagree about where the floor is.
+    //
+    // Counted rather than reasoned about: how many placements skipped the controller, against how many did not.
+    // A number that is occasionally non-zero is a controller waiting a frame or two for its first step, which is
+    // what the code above expects. A number that stays high is the assumption failing, and then SinkDiag's
+    // "has controller" field says which actors it is failing for.
+    if (pExtension && pExtension->IsRemote())
+    {
+        static uint32_t s_skipped = 0;
+        static uint32_t s_updated = 0;
+        static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+
+        updateController ? ++s_updated : ++s_skipped;
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= s_nextLog)
+        {
+            s_nextLog = now + std::chrono::seconds(10);
+            if (s_skipped)
+                spdlog::info("ControllerDiag: {} of {} remote placements could not move the character controller with the reference", s_skipped, s_skipped + s_updated);
+            s_skipped = 0;
+            s_updated = 0;
+        }
+    }
+#endif
+
     // With no usable step yet, update the reference/3D now; interpolation will
     // catch the controller up once physics timing becomes available
     SetPosition(acPosition, updateController);
@@ -1059,24 +1089,6 @@ char TP_MAKE_THISCALL(HookSetPosition, Actor, NiPoint3& aPosition)
     return 1;
 }
 
-TP_THIS_FUNCTION(TForceState, void, Actor, const NiPoint3&, float, float, TESObjectCELL*, TESWorldSpace*, bool);
-static TForceState* RealForceState = nullptr;
-
-void TP_MAKE_THISCALL(HookForceState, Actor, const NiPoint3& acPosition, float aX, float aZ, TESObjectCELL* apCell, TESWorldSpace* apWorldSpace, bool aUnkBool)
-{
-    /*const auto pNpc = Cast<TESNPC>(apThis->baseForm);
-    if (pNpc)
-    {
-        spdlog::info("For TESNPC: {}, spawn at {} {} {}", pNpc->fullName.value, apPosition->m_x, apPosition->m_y,
-                     apPosition->m_z);
-    }*/
-
-    // if (apThis != PlayerCharacter::Get())
-    //     return;
-
-    return TiltedPhoques::ThisCall(RealForceState, apThis, acPosition, aX, aZ, apCell, apWorldSpace, aUnkBool);
-}
-
 TP_THIS_FUNCTION(TSpawnActorInWorld, bool, Actor);
 static TSpawnActorInWorld* RealSpawnActorInWorld = nullptr;
 
@@ -1503,7 +1515,6 @@ static TiltedPhoques::Initializer s_actorHooks(
         POINTER_SKYRIMSE(TCharacterConstructor2, s_characterCtor2, 40246, 40246);
         POINTER_SKYRIMSE(TCharacterDestructor, s_characterDtor, 37175, 37175);
         POINTER_SKYRIMSE(TGetLocation, s_GetActorLocation, 19812, 19385);
-        POINTER_SKYRIMSE(TForceState, s_ForceState, 37313, 37313);
         POINTER_SKYRIMSE(TSpawnActorInWorld, s_SpawnActorInWorld, 19742, 19742);
         POINTER_SKYRIMSE(TDamageActor, s_damageActor, 37335, 36345);
         POINTER_SKYRIMSE(TApplyActorEffect, s_applyActorEffect, 35086, 35086);
@@ -1544,7 +1555,6 @@ static TiltedPhoques::Initializer s_actorHooks(
         FUNC_GetActorLocation = s_GetActorLocation.Get();
         RealCharacterConstructor = s_characterCtor.Get();
         RealCharacterConstructor2 = s_characterCtor2.Get();
-        RealForceState = s_ForceState.Get();
         RealSpawnActorInWorld = s_SpawnActorInWorld.Get();
         RealDamageActor = s_damageActor.Get();
         RealApplyActorEffect = s_applyActorEffect.Get();
@@ -1565,7 +1575,6 @@ static TiltedPhoques::Initializer s_actorHooks(
         TP_HOOK(&RealRemoveSpell, HookRemoveSpell);
         TP_HOOK(&RealCharacterConstructor, HookCharacterConstructor);
         TP_HOOK(&RealCharacterConstructor2, HookCharacterConstructor2);
-        TP_HOOK(&RealForceState, HookForceState);
         TP_HOOK(&RealSpawnActorInWorld, HookSpawnActorInWorld);
         TP_HOOK(&RealDamageActor, HookDamageActor);
         TP_HOOK(&RealApplyActorEffect, HookApplyActorEffect);

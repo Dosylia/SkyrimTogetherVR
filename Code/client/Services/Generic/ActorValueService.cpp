@@ -6,6 +6,7 @@
 #include <Forms/ActorValueInfo.h>
 #include <Games/References.h>
 #include <Components.h>
+#include <EpochMiss.h>
 
 #include <Events/UpdateEvent.h>
 #include <Events/ActorRemovedEvent.h>
@@ -400,11 +401,19 @@ void ActorValueService::OnActorValueChanges(const NotifyActorValueChanges& acMes
 {
     auto view = m_world.view<FormIdComponent, RemoteComponent>();
 
+    // Separated from the epoch test so a stale epoch can be told apart from a character we simply do not have.
     const auto itor = std::find_if(std::begin(view), std::end(view), [&acMessage, view](entt::entity entity)
+    { return view.get<RemoteComponent>(entity).Id == acMessage.Id; });
+
+    if (itor != std::end(view))
     {
-        const auto& remote = view.get<RemoteComponent>(entity);
-        return remote.Id == acMessage.Id && acMessage.OwnershipEpoch != 0 && remote.OwnershipEpoch == acMessage.OwnershipEpoch;
-    });
+        const auto& remoteFound = view.get<RemoteComponent>(*itor);
+        if (acMessage.OwnershipEpoch == 0 || remoteFound.OwnershipEpoch != acMessage.OwnershipEpoch)
+        {
+            ReportEpochMiss("an actor value change", acMessage.Id, acMessage.OwnershipEpoch, remoteFound.OwnershipEpoch);
+            return;
+        }
+    }
 
     if (itor == std::end(view))
         return;
@@ -504,11 +513,19 @@ void ActorValueService::OnActorMaxValueChanges(const NotifyActorMaxValueChanges&
 {
     auto view = m_world.view<FormIdComponent, RemoteComponent>();
 
+    // Separated from the epoch test so a stale epoch can be told apart from a character we simply do not have.
     const auto it = std::find_if(std::begin(view), std::end(view), [&acMessage, view](entt::entity entity)
+    { return view.get<RemoteComponent>(entity).Id == acMessage.Id; });
+
+    if (it != std::end(view))
     {
-        const auto& remote = view.get<RemoteComponent>(entity);
-        return remote.Id == acMessage.Id && acMessage.OwnershipEpoch != 0 && remote.OwnershipEpoch == acMessage.OwnershipEpoch;
-    });
+        const auto& remoteFound = view.get<RemoteComponent>(*it);
+        if (acMessage.OwnershipEpoch == 0 || remoteFound.OwnershipEpoch != acMessage.OwnershipEpoch)
+        {
+            ReportEpochMiss("a health broadcast", acMessage.Id, acMessage.OwnershipEpoch, remoteFound.OwnershipEpoch);
+            return;
+        }
+    }
 
     if (it == std::end(view))
         return;
@@ -534,11 +551,19 @@ void ActorValueService::OnDeathStateChange(const NotifyDeathStateChange& acMessa
 {
     auto view = m_world.view<FormIdComponent, RemoteComponent>();
 
+    // Separated from the epoch test so a stale epoch can be told apart from a character we simply do not have.
     const auto it = std::find_if(std::begin(view), std::end(view), [&acMessage, view](entt::entity entity)
+    { return view.get<RemoteComponent>(entity).Id == acMessage.Id; });
+
+    if (it != std::end(view))
     {
-        const auto& remote = view.get<RemoteComponent>(entity);
-        return remote.Id == acMessage.Id && acMessage.OwnershipEpoch != 0 && remote.OwnershipEpoch == acMessage.OwnershipEpoch;
-    });
+        const auto& remoteFound = view.get<RemoteComponent>(*it);
+        if (acMessage.OwnershipEpoch == 0 || remoteFound.OwnershipEpoch != acMessage.OwnershipEpoch)
+        {
+            ReportEpochMiss("a death state change", acMessage.Id, acMessage.OwnershipEpoch, remoteFound.OwnershipEpoch);
+            return;
+        }
+    }
 
     if (it == std::end(view))
         return;

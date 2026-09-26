@@ -1,0 +1,30 @@
+# Does a death that happened out of range survive the journey back?
+#
+# A death is broadcast to every player rather than only those in range, deliberately, so that nobody holding the
+# actor can miss it. The client then applies it only when the copy's ownership epoch matches the message's -- and
+# ownership transfers **are** range-filtered, so a player who was away while the actor changed hands has a stale
+# epoch, throws the death away on arrival, and is left with a corpse still walking around.
+#
+# The spawn the server re-sends on the way back is the last place that still knows, which is why the stale-copy
+# repair now applies death state as well (2026-09-26). This test holds the plain requirement: they died over
+# there, so they are dead over here.
+
+log deadfar watcher
+waitfor connected 45
+collect health death spawn
+record deadfar watcher
+
+waitfor known other 40
+expect known other
+expect alive other
+
+log they went away, died, and came back
+waitfor dead other 90
+expect dead other
+expect known other
+expect connected
+
+record off
+report bot-deadfar-watcher.txt
+log done
+stop

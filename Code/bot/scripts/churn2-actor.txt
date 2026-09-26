@@ -48,9 +48,11 @@ reconnect
 waitfor connected 45
 expect known me
 
-# Staying put at the end. The watcher does its final count once the churn has stopped, and a bot that leaves the
-# moment its last round finishes is a bot the watcher can only report as missing.
-wait 25
+# 77 is a marker, not a health test: "present" looks the same to the watcher in the middle of the churn as it does
+# at the end, so the two halves need something to agree on. This is the agreed thing, and it lets the watcher stop
+# waiting the instant the rounds are over.
+health 77
+wait 10
 expect connected
 
 record off

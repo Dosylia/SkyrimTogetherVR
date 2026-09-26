@@ -1,0 +1,27 @@
+# The watching half: does an equipment change made over there arrive here at all?
+#
+# Equipment travels as its own message and **in range only**, which is the same filter that made a returning
+# player come back with the wrong health. Nothing had ever checked that it arrives even at close range, because
+# the bot could send equipment changes and never hear one. Now it can hear them, so this asks the plain question.
+
+log equip watcher
+waitfor connected 45
+collect equipment spawn
+record equip watcher
+
+waitfor known other 40
+expect known other
+
+log the sword they drew should reach us
+waitfor equipped other 12EB7 40
+expect equipped other 12EB7
+
+log and so should putting it away
+waitfor not equipped other 12EB7 40
+expect not equipped other 12EB7
+expect connected
+
+record off
+report bot-equip-watcher.txt
+log done
+stop

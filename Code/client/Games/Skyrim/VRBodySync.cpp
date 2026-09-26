@@ -1382,6 +1382,94 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
     return true;
 }
 
+// Measurement only: nothing here claims anything or changes what anyone sees.
+//
+// Dragging a corpse is only sent by the client that **owns** it (see AnimationSystem: "a body this machine owns").
+// The thing that used to claim a body you had grabbed, RunBodyGrabUpdates, was removed on 2026-09-24 because its
+// test -- "a dead body more than 32 units from its network position" -- is true of corpses that have merely
+// settled, and it fired 207 times across 58 bodies in one session and crashed the receiver. So since that removal,
+// dragging a body you do not own is invisible to everybody, by construction. That is the 20:45 Lurker of
+// 2026-09-25, and it needs no log to explain.
+//
+// Before anything claims a body again, this says what a safe test would look like. A settling ragdoll comes to
+// rest in a second or two; a body someone is dragging keeps moving for as long as they drag it. So what gets
+// measured is *sustained* motion within arm's reach -- how long, how far, and how close -- and the numbers decide
+// the threshold rather than the other way round.
+void ObserveRemoteBodyMotion(Actor* apActor) noexcept
+{
+    if (!apActor || !apActor->actorState.IsDead())
+        return;
+
+    const PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer)
+        return;
+
+    void* pRoot = apActor->GetNiNode();
+    if (!pRoot)
+        return;
+
+    const glm::vec3 at = ToGlm(At<NiTransform>(pRoot, kWorldOffset).translate);
+    const glm::vec3 playerAt = ToGlm(static_cast<NiPoint3>(pPlayer->position));
+    const float toPlayer = glm::distance(at, playerAt);
+    // Beyond this nobody is touching it by hand, so it is not worth a thought.
+    if (toPlayer > 400.f)
+        return;
+
+    struct Watch
+    {
+        glm::vec3 Last{};
+        bool Placed = false;
+        std::chrono::steady_clock::time_point MovingSince{};
+        std::chrono::steady_clock::time_point LastMoved{};
+        std::chrono::steady_clock::time_point NextLog{};
+        float Travelled = 0.f;
+        std::chrono::steady_clock::time_point TouchedAt{};
+    };
+    static std::unordered_map<uint32_t, Watch> s_watch;
+
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = s_watch.begin(); it != s_watch.end();)
+        it = now - it->second.TouchedAt > std::chrono::seconds(30) ? s_watch.erase(it) : std::next(it);
+
+    Watch& watch = s_watch[apActor->formID];
+    watch.TouchedAt = now;
+
+    if (!watch.Placed)
+    {
+        watch.Last = at;
+        watch.Placed = true;
+        return;
+    }
+
+    const float step = glm::distance(at, watch.Last);
+    watch.Last = at;
+
+    // The same 4 units CaptureBodyPose uses: a settled ragdoll still twitches.
+    if (step >= 4.f)
+    {
+        if (now - watch.LastMoved > std::chrono::milliseconds(500))
+        {
+            watch.MovingSince = now;
+            watch.Travelled = 0.f;
+        }
+        watch.LastMoved = now;
+        watch.Travelled += step;
+    }
+    else if (now - watch.LastMoved > std::chrono::milliseconds(500))
+    {
+        watch.Travelled = 0.f;
+        return;
+    }
+
+    const auto movingFor = std::chrono::duration_cast<std::chrono::milliseconds>(now - watch.MovingSince).count();
+    if (movingFor < 1000 || now < watch.NextLog)
+        return;
+
+    watch.NextLog = now + std::chrono::seconds(5);
+    spdlog::info("BodyGrabDiag: remote body {:X} has been moving here for {} ms, {:.0f} units travelled, {:.0f} from the player. Nobody owns it on this side, so nothing of this is being sent.",
+                 apActor->formID, movingFor, watch.Travelled, toPlayer);
+}
+
 bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
 {
     aOutPose.HasData = false;

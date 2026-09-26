@@ -18,7 +18,12 @@ expect known other
 expect actors == 2
 
 log riding out four join-and-leave rounds
-wait 32
+waitfor health other == 77 90
+
+# The marker arrives the moment the last round ends, which can be before the removals for the rounds before it
+# have landed. The invariant is "eventually exactly two", not "two this instant" -- counting without letting the
+# world settle is a race in the test, and it shows up as a phantom leak when the server is busy.
+wait 4
 
 log the other player is back, and there is exactly one of them
 waitfor known other 30

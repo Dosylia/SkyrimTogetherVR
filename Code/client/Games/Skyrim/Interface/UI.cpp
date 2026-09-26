@@ -311,43 +311,6 @@ void UIMessageQueue__AddMessage(void* a1, const BSFixedString* a2, UIMessage::UI
         *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(a4) + 0x10) == 0xB && *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(a4) + 0x28) != 0)
         s_lastGameEnemyMeterTargetAt = std::chrono::steady_clock::now();
 
-    if (a2 && a2->AsAscii() && !s_sendingEnemyMeter && (strcmp(a2->AsAscii(), "WSEnemyMeters") == 0 || (strcmp(a2->AsAscii(), "HUD Menu") == 0 && a3 != UIMessage::kUpdate)))
-    {
-        static std::chrono::steady_clock::time_point s_windowStart;
-        static int s_linesThisWindow = 0;
-        const auto now = std::chrono::steady_clock::now();
-        if (now - s_windowStart >= std::chrono::seconds(1))
-        {
-            s_windowStart = now;
-            s_linesThisWindow = 0;
-        }
-        if (s_linesThisWindow++ < 20)
-        {
-            char caller[160];
-            DescribeCaller(_ReturnAddress(), caller, sizeof(caller));
-            std::string dataWords;
-            if (a4 && ReadableBytes(a4, 64))
-            {
-                const uint64_t* pWords = static_cast<const uint64_t*>(a4);
-                for (int i = 0; i < 8; ++i)
-                {
-                    char word[160];
-                    DescribeCaller(reinterpret_cast<void*>(static_cast<uintptr_t>(pWords[i])), word, sizeof(word));
-                    dataWords += fmt::format("{}{}", i == 0 ? "" : ", ", word);
-                }
-            }
-            std::string frames;
-            void* stack[10] = {};
-            const USHORT count = RtlCaptureStackBackTrace(1, 10, stack, nullptr);
-            for (USHORT i = 0; i < count; ++i)
-            {
-                char frame[160];
-                DescribeCaller(stack[i], frame, sizeof(frame));
-                frames += fmt::format("{}{}", i == 0 ? "" : " < ", frame);
-            }
-            spdlog::info("MeterProbe: {} message type {}, data {}, from {}; data words [{}]; stack [{}]", a2->AsAscii(), static_cast<int>(a3), a4 ? "yes" : "no", caller, dataWords, frames);
-        }
-    }
     UIMessageQueue__AddMessage_Real(a1, a2, a3, a4);
 }
 

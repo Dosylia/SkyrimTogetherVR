@@ -115,7 +115,11 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
         delta = 1.f / tickDelta * static_cast<float>(aTick - first.Tick);
     }
 
-    delta = TiltedPhoques::Min(delta, 1.0f);
+    // Clamped at both ends. The lower clamp is belt and braces rather than a fix: `aTick - first.Tick` is
+    // unsigned, so a playback tick behind the oldest point wraps to an enormous positive value and the upper
+    // clamp already catches it. (Written on 2026-09-26 as though it fixed the displaced actors below. It does
+    // not -- Lerp with delta in [0, 1] can only ever put an actor *between* the two points it is given.)
+    delta = TiltedPhoques::Max(0.f, TiltedPhoques::Min(delta, 1.0f));
 
     const NiPoint3 position{TiltedPhoques::Lerp(first.Position, second.Position, delta)};
 
@@ -227,7 +231,15 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
         static uint32_t s_worstActor = 0;
         static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
 
-        if (const auto it = s_lastPlacedZ.find(apActor->formID); it != s_lastPlacedZ.end())
+        // Only while the points being interpolated between are current. On 2026-09-23 at 19:04:11 this reported
+        // 195 sinks with a worst of 875,458 units -- two hundred cells, which is not a body sinking through a
+        // floor but the buffer being fifteen seconds behind playback ("newest buffered tick -15575"). Positions
+        // interpolated across a backlog like that are nonsense, and counting them here buries the real signal,
+        // which is the ordinary 30-to-190-unit drops that show up one or two at a time.
+        const uint64_t cNewestTick = movements.back().Tick;
+        const bool cFresh = cNewestTick + 1000 >= aTick;
+
+        if (const auto it = s_lastPlacedZ.find(apActor->formID); cFresh && it != s_lastPlacedZ.end())
         {
             const float sink = it->second - apActor->position.z;
             if (sink > 16.f)
@@ -247,7 +259,14 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
         {
             s_nextLog = now + 10s;
             if (s_sunkPlacements)
-                spdlog::info("SinkDiag: {} placements found a remote actor lower than where it was last put, worst {:.0f} units on {:X}", s_sunkPlacements, s_worstSink, s_worstActor);
+            {
+                // "has controller" was added on 2026-09-26. An actor that sinks *with* a controller is physics
+                // disagreeing about the floor; one that sinks without is a body nothing is holding up, which
+                // points straight at ForcePosition giving up on the controller (see ControllerDiag).
+                const Actor* pWorst = s_worstActor ? Cast<Actor>(TESForm::GetById(s_worstActor)) : nullptr;
+                spdlog::info("SinkDiag: {} placements found a remote actor lower than where it was last put, worst {:.0f} units on {:X}, has controller {}", s_sunkPlacements, s_worstSink,
+                             s_worstActor, pWorst && pWorst->currentProcess && pWorst->currentProcess->GetCharController() ? "yes" : "no");
+            }
             s_sunkPlacements = 0;
             s_worstSink = 0.f;
             s_worstActor = 0;
@@ -255,76 +274,12 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     }
 #endif
 
-#ifdef SKYRIMVR
-    // TEMPORARY: remote NPCs slide for the receiving player while the owner sees them walk (2026-09-19). Either their
-    // animation graph is not advancing at all (Actor::Process is skipped for remote actors, and on VR that id may
-    // cover more than AI) or it advances with wrong variables. Every fourth frame, for a remote NPC that moved
-    // since its last sample, the skeleton's local transforms are fingerprinted: a body that moves while its bones
-    // never change has a frozen graph. Remove once understood.
-    if (!apActor->GetExtension()->IsRemotePlayer() && !apActor->actorState.IsDeadOrDying())
-    {
-        struct MotionSample
-        {
-            uint64_t Fingerprint = 0;
-            glm::vec3 Position{};
-            uint32_t Frame = 0;
-            uint32_t FrozenSamples = 0;
-        };
-        static TiltedPhoques::Map<uint32_t, MotionSample> s_samples;
-        static uint32_t s_frame = 0;
-        static uint32_t s_moving = 0;
-        static uint32_t s_frozen = 0;
-        static uint32_t s_worstActor = 0;
-        static uint32_t s_worstFrozen = 0;
-        static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
+// MotionDiag lived here and has been removed (2026-09-25). It answered its question -- remote NPCs slid because the
+// wrong function was skipped on VR -- and every session since has reported "0 with bones that had not changed".
+// What it cost to keep asking: for every moving remote NPC, every fourth frame, a walk of the whole skeleton into a
+// freshly allocated vector and a 4 KB hash. With twenty NPCs about that is several skeleton walks and allocations
+// per frame, for an answer already known. Stalls are what time a client out, and a timeout hands its actors away.
 
-        ++s_frame;
-        MotionSample& sample = s_samples[apActor->formID];
-        if (s_frame - sample.Frame >= 4)
-        {
-            sample.Frame = s_frame;
-            const bool moved = glm::distance(position, sample.Position) > 2.f;
-            sample.Position = position;
-            if (moved)
-            {
-                const uint64_t fingerprint = VRBodySync::SkeletonMotionFingerprint(apActor);
-                if (fingerprint != 0 && fingerprint == sample.Fingerprint)
-                    ++sample.FrozenSamples;
-                else
-                    sample.FrozenSamples = 0;
-                sample.Fingerprint = fingerprint;
-
-                ++s_moving;
-                if (sample.FrozenSamples >= 5)
-                {
-                    ++s_frozen;
-                    if (sample.FrozenSamples > s_worstFrozen)
-                    {
-                        s_worstFrozen = sample.FrozenSamples;
-                        s_worstActor = apActor->formID;
-                    }
-                }
-            }
-        }
-
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= s_nextLog)
-        {
-            s_nextLog = now + 10s;
-            if (s_moving)
-            {
-                const Actor* pWorst = s_worstActor ? Cast<Actor>(TESForm::GetById(s_worstActor)) : nullptr;
-                const TESNPC* pBase = pWorst ? Cast<TESNPC>(pWorst->baseForm) : nullptr;
-                spdlog::info("MotionDiag: {} samples of remote NPCs moving, {} with bones that had not changed for 5+ samples; worst {:X} ({}) frozen for {} samples", s_moving, s_frozen,
-                             s_worstActor, pBase ? pBase->fullName.value.AsAscii() : "-", s_worstFrozen);
-            }
-            s_moving = 0;
-            s_frozen = 0;
-            s_worstActor = 0;
-            s_worstFrozen = 0;
-        }
-    }
-#endif
 
     apActor->ForcePosition(position);
     // A creature of another kind than the owner's (see MarkForeignGraph) keeps its own animation state.
@@ -355,6 +310,43 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
 
 void InterpolationSystem::AddPoint(InterpolationComponent& aInterpolationComponent, const InterpolationComponent::TimePoint& acPoint) noexcept
 {
+    // Two points far enough apart that no actor could have travelled between them do not describe a journey, and
+    // interpolating across them drags the actor over everything in between. The buffer keeps no worldspace, so a
+    // point from before a worldspace change and one from after sit side by side and get walked between -- which
+    // is Solstheim to somewhere else, hundreds of cells, in a tenth of a second.
+    //
+    // That is the 875,458 units SinkDiag reported on 2026-09-23 with 195 actors displaced at once, and it is
+    // what "a bandit got launched into the sky" looks like from inside the game. A cell is 4096 units and the
+    // points are about a tenth of a second apart, so anything approaching that is not movement: drop what is
+    // buffered and let the actor arrive at the new place instead of flying to it.
+    if (!aInterpolationComponent.TimePoints.empty())
+    {
+        constexpr float cImpossibleStep = 4096.f;
+        const glm::vec3& previous = aInterpolationComponent.TimePoints.back().Position;
+        const float jump = glm::distance(previous, static_cast<glm::vec3>(acPoint.Position));
+        if (jump > cImpossibleStep)
+        {
+            aInterpolationComponent.TimePoints.clear();
+            aInterpolationComponent.Position = acPoint.Position;
+
+            // Said out loud, because the reason for this guard is a hypothesis: that the 875,458-unit
+            // displacement of 2026-09-23 was two buffered points either side of a worldspace change. The guard
+            // bounds the damage whatever the cause, but only a session says how often this happens, how far, and
+            // from where -- and whether it lines up with somebody crossing a boundary or with nothing at all.
+            static std::chrono::steady_clock::time_point s_nextLog;
+            static uint32_t s_since = 0;
+            ++s_since;
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= s_nextLog)
+            {
+                s_nextLog = now + std::chrono::seconds(10);
+                spdlog::info("JumpDiag: a buffered point was {:.0f} units from the one before it, at ({:.0f}, {:.0f}, {:.0f}); dropped the buffer so the actor arrives instead of flying. {} since the last line.",
+                             jump, acPoint.Position.x, acPoint.Position.y, acPoint.Position.z, s_since);
+                s_since = 0;
+            }
+        }
+    }
+
     auto itor = std::begin(aInterpolationComponent.TimePoints);
     const auto end = std::cend(aInterpolationComponent.TimePoints);
 
