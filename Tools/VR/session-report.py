@@ -69,6 +69,7 @@ MEASURED = [
     ('Stale copy: death', r'and this copy had it the other way'),
     ('Stale copy: inventory', r'came back with a different inventory'),
     ('Impossible jumps caught', r'JumpDiag:'),
+    ('Sliding', r'SlideDiag:'),
 ]
 
 PROBLEMS = [
@@ -103,6 +104,7 @@ EPOCH_MISS = re.compile(r'EpochMiss: dropped (.+?) for character ([0-9A-F]+) .* 
 ARCHERY = re.compile(r'VRArchery: local attack state (\d+)')
 # The player is form 14; a bow shot carries ammo, a spell does not.
 BOW_SHOT = re.compile(r'Projectile launch: shooter 14, base [0-9A-F]+, weapon [0-9A-F]+, ammo (?!0,)[0-9A-F]+')
+SLIDE = re.compile(r'SlideDiag: (\d+) of (\d+) moves of a remote body')
 SILENCE = re.compile(r'Silence: sent nothing for (\d+) ms; menus \[([^\]]*)\]')
 OBJECT_MOVE = re.compile(r'ObjectMove: ([0-9A-F]+) moved ([0-9.]+) units')
 JUMP = re.compile(r'JumpDiag: a buffered point was ([0-9.]+) units from the one before it, at \(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\).*?(\d+) since')
@@ -208,12 +210,22 @@ def analyse(lines):
         starved = sum(b[2] for b in backlog)
         if worst_behind < -1000:
             out.append(('Interpolation backlog',
-                        'the buffer was %d ms BEHIND playback at worst, and %d updates arrived with nothing after them. '
-                        'Positions interpolated across a gap like that are nonsense -- this is what made SinkDiag report '
-                        '875,458 units on 2026-09-23 -- and to a player it looks like everything lagging and then teleporting.'
+                        'worst %d ms behind playback, %d updates with nothing after them. '
+                        'Mostly NORMAL: an actor whose updates the server withholds for range runs out of future by design, and the '
+                        'interpolation factor is clamped so it simply holds still. Worth a look only if it coincides with somebody '
+                        'complaining, or with the client having gone quiet.'
                         % (worst_behind, starved)))
         else:
             out.append(('Interpolation backlog', 'worst %d ms behind playback, %d updates with nothing after them: healthy.' % (worst_behind, starved)))
+
+    slides = [(int(m.group(1)), int(m.group(2))) for m in (SLIDE.search(l) for l in lines) if m]
+    if slides:
+        frozen = sum(s[0] for s in slides)
+        moves = sum(s[1] for s in slides)
+        share = (100.0 * frozen / moves) if moves else 0.0
+        verdict = ('bodies are walking as they should' if share < 5 else
+                   'this is the sliding: a body translating while the variables that drive its legs do not change')
+        out.append(('Sliding', '%d of %d moves (%.1f%%) came with unchanged animation variables. %s' % (frozen, moves, share, verdict)))
 
     jumps = [(float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4)), int(m.group(5))) for m in (JUMP.search(l) for l in lines) if m]
     if jumps:

@@ -104,6 +104,7 @@ private:
     void RunLocalUpdates() const noexcept;
     void RunEnemyMeterUpdates() noexcept;
     void RunRemotePlayerDiag() noexcept;
+    void RunOrphanedRemoteDiag() noexcept;
 
 public:
     static std::chrono::steady_clock::time_point LastMoveSentAt() noexcept;

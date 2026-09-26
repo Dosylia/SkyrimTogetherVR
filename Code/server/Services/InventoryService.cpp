@@ -15,7 +15,11 @@
 #include <Setting.h>
 namespace
 {
-Console::Setting bEnableItemDrops{"Gameplay:bEnableItemDrops", "(Experimental) Syncs dropped items by players", false};
+// On by default since 2026-09-26. Emma reported dropped items invisible to the other player and the reason
+// was this setting, not a missing feature: the receiving client has had the code to place them since
+// 2026-09-18, and the server was stripping the drop flag before it ever got there. Turned on rather than
+// documented, because an opt-in switch for something everyone wants is a feature nobody finds.
+Console::Setting bEnableItemDrops{"Gameplay:bEnableItemDrops", "Syncs dropped items by players", true};
 }
 
 InventoryService::InventoryService(World& aWorld, entt::dispatcher& aDispatcher)

@@ -402,15 +402,32 @@ Actor* Actor::GetCombatTarget() const noexcept
     return s_pGetCombatTarget(this);
 }
 
-// TODO: this is a really hacky solution.
-// The internal targeting system should be disabled instead.
+// Re-aim an actor at whoever just hit it, without dropping it out of combat to do so.
+//
+// This used to call StopCombat() and then StartCombat(), and the second half is not guaranteed: these are Papyrus
+// functions, and on VR the registration they depend on has no address of its own (see HookBindEverythingToScript,
+// which recovers it from the VM's vtable). If the stop lands and the start does not, the actor is left out of
+// combat with nothing to put it back -- it follows, it faces you, it never swings, and only a cell reload fixes
+// it. That is the Burnt Spriggan of 2026-09-25 and -26, and the log has our own line for it at 08:21:32 on actor
+// 203A5E8.
+//
+// It was also destructive by design: actor 203A3C8 was hit repeatedly on 2026-09-26 and had its combat torn down
+// three times in six seconds, once per rate-limit window.
+//
+// An actor already fighting has a combat controller, and that controller can simply be pointed at somebody else.
+// Only an actor with no combat at all needs starting, and then there is nothing to stop first.
 void Actor::StartCombatEx(Actor* apTarget) noexcept
 {
-    if (GetCombatTarget() != apTarget)
+    if (GetCombatTarget() == apTarget)
+        return;
+
+    if (pCombatController)
     {
-        StopCombat();
-        StartCombat(apTarget);
+        SetCombatTargetEx(apTarget);
+        return;
     }
+
+    StartCombat(apTarget);
 }
 
 void Actor::SetCombatTargetEx(Actor* apTarget) noexcept

@@ -194,6 +194,36 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
                 vrPose.HasScale = true;
                 vrPose.RootScale = scaleSource.RootScale;
             }
+
+            // Hips, blended like the movement they are: the whole body is offset by this, so a step in it is a
+            // step in the body. Only when both points carry one, so it never blends against a stale origin.
+            //
+            // This was missing until 2026-09-26, and its absence is why the hip sync shipped on 2026-09-25 never
+            // did anything: the field was added to the message, to the sender and to the receiver, and not to the
+            // layer in between, which rebuilds the pose from the buffer and copies only the fields it knows. A
+            // new field in VRPose has to be added here too or it is silently dropped on arrival -- and the
+            // receiver simply never sees it, so nothing logs and nothing complains.
+            if (pBefore->VRPoseData.HasHips && pAfter->VRPoseData.HasHips)
+            {
+                vrPose.HasHips = true;
+                for (size_t i = 0; i < 3; ++i)
+                    vrPose.HipOffset[i] = TiltedPhoques::Lerp(pBefore->VRPoseData.HipOffset[i], pAfter->VRPoseData.HipOffset[i], poseDelta);
+            }
+            else if (pAfter->VRPoseData.HasHips)
+            {
+                vrPose.HasHips = true;
+                std::copy(std::begin(pAfter->VRPoseData.HipOffset), std::end(pAfter->VRPoseData.HipOffset), std::begin(vrPose.HipOffset));
+            }
+
+            // The hand measurement: newest wins, no blending. It is the owner's own reading at a moment in time
+            // and averaging two of them would make it agree with nothing.
+            const VRPose& handSource = pAfter->VRPoseData.HasHandCheck ? pAfter->VRPoseData : pBefore->VRPoseData;
+            if (handSource.HasHandCheck)
+            {
+                vrPose.HasHandCheck = true;
+                std::copy(std::begin(handSource.LeftHandOffset), std::end(handSource.LeftHandOffset), std::begin(vrPose.LeftHandOffset));
+                std::copy(std::begin(handSource.RightHandOffset), std::end(handSource.RightHandOffset), std::begin(vrPose.RightHandOffset));
+            }
         }
     }
 
@@ -280,6 +310,43 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
 // freshly allocated vector and a 4 KB hash. With twenty NPCs about that is several skeleton walks and allocations
 // per frame, for an answer already known. Stalls are what time a client out, and a timeout hands its actors away.
 
+
+#ifdef SKYRIMVR
+    // Sliding, measured the cheap way (2026-09-26). Emma and Seen saw each other sliding for half a session.
+    //
+    // MotionDiag used to answer this by walking the whole skeleton and hashing it, and I deleted it on
+    // 2026-09-26 on the grounds that its question was settled -- the same day the symptom came back. That was
+    // premature. This asks the same question for a fraction of the cost: a body that translates while the
+    // animation variables driving its legs do not change is a body sliding, and both numbers are already here.
+    {
+        static uint32_t s_moved = 0;
+        static uint32_t s_movedFrozen = 0;
+        static uint32_t s_worstActor = 0;
+        static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
+
+        if (glm::distance(static_cast<glm::vec3>(apActor->position), position) > 2.f)
+        {
+            ++s_moved;
+            if (first.Variables == second.Variables)
+            {
+                ++s_movedFrozen;
+                s_worstActor = apActor->formID;
+            }
+        }
+
+        const auto slideNow = std::chrono::steady_clock::now();
+        if (slideNow >= s_nextLog)
+        {
+            s_nextLog = slideNow + 10s;
+            if (s_moved)
+                spdlog::info("SlideDiag: {} of {} moves of a remote body came with animation variables that had not changed; last was {:X}. All of them would be a body sliding rather than walking.",
+                             s_movedFrozen, s_moved, s_worstActor);
+            s_moved = 0;
+            s_movedFrozen = 0;
+            s_worstActor = 0;
+        }
+    }
+#endif
 
     apActor->ForcePosition(position);
     // A creature of another kind than the owner's (see MarkForeignGraph) keeps its own animation state.

@@ -821,6 +821,7 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose, const glm::vec3& acWo
     }
 
     const glm::mat3 rootRotation = ToGlm(At<NiTransform>(acRig.pRoot, kWorldOffset).rotate);
+    const bool cHasOffset = glm::dot(acWorldOffset, acWorldOffset) > 0.0001f;
 
     // Parents first. Each bone is turned about its own position, and that rigid motion is carried to everything below
     // it, posed children included, so a child's transform already holds its parents' motion when its own rotation is
@@ -831,7 +832,31 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose, const glm::vec3& acWo
         const RigBone& bone = acRig.Bones[i];
         // Legs only when the sender's trackers drive them; otherwise the walk animation keeps them.
         if (i >= VRPose::kUpperBoneCount && !acPose.HasLegs)
+        {
+            // ...but a body being dragged is still being dragged from the waist down. A corpse never carries legs
+            // (HasLegs is false for one), so the offset below reached the spine and the arms and stopped there:
+            // the top half went with the hands and the bottom half stayed on the floor, which is the body
+            // stretching into a long thing that Seen watched on 2026-09-26 at 09:43.
+            //
+            // Only the pelvis is shifted, with everything under it -- the thighs, calves and feet are its
+            // descendants, so shifting them again by their own index would move them twice.
+            if (cHasOffset && i == VRPose::kPelvis && (bone.pNode || bone.pEntry))
+            {
+                NiTransform pelvisWorld = bone.World();
+                pelvisWorld.translate = FromGlm(ToGlm(pelvisWorld.translate) + acWorldOffset);
+                bone.WriteWorld(pelvisWorld);
+
+                for (const RigBone& below : acRig.Descendants[i])
+                {
+                    if (!below.pNode && !below.pEntry)
+                        continue;
+                    NiTransform world = below.World();
+                    world.translate = FromGlm(ToGlm(world.translate) + acWorldOffset);
+                    below.WriteWorld(world);
+                }
+            }
             continue;
+        }
         if (!bone.pNode && !bone.pEntry)
             continue;
         const NiTransform current = bone.World();

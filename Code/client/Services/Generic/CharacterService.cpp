@@ -494,6 +494,7 @@ void CharacterService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
     {
         PerfScope perfScope("CharacterService::RunRemotePlayerDiag");
         RunRemotePlayerDiag();
+        RunOrphanedRemoteDiag();
     }
     {
         PerfScope perfScope("CharacterService::RunFactionsUpdates");
@@ -562,10 +563,18 @@ void CharacterService::OnDisconnected(const DisconnectedEvent& acDisconnectedEve
         if (!pActor)
             continue;
 
-        if (pActor->GetExtension()->IsRemotePlayer())
+        // GetExtension() returns null by design for an actor this client did not allocate, and this loop walks
+        // whatever the world still holds at disconnect. The same unguarded dereference was swept out of fourteen
+        // hook sites on 2026-09-25 and this one was missed: it is on the disconnect path, which is exactly when
+        // the world is in its least tidy state.
+        ActorExtension* pExtension = pActor->GetExtension();
+        if (!pExtension)
+            continue;
+
+        if (pExtension->IsRemotePlayer())
             pActor->Delete();
         else
-            pActor->GetExtension()->SetRemote(false);
+            pExtension->SetRemote(false);
     }
 
     m_world.clear<WaitingForAssignmentComponent, LocalComponent, RemoteComponent>();
@@ -2411,13 +2420,74 @@ void CharacterService::RunEnemyMeterUpdates() noexcept
 // Every 5 s, what the game holds for each remote player's copy: distance and height difference to us, form flags
 // (0x800 disabled, 0x20 deleted), 3D and its root, health and state, body scale. Compare a visible copy against an
 // invisible one.
+// TEMPORARY (2026-09-26): Lydia follows and will not attack, and it survives a disconnect -- the enemy that was
+// also refusing to attack started the moment the connection dropped, and she did not. Something about her state
+// is being left behind rather than driven.
+//
+// The suspect this tests: an actor still carrying our "remote" flag while the component that justified it is gone.
+// HookActorProcess suppresses the AI of anything flagged remote, and the disconnect cleanup only walks actors that
+// still have a RemoteComponent -- so an actor whose component was removed first (the server dropping it, or going
+// out of range) keeps the flag with nothing left to clear it.
+//
+// Reasoning has been wrong about this twice, so it is counted instead. An orphan here is the bug; none at all
+// means the flag is innocent and the cause is somewhere else entirely.
+void CharacterService::RunOrphanedRemoteDiag() noexcept
+{
+#ifdef SKYRIMVR
+    static std::chrono::steady_clock::time_point s_next;
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_next)
+        return;
+    s_next = now + 10s;
+
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer)
+        return;
+
+    uint32_t orphans = 0;
+    uint32_t firstId = 0;
+    const char* pFirstName = "?";
+
+    auto view = m_world.view<FormIdComponent>();
+    for (auto entity : view)
+    {
+        Actor* pActor = Cast<Actor>(TESForm::GetById(view.get<FormIdComponent>(entity).Id));
+        if (!pActor)
+            continue;
+
+        const ActorExtension* pExtension = pActor->GetExtension();
+        if (!pExtension || !pExtension->IsRemote())
+            continue;
+
+        // Flagged remote with nothing to say it should be.
+        if (m_world.all_of<RemoteComponent>(entity))
+            continue;
+
+        ++orphans;
+        if (!firstId)
+        {
+            firstId = pActor->formID;
+            if (const TESNPC* pBase = Cast<TESNPC>(pActor->baseForm))
+                pFirstName = pBase->fullName.value.AsAscii();
+        }
+    }
+
+    if (orphans)
+        spdlog::warn("OrphanDiag: {} actors are still flagged remote with no remote component; first is {:X} ({}). Their AI is being suppressed and nothing is left to turn it back on.", orphans,
+                     firstId, pFirstName);
+#endif
+}
+
 void CharacterService::RunRemotePlayerDiag() noexcept
 {
     static std::chrono::steady_clock::time_point s_next;
     const auto now = std::chrono::steady_clock::now();
     if (now < s_next)
         return;
-    s_next = now + 5s;
+    // Two seconds, not five: the corrective half of this pass is a pointer read and a float compare per remote
+    // player, and the thing it corrects is a body nobody can see. The expensive measuring below keeps its own
+    // thirty-second timer.
+    s_next = now + 2s;
     if (!m_transport.IsConnected())
         return;
     PlayerCharacter* pPlayer = PlayerCharacter::Get();
@@ -2442,6 +2512,17 @@ void CharacterService::RunRemotePlayerDiag() noexcept
             spdlog::info("Remote player {:X} copy was invisible ({:.2f}); cleared", pActor->formID, invisibility);
             pActor->SetActorValue(ActorValueInfo::kInvisibility, 0.f);
         }
+
+        // A fade fix lived here on 2026-09-26 and was wrong. The reasoning: the copy's node carries a fade at
+        // +0x158 which read 0.000 on the two samples where Seen could not be seen, so it was forced back to 1.
+        // What that reasoning skipped was the distance on the very same log line -- 7,703 units on one sample and
+        // 10,048 on the other, against a fade far-distance of 1,000. The game fades out anything past that, and
+        // fade 0 at ten thousand units is the renderer working correctly. Forcing it to 1 would draw a body at
+        // full opacity from across the map.
+        //
+        // The real finding is in the distances themselves and is written up in VR_TODO: the copy is not faded,
+        // it is somewhere else. See "the invisible body is a misplaced body".
+
         // The line below costs 20 to 30 ms, because DescribeBody walks the whole skeleton by name and measures it.
         // At five seconds that is a dropped frame or two every five seconds, for ever: Seen's session of
         // 2026-09-25 has 54 "Mod update took ..." warnings naming this function, on a client that was already

@@ -93,7 +93,23 @@ bool IsScriptExtenderLoaded()
     moduleName += L'_';
     moduleName.append(version.begin(), version.end());
     moduleName += L".dll";
-    return GetModuleHandleW(moduleName.c_str()) != nullptr;
+
+    const bool found = GetModuleHandleW(moduleName.c_str()) != nullptr;
+    if (!found)
+    {
+        // The trimming was fixed on 2026-09-25 and the message came back anyway on 2026-09-26, so guessing at the
+        // string a second time is not the move: say what was looked for and what the version string was, and the
+        // next line of the log settles it.
+        static bool s_said = false;
+        if (!s_said)
+        {
+            s_said = true;
+            const std::string narrow(moduleName.begin(), moduleName.end());
+            spdlog::warn("Script extender not found. Looked for '{}', built from exe version '{}'.", narrow, version);
+        }
+    }
+
+    return found;
 #else
     return g_SKSEModuleHandle;
 #endif

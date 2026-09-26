@@ -188,6 +188,18 @@ void TESObjectREFR::SetLeveledCreature(TESActorBase* apOriginalBase, TESActorBas
 
 using TiltedPhoques::Serialization;
 
+// TEMPORARY (2026-09-26): SlideDiag reported 339 of 339 moves of a remote body arriving with animation variables
+// that had not changed -- not most of them, all of them. A body that translates while the variables driving its
+// legs stay put is a body sliding, which is what Emma and Seen saw for half a session.
+//
+// Every path out of SaveAnimationVariables below leaves aVariables untouched, and an untouched set is identical
+// to the last one -- exactly the symptom. Rather than read the early returns and pick a favourite, each says so.
+#ifdef SKYRIMVR
+#define TP_ANIMVARS_GAVE_UP(reason)                                                                                    do                                                                                                                 {                                                                                                                      if (formID == 0x14)                                                                                                {                                                                                                                      static std::chrono::steady_clock::time_point s_next;                                                               static uint32_t s_since = 0;                                                                                        ++s_since;                                                                                                          const auto animVarNow = std::chrono::steady_clock::now();                                                           if (animVarNow >= s_next)                                                                                           {                                                                                                                       s_next = animVarNow + std::chrono::seconds(10);                                                                      spdlog::warn("AnimVarDiag: no animation variables for the local player -- {} ({} since the last line). The others see a body that slides.", reason, s_since);                 s_since = 0;                                                                                                    }                                                                                                               }                                                                                                               } while (false)
+#else
+#define TP_ANIMVARS_GAVE_UP(reason) ((void)0)
+#endif
+
 void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const noexcept
 {
     BSAnimationGraphManager* pManager = nullptr;
@@ -209,10 +221,16 @@ void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const
                 pGraph = pManager->animationGraphs.Get(pManager->animationGraphIndex);
 
             if (!pGraph)
+            {
+                TP_ANIMVARS_GAVE_UP("the animation graph is missing");
                 return;
+            }
 
             if (!pGraph->behaviorGraph || !pGraph->behaviorGraph->stateMachine || !pGraph->behaviorGraph->stateMachine->name)
+            {
+                TP_ANIMVARS_GAVE_UP("the behaviour graph or its state machine is missing");
                 return;
+            }
 
             auto* pExtendedActor = pActor->GetExtension();
             if (pExtendedActor->GraphDescriptorHash == 0)
@@ -231,12 +249,18 @@ void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const
                 pDescriptor = BehaviorVarPatch(pManager, pActor);
 
             if (!pDescriptor)
+            {
+                TP_ANIMVARS_GAVE_UP("no descriptor for this behaviour, and the modded-behaviour patch did not make one");
                 return;
+            }
 
             const auto* pVariableSet = pGraph->behaviorGraph->animationVariables;
 
             if (!pVariableSet)
+            {
+                TP_ANIMVARS_GAVE_UP("the graph has no variable set");
                 return;
+            }
 
             aVariables.Booleans.assign(pDescriptor->BooleanLookUpTable.size(), false);
             aVariables.Floats.assign(pDescriptor->FloatLookupTable.size(), 0.f);

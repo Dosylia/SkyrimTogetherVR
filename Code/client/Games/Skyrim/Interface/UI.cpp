@@ -191,6 +191,17 @@ static void* UI_AddToActiveQueue_Hook(UI* apSelf, IMenu* apMenu, void* apFoundIt
         }
 #endif
 
+    // A menu opened out of a conversation is left to pause, whatever the list says.
+    //
+    // Trading with a follower opens ContainerMenu on top of a Dialogue Menu that is still up, and ContainerMenu is
+    // on the list. Unfrozen, the trade panel draws but the dialogue underneath keeps the input: Emma could see
+    // "LYDIA <-> QUEEN EMMA" and could not touch it until she closed the conversation (2026-09-26). Vanilla pauses
+    // there, and pausing is what hands the focus over.
+    //
+    // Only while a conversation is actually open, so looting a chest or a corpse -- the reason this list exists --
+    // still leaves everyone else moving.
+    const bool cInConversation = apSelf->GetMenuOpen(BSFixedString("Dialogue Menu"));
+
     // NOTE(Force): could also compare by RTTI later on...
     for (const char* item : kAllowList)
     {
@@ -198,6 +209,12 @@ static void* UI_AddToActiveQueue_Hook(UI* apSelf, IMenu* apMenu, void* apFoundIt
         {
             if (pMenu == apMenu)
             {
+                if (cInConversation)
+                {
+                    spdlog::info("Menu opened while connected: {} (left paused; a conversation is open and would keep the input)", item);
+                    break;
+                }
+
                 spdlog::info("Menu opened while connected: {} (runs unpaused)", item);
                 UnfreezeMenu(apMenu);
             }

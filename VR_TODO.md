@@ -158,6 +158,25 @@ Running it on the 21:26 bundle immediately paid for itself twice:
       original survives -- its numbers are comparable across sessions, which is the whole point of a measurement
       -- and has gained the `has controller` field that mine had.
 
+### A new field in VRPose must be added in three places, not two (2026-09-26)
+
+**The hip sync shipped on 2026-09-25 has never done anything, and I said it was working.**
+
+`InterpolationSystem::Update` does not hand the received pose to the body sync. It **rebuilds** one from the two
+buffered points, copying the fields it knows about: bones, fingers, root position, scale. `HasHips`/`HipOffset`
+and `HasHandCheck`/`LeftHandOffset`/`RightHandOffset` were added to the message, to the sender and to the
+receiver -- and not to that rebuild. So they were dropped between the wire and the body, silently, and the
+receiver simply never saw them. Nothing logged, because the code that logs runs on the rebuilt pose.
+
+That is why the session report reads `Hips (receiver) 0` and `Hands compared 0` while the sender is filling both.
+
+- [x] **[untested] Both are carried through the rebuild now.** Hips are blended like the movement they are (the
+      whole body is offset by it, so a step in it is a step in the body); the hand measurement takes the newest
+      point that has one, because averaging two readings of where somebody's hand was would agree with neither.
+- **The rule this leaves:** a new field in `VRPose` needs the message, the sender, **the interpolation rebuild**
+      and the receiver. Three of the four are obvious and the third is not, and missing it fails silently in the
+      most expensive way -- a feature that is shipped, believed, and does nothing.
+
 ### Goal 2: a corpse that still walks, and why (2026-09-26)
 
 A death is broadcast to **every** player rather than only those in range, deliberately, so that nobody holding
