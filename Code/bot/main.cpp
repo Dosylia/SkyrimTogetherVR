@@ -20,6 +20,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -131,6 +132,15 @@ int main(int argc, char** argv)
             return true;
         };
 
+        // The harness asks for this before it runs anything. It used to read the version out of the usage line
+        // instead, which matches "STBot <script>" and reports the bot's version as "<script>" -- a version-skew
+        // warning on every single run, which is the fastest way to teach somebody to ignore version-skew warnings.
+        if (arg == "--version")
+        {
+            std::printf("STBot %s\n", BUILD_COMMIT);
+            return 0;
+        }
+
         std::string value;
         if (arg == "--server" && next(value))
             options.Server = value;
@@ -180,7 +190,7 @@ int main(int argc, char** argv)
 
     if (scriptPath.empty())
     {
-        spdlog::error("Usage: STBot <script> [--server host:port] [--password X] [--name X] [--x N --y N] [--hostlog path] [--spacing N]");
+        spdlog::error("Usage: STBot <script> [--server host:port] [--password X] [--name X] [--x N --y N] [--hostlog path] [--spacing N] [--version]");
         return 2;
     }
 

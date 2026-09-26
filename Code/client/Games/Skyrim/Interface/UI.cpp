@@ -353,8 +353,35 @@ void UI::SetEnemyMeterTarget(uint32_t aHandle, uint16_t aLevel)
     // something already gone.
     BSFixedString meterMenu("WSEnemyMeters");
     UI* pUI = UI::Get();
-    if (!pUI || !pUI->GetMenuOpen(meterMenu))
+    if (!pUI)
         return;
+
+    if (!pUI->GetMenuOpen(meterMenu))
+    {
+        // ...but refusing and saying nothing is why the friend's bar "needs to be initialised once" (2026-09-26).
+        // The meter is not part of the HUD until something has shown it: Emma's session of that morning started at
+        // 10:43:50 and WSEnemyMeters first appeared in the menu list at 10:47:58, four minutes later, and was
+        // missing from 205 of 575 probes -- a third of the session with no bar over anyone's head, whatever this
+        // driver decided.
+        //
+        // So ask for it. kShow with no data is how the game opens a menu, and it allocates nothing from the
+        // factory, which is what made the update above dangerous. If the menu comes up the next tick, 250 ms
+        // later, finds it open and posts the real target; if it does not, nothing has changed and the log says so.
+        if (aHandle == 0)
+            return;
+
+        static std::chrono::steady_clock::time_point s_nextShow{};
+        const auto now = std::chrono::steady_clock::now();
+        if (now < s_nextShow)
+            return;
+        s_nextShow = now + std::chrono::seconds(2);
+
+        spdlog::info("Enemy meter: WSEnemyMeters is not open, asking the UI to show it");
+        s_sendingEnemyMeter = true;
+        UIMessageQueue__AddMessage_Real(pQueue, &meterMenu, UIMessage::kShow, nullptr);
+        s_sendingEnemyMeter = false;
+        return;
+    }
 
     BSFixedString dataName("HUDData");
     void* pData = TiltedPhoques::ThisCall(s_createData, pQueue, &dataName);

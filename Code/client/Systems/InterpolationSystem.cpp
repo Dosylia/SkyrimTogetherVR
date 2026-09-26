@@ -129,6 +129,7 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     // out of sync.
     auto& vrPose = aInterpolationComponent.InterpolatedVRPose;
     vrPose.HasData = false;
+    vrPose.NoBones = false;
     vrPose.HasLegs = false;
     vrPose.HasFingers = false;
     vrPose.HasScale = false;
@@ -161,11 +162,18 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
                 poseDelta = TiltedPhoques::Min(static_cast<float>(poseTick - TiltedPhoques::Min(poseTick, pBefore->Tick)) / static_cast<float>(pAfter->Tick - pBefore->Tick), 1.0f);
 
             vrPose.HasData = true;
-            // Legs only between two points that both carry them (the sender's trackers can come and go).
-            vrPose.HasLegs = pBefore->VRPoseData.HasLegs && pAfter->VRPoseData.HasLegs;
-            const size_t boneCount = vrPose.HasLegs ? VRPose::kBoneCount : VRPose::kUpperBoneCount;
-            for (size_t i = 0; i < boneCount; ++i)
-                vrPose.Bones[i] = glm::slerp(static_cast<glm::quat>(pBefore->VRPoseData.Bones[i]), static_cast<glm::quat>(pAfter->VRPoseData.Bones[i]), poseDelta);
+            // A body with no readable skeleton (VRPose::NoBones): there is nothing to blend and nothing to pose,
+            // and the bone arrays on both points are meaningless, so they are left alone. The newest point wins,
+            // as it does for every other field that is a reading rather than a rotation.
+            vrPose.NoBones = pAfter->VRPoseData.NoBones || pBefore->VRPoseData.NoBones;
+            if (!vrPose.NoBones)
+            {
+                // Legs only between two points that both carry them (the sender's trackers can come and go).
+                vrPose.HasLegs = pBefore->VRPoseData.HasLegs && pAfter->VRPoseData.HasLegs;
+                const size_t boneCount = vrPose.HasLegs ? VRPose::kBoneCount : VRPose::kUpperBoneCount;
+                for (size_t i = 0; i < boneCount; ++i)
+                    vrPose.Bones[i] = glm::slerp(static_cast<glm::quat>(pBefore->VRPoseData.Bones[i]), static_cast<glm::quat>(pAfter->VRPoseData.Bones[i]), poseDelta);
+            }
             // Fingers travel only when they change, so most points carry none; the newest set around the pose tick
             // is passed on and the body sync keeps the last one it received. No blending: a grip is a step.
             const VRPose& fingerSource = pAfter->VRPoseData.HasFingers ? pAfter->VRPoseData : pBefore->VRPoseData;

@@ -8,6 +8,7 @@
 #include <Services/QuestService.h>
 #include <Services/TransportService.h>
 #include <Services/InventoryService.h>
+#include <Services/DiscoveryService.h>
 
 #include <Games/References.h>
 #include <Games/Misc/SubtitleManager.h>
@@ -1079,6 +1080,14 @@ void CharacterService::OnReferencesMoveRequest(const ServerReferencesMoveRequest
         {
             animationComponent.TimePoints.push_back(action);
         }
+
+        // The busy path, and the one that had no bound on it. See AnimationSystem::TrimBacklog: a Dwarven Centurion
+        // reached 5,123 queued actions here on 2026-09-26 and Neloth 17,411, which is minutes of replay behind the
+        // present on an actor that plays one action a frame.
+        if (const auto* pFormId = m_world.try_get<FormIdComponent>(*itor))
+            AnimationSystem::TrimBacklog(animationComponent, pFormId->Id);
+        else
+            AnimationSystem::TrimBacklog(animationComponent, 0);
     }
 }
 
@@ -1893,6 +1902,13 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
                 spdlog::info("Temporary Remote Deleted {:X}", aFormId);
                 pActor->Delete();
                 ReleaseGhostOf(aFormId);
+
+                // This is a decision taken here, not one the server asked for: the reference went away because a
+                // cell unloaded under it. The server still counts this character as spawned on this client and
+                // will not send it again, so the copy stays gone -- the invisible player of 2026-09-26 11:20.
+                // Announcing the cell again makes the server re-send everything in it.
+                if (m_transport.IsConnected())
+                    DiscoveryService::RequestCellReannounce();
             }
             else
             {
@@ -2543,6 +2559,7 @@ void CharacterService::RunRemotePlayerDiag() noexcept
 }
 #else
 void CharacterService::RunRemotePlayerDiag() noexcept {}
+void CharacterService::RunOrphanedRemoteDiag() noexcept {}
 #endif
 
 void CharacterService::RunRemoteUpdates() noexcept

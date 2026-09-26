@@ -10,6 +10,8 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
     if (!HasData)
         return true;
 
+    if (NoBones != acRhs.NoBones)
+        return false;
     if (HasLegs != acRhs.HasLegs || HasFingers != acRhs.HasFingers)
         return false;
     if (HasFingers && Fingers != acRhs.Fingers)
@@ -29,6 +31,8 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
         return false;
     if (HasRootPosition && !std::equal(std::begin(RootPosition), std::end(RootPosition), std::begin(acRhs.RootPosition)))
         return false;
+    if (NoBones)
+        return true;
     const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
     return std::equal(Bones.begin(), Bones.begin() + count, acRhs.Bones.begin());
 }
@@ -45,10 +49,14 @@ void VRPose::Serialize(TiltedPhoques::Buffer::Writer& aWriter) const noexcept
     if (!HasData)
         return;
 
-    aWriter.WriteBits(HasLegs ? 1 : 0, 1);
-    const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
-    for (size_t i = 0; i < count; ++i)
-        Bones[i].Serialize(aWriter);
+    aWriter.WriteBits(NoBones ? 1 : 0, 1);
+    if (!NoBones)
+    {
+        aWriter.WriteBits(HasLegs ? 1 : 0, 1);
+        const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
+        for (size_t i = 0; i < count; ++i)
+            Bones[i].Serialize(aWriter);
+    }
     aWriter.WriteBits(HasFingers ? 1 : 0, 1);
     if (HasFingers)
         for (const auto& bone : Fingers)
@@ -107,12 +115,19 @@ void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
     if (!HasData)
         return;
 
-    uint64_t hasLegs = 0;
-    aReader.ReadBits(hasLegs, 1);
-    HasLegs = hasLegs != 0;
-    const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
-    for (size_t i = 0; i < count; ++i)
-        Bones[i].Deserialize(aReader);
+    uint64_t noBones = 0;
+    aReader.ReadBits(noBones, 1);
+    NoBones = noBones != 0;
+    HasLegs = false;
+    if (!NoBones)
+    {
+        uint64_t hasLegs = 0;
+        aReader.ReadBits(hasLegs, 1);
+        HasLegs = hasLegs != 0;
+        const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
+        for (size_t i = 0; i < count; ++i)
+            Bones[i].Deserialize(aReader);
+    }
     uint64_t hasFingers = 0;
     aReader.ReadBits(hasFingers, 1);
     HasFingers = hasFingers != 0;

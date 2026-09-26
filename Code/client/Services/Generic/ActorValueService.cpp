@@ -113,6 +113,22 @@ void ActorValueService::BroadcastActorValues() noexcept
     if (!m_transport.IsConnected())
         return;
 
+    // Only changes go on the wire, which is right until the other side misses one -- and there is a window where
+    // it always does. On 2026-09-26 at 10:48 Seen died and respawned; his health went -275 -> 315 while Emma's
+    // copy of him did not yet exist, so that change was delivered to nobody. The copy was then created, took a
+    // stale death delta down to -275, was floored to 25 by the "a copy never goes down" rule, and sat at 25 --
+    // an eighth of a bar -- for ninety seconds, until Seen's health next happened to change. Emma watched it
+    // creep back up on its own and read it as him healing.
+    //
+    // So the three values a health bar is made of are re-sent every few seconds whether or not they moved. Three
+    // floats every three seconds per player is nothing, and it makes every copy self-correcting: a missed change,
+    // a floored value, a copy that regenerated on its own, all repaired within one period instead of never.
+    static std::chrono::steady_clock::time_point s_nextRefresh{};
+    const auto refreshNow = std::chrono::steady_clock::now();
+    const bool cRefresh = refreshNow >= s_nextRefresh;
+    if (cRefresh)
+        s_nextRefresh = refreshNow + 3s;
+
     auto view = m_world.view<FormIdComponent, LocalComponent, ActorValuesComponent>();
 
     for (auto entity : view)
@@ -155,6 +171,17 @@ void ActorValueService::BroadcastActorValues() noexcept
             {
                 requestMaxValueChanges.Values.insert({i, newMaxValue});
                 actorValuesComponent.CurrentActorValues.ActorMaxValuesList[i] = newMaxValue;
+            }
+        }
+
+        // Only for a player: an NPC's copy is repaired by the correction in OnNotifyActorValueChanges when its
+        // owner's snapshot next arrives, and there are far more of them than there are players.
+        if (cRefresh && isPlayer)
+        {
+            for (const uint32_t key : {uint32_t(ActorValueInfo::kHealth), uint32_t(ActorValueInfo::kMagicka), uint32_t(ActorValueInfo::kStamina)})
+            {
+                requestValueChanges.Values[key] = pActor->GetActorValue(key);
+                requestMaxValueChanges.Values[key] = pActor->GetActorPermanentValue(key);
             }
         }
 

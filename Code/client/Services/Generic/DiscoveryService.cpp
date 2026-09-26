@@ -45,7 +45,34 @@ bool IsDefaultModlist(GameList<Mod>& aCurrentModlist) noexcept
 
     return true;
 }
+
+// A copy this client threw away on its own. See RequestCellReannounce.
+std::chrono::steady_clock::time_point s_reannounceAt{};
 } // namespace
+
+// The invisible player, named at last (2026-09-26, 11:20).
+//
+// The server sends a character's spawn to the other players when **that character** changes cell. It has no handler
+// for the reverse: a player whose own cell unloads and takes every remote copy in it down with it. So the order
+// that morning was
+//
+//   11:20:17  Emma enters interior cell 34FD2; the server tells Seen to drop her copy and waits.
+//   11:20:21  Seen enters 34FD2 too; the server sends his spawn to Emma, whose client answers
+//             "Character with remote id 20 is already spawned" and only nudges the old copy's position.
+//   11:20:22  Emma's old cell finishes unloading and deletes that very copy.
+//
+// From then on the server believes Emma has Seen and Emma has nobody: "could not find actor server id 20" three
+// times over the next minute, and Seen invisible until the *next* load door at 11:21:25 happened to fix it.
+//
+// Announcing the cell again is enough: the server re-sends every character in it, and by then the teardown is
+// finished so the spawn lands on an empty slot. Nothing else is disturbed -- the server's leave-cell cleanup bails
+// as soon as it finds a player still in the cell, which is us.
+void DiscoveryService::RequestCellReannounce() noexcept
+{
+    // A load door tears copies down over several frames; one announcement after the last of them is what is wanted,
+    // so each request pushes the moment back rather than queuing another.
+    s_reannounceAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+}
 
 DiscoveryService::DiscoveryService(World& aWorld, entt::dispatcher& aDispatcher) noexcept
     : m_world(aWorld)
@@ -330,6 +357,15 @@ void DiscoveryService::OnUpdate(const PreUpdateEvent& acUpdateEvent) noexcept
     PerfScope perfScope("DiscoveryService::OnUpdate");
 
     TP_UNUSED(acUpdateEvent);
+
+    if (s_reannounceAt != std::chrono::steady_clock::time_point{} && std::chrono::steady_clock::now() >= s_reannounceAt)
+    {
+        s_reannounceAt = {};
+        spdlog::info("Announcing this cell again: a remote copy was torn down here by a cell unloading, and the server does not know");
+        VisitCell(true);
+        VisitForms();
+        return;
+    }
 
     VisitCell();
     VisitForms();

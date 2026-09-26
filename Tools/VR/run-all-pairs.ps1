@@ -29,7 +29,7 @@ $ErrorActionPreference = 'Stop'
 # mid-change while the working tree moved on. The version is a hash of the uncommitted diff, so the only safe habit
 # is to build all of them in one go -- and to say so loudly when they disagree.
 function Assert-VersionsMatch($botExe, $release) {
-    $botLine = & $botExe 2>&1 | Select-String -Pattern 'STBot (\S+)' | Select-Object -First 1
+    $botLine = & $botExe --version 2>&1 | Select-String -Pattern 'STBot (v\S+)' | Select-Object -First 1
     if (-not $botLine) { return }
     $botVer = $botLine.Matches[0].Groups[1].Value
 

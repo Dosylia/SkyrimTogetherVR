@@ -27,6 +27,15 @@ struct DiscoveryService final : BSTEventSink<TESLoadGameEvent>
 
     TP_NOCOPYMOVE(DiscoveryService);
 
+    /**
+     * @brief Asks for the current cell to be announced to the server again, shortly.
+     *
+     * Called when a remote copy was torn down here for a local reason (a cell unloading) rather than because the
+     * server said so. The server has no way to know that happened, so without this the copy is never re-sent.
+     * @see CharacterService::CancelServerAssignment
+     */
+    static void RequestCellReannounce() noexcept;
+
 protected:
     /**
      * Checks whether the cell has changed, and if so,

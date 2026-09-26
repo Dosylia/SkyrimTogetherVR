@@ -406,6 +406,8 @@ void WriteFingerRotations(const FingerEntries& acFingers, const NiTransform& acH
 
 struct RemotePose
 {
+    // The whole pose is a position and nothing else (see VRPose::NoBones): a skeleton the bone search cannot read.
+    bool NoBones = false;
     bool HasLegs = false;
     std::array<glm::quat, VRPose::kBoneCount> Bones{};
     // Kept from the last update that carried them (see VRPose::HasFingers).
@@ -805,6 +807,61 @@ void* SceneTopOf(void* apNode) noexcept
 
 //! acWorldOffset shifts the whole skeleton, for a corpse being dragged elsewhere. It has to reach every bone:
 //! this writes world transforms directly and the skinned body follows the bones, not the root.
+// Move a whole 3D tree by an offset, without knowing a single bone's name.
+//
+// For a body VRPose::NoBones describes: a Dwemer automaton, a spider, anything whose skeleton the name search
+// cannot read. The renderer follows the bones and not the root -- writing the root alone moved nothing at all,
+// which is the lesson of 2026-09-24 -- so every node under it is shifted too, and the flattened bone tree with
+// them where there is one. Rotations are left exactly as the local animation has them; only where the thing is
+// changes, which is all a drag is.
+void ShiftTree(void* apRoot, const glm::vec3& acWorldOffset) noexcept
+{
+    if (!apRoot)
+        return;
+
+    NiTransform& rootWorld = At<NiTransform>(apRoot, kWorldOffset);
+    rootWorld.translate = FromGlm(ToGlm(rootWorld.translate) + acWorldOffset);
+
+    TiltedPhoques::Vector<void*> queue;
+    queue.push_back(apRoot);
+    for (size_t head = 0; head < queue.size() && head < 8192; ++head)
+    {
+        void* pObject = queue[head];
+        if (head > 0)
+        {
+            NiTransform& world = At<NiTransform>(pObject, kWorldOffset);
+            world.translate = FromGlm(ToGlm(world.translate) + acWorldOffset);
+        }
+
+        void* pNode = AsNode(pObject);
+        if (!pNode)
+            continue;
+
+        void** pChildren = At<void**>(pNode, kChildrenOffset + 0x8);
+        const uint16_t capacity = At<uint16_t>(pNode, kChildrenOffset + 0x10);
+        if (!pChildren)
+            continue;
+
+        for (uint16_t i = 0; i < capacity; ++i)
+            if (pChildren[i])
+                queue.push_back(pChildren[i]);
+    }
+
+    // Bones that were flattened away exist only in the tree's own array and have no node to walk to.
+    uint32_t count = 0;
+    if (uint8_t* pArray = GetBoneArray(FindByRtti(apRoot, "BSFlattenedBoneTree"), count))
+    {
+        for (uint32_t i = 0; i < count && i < kMaxBones; ++i)
+        {
+            uint8_t* pEntry = pArray + static_cast<size_t>(i) * kBoneEntrySize;
+            if (At<void*>(pEntry, kBoneEntryNode))
+                continue; // already shifted above, through its node
+            NiTransform& world = At<NiTransform>(pEntry, kBoneEntryWorld);
+            world.translate = FromGlm(ToGlm(world.translate) + acWorldOffset);
+        }
+    }
+}
+
 void PoseActor(const Rig& acRig, const RemotePose& acPose, const glm::vec3& acWorldOffset) noexcept
 {
     // Body size: the skeleton root's local scale is set so that its world scale matches the sender's. Only the local
@@ -971,6 +1028,34 @@ void OnFrameEnd() noexcept
         const bool cGone = rig.pRoot != pRoot || !rig.Valid || !RigIntact(rig);
         // Only worth asking once the rig is known good, and not more than a few times a second.
         const bool cRestructured = !cGone && now >= rig.RestructureAt && !RigStructureUnchanged(rig);
+
+        // A body with no readable skeleton, sent as a position and nothing else. There is no rig to resolve and
+        // none is needed: shift the whole tree by however far the owner has it from where this side does.
+        if (pose.NoBones)
+        {
+            if (!pose.HasRootPosition)
+                continue;
+
+            const glm::vec3 wanted{pose.RootPosition[0], pose.RootPosition[1], pose.RootPosition[2]};
+            if (!std::isfinite(wanted.x) || !std::isfinite(wanted.y) || !std::isfinite(wanted.z))
+                continue;
+
+            const glm::vec3 offset = wanted - ToGlm(At<NiTransform>(pRoot, kWorldOffset).translate);
+            // Half a cell apart is a desync, not a drag.
+            if (glm::dot(offset, offset) > 2048.f * 2048.f || glm::dot(offset, offset) < 0.0001f)
+                continue;
+
+            ShiftTree(pRoot, offset);
+
+            static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextBoneless;
+            auto& nextBoneless = s_nextBoneless[formId];
+            if (now >= nextBoneless)
+            {
+                nextBoneless = now + std::chrono::seconds(5);
+                spdlog::info("VRBodySync: body {:X} has no humanoid skeleton; moved its whole tree {:.1f} units to where its owner has it", formId, glm::length(offset));
+            }
+            continue;
+        }
 
         if (cGone || cRestructured)
         {
@@ -1521,6 +1606,7 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
         std::chrono::steady_clock::time_point MovedAt{};
         bool Placed = false;
         bool Sent = false;
+        bool Boneless = false; // a skeleton this bone search cannot read; the root position is sent on its own
     };
     static std::unordered_map<uint32_t, BodyCapture> s_bodies;
 
@@ -1541,15 +1627,27 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
         BoneNodes nodes;
         if (!FindBones(pRoot, nodes))
         {
-            capture.pRoot = nullptr;
-            return false;
+            // Not a person. The bone search is by human bone name, so a Dwarven sphere, a spider or a centurion
+            // never gets past it -- and until 2026-09-26 that meant nothing at all was sent for one, so dragging
+            // an automaton did nothing on the other screen. Where it is can still be sent; only how it is bent
+            // cannot. See VRPose::NoBones.
+            capture.pRoot = pRoot;
+            capture.Nodes = BoneNodes{};
+            capture.VTables = {};
+            capture.Boneless = true;
+            capture.RefreshAt = now + std::chrono::seconds(5);
+            capture.Sent = false;
         }
-        capture.pRoot = pRoot;
-        capture.Nodes = nodes;
-        for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
-            capture.VTables[i] = nodes[i] ? *static_cast<void**>(nodes[i]) : nullptr;
-        capture.RefreshAt = now + std::chrono::seconds(5);
-        capture.Sent = false;
+        else
+        {
+            capture.pRoot = pRoot;
+            capture.Nodes = nodes;
+            capture.Boneless = false;
+            for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
+                capture.VTables[i] = nodes[i] ? *static_cast<void**>(nodes[i]) : nullptr;
+            capture.RefreshAt = now + std::chrono::seconds(5);
+            capture.Sent = false;
+        }
     }
 
     // Bones alone are a bad signal for "someone is handling this body": a corpse settling on the ground, or an
@@ -1572,6 +1670,26 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
     {
         capture.Sent = false;
         return false;
+    }
+
+    // A skeleton with no readable bones: the root position is the whole message. It is sent every time it is
+    // asked for rather than on change, because the change test below is a comparison of bones there are none of.
+    if (capture.Boneless)
+    {
+        if (!capture.Sent)
+            spdlog::info("VRBodySync: body {:X} is being moved here and has no humanoid skeleton; sending where it is, not how it is bent", apActor->formID);
+        capture.Sent = true;
+
+        aOutPose.NoBones = true;
+        aOutPose.HasLegs = false;
+        aOutPose.HasFingers = false;
+        aOutPose.HasScale = false;
+        aOutPose.HasRootPosition = true;
+        aOutPose.RootPosition[0] = rootPosition.x;
+        aOutPose.RootPosition[1] = rootPosition.y;
+        aOutPose.RootPosition[2] = rootPosition.z;
+        aOutPose.HasData = true;
+        return true;
     }
 
     const glm::mat3 inverseRoot = glm::transpose(ToGlm(At<NiTransform>(pRoot, kWorldOffset).rotate));
@@ -1648,9 +1766,11 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
 
     std::unique_lock lock(s_posesLock);
     RemotePose& pose = s_poses[apActor->formID];
-    pose.HasLegs = acPose.HasLegs;
-    for (uint32_t i = 0; i < (acPose.HasLegs ? VRPose::kBoneCount : VRPose::kUpperBoneCount); ++i)
-        pose.Bones[i] = acPose.Bones[i];
+    pose.NoBones = acPose.NoBones;
+    pose.HasLegs = acPose.NoBones ? false : acPose.HasLegs;
+    if (!acPose.NoBones)
+        for (uint32_t i = 0; i < (acPose.HasLegs ? VRPose::kBoneCount : VRPose::kUpperBoneCount); ++i)
+            pose.Bones[i] = acPose.Bones[i];
     if (acPose.HasFingers)
     {
         pose.HasFingers = true;

@@ -178,6 +178,51 @@ void AnimationSystem::Clean(World& aWorld, const entt::entity aEntity) noexcept
         aWorld.remove<RemoteAnimationComponent>(aEntity);
 }
 
+// Update plays at most one action per frame, and until 2026-09-26 only one of the three paths that push into this
+// queue was bounded -- the single-action one, which is not the busy one. The movement snapshot carries actions too,
+// and that path had no cap at all: Seen's log of 2026-09-26 has a Dwarven Centurion Master at 5,123 queued and
+// Neloth at 17,411, every one of them refused. A queue that long is not a backlog, it is a different point in time:
+// 17,000 actions at one a frame is six minutes of replay, so the automaton was playing what it did before the fight
+// started and stood there through the whole of it. That is "dwarven spheres are not fighting at all".
+//
+// An action this far behind is not worth playing, so the oldest go and the actor catches up with the present.
+void AnimationSystem::TrimBacklog(RemoteAnimationComponent& aAnimationComponent, const uint32_t aFormId) noexcept
+{
+    constexpr size_t cMaxQueued = 96; // over a second of backlog at the frame rate these replay at
+    if (aAnimationComponent.TimePoints.size() <= cMaxQueued)
+        return;
+
+    const size_t dropped = aAnimationComponent.TimePoints.size() - cMaxQueued;
+    for (size_t i = 0; i < dropped; ++i)
+        aAnimationComponent.TimePoints.pop_front();
+
+    if (aAnimationComponent.ReplayCount > dropped)
+        aAnimationComponent.ReplayCount -= dropped;
+    else
+        aAnimationComponent.ReplayCount = 0;
+
+    static std::chrono::steady_clock::time_point s_nextSaid{};
+    static uint32_t s_since = 0;
+    static size_t s_worst = 0;
+    static uint32_t s_worstActor = 0;
+    ++s_since;
+    if (dropped > s_worst)
+    {
+        s_worst = dropped;
+        s_worstActor = aFormId;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= s_nextSaid)
+    {
+        s_nextSaid = now + 10s;
+        spdlog::warn("Animation replay backlog over {} actions; trimmed {} times, worst {} dropped at once on {:X}. An owner is looping an action.", cMaxQueued, s_since, s_worst, s_worstActor);
+        s_since = 0;
+        s_worst = 0;
+        s_worstActor = 0;
+    }
+}
+
 void AnimationSystem::AddActionsForReplay(RemoteAnimationComponent& aAnimationComponent,
                                           const ActionReplayChain& acReplay) noexcept
 {
@@ -185,6 +230,8 @@ void AnimationSystem::AddActionsForReplay(RemoteAnimationComponent& aAnimationCo
                                           acReplay.Actions.end());
     aAnimationComponent.ReplayCount = acReplay.Actions.size();
     aAnimationComponent.ResetAnimationGraphForReplay = acReplay.ResetAnimationGraph;
+
+    TrimBacklog(aAnimationComponent, 0);
 }
 
 void AnimationSystem::AddAction(RemoteAnimationComponent& aAnimationComponent, const std::string& acActionDiff) noexcept
@@ -201,29 +248,7 @@ void AnimationSystem::AddAction(RemoteAnimationComponent& aAnimationComponent, c
 
     aAnimationComponent.TimePoints.push_back(lastProcessedAction);
 
-    // Update plays at most one action per frame, and nothing bounded this queue. An actor whose owner is stuck in
-    // a loop therefore builds a backlog that never drains: on 2026-09-24 a single Redoran Guard reached 717
-    // refused 'Unequip' replays while the rest of the world starved for updates. An action this far behind is not
-    // worth playing anyway, so the oldest are dropped and the actor catches up with the present.
-    constexpr size_t cMaxQueued = 96; // over a second of backlog at the frame rate these replay at
-    if (aAnimationComponent.TimePoints.size() > cMaxQueued)
-    {
-        const size_t dropped = aAnimationComponent.TimePoints.size() - cMaxQueued;
-        for (size_t i = 0; i < dropped; ++i)
-            aAnimationComponent.TimePoints.pop_front();
-        if (aAnimationComponent.ReplayCount > dropped)
-            aAnimationComponent.ReplayCount -= dropped;
-        else
-            aAnimationComponent.ReplayCount = 0;
-
-        static std::chrono::steady_clock::time_point s_nextSaid{};
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= s_nextSaid)
-        {
-            s_nextSaid = now + 10s;
-            spdlog::warn("Animation replay backlog over {} actions, dropped {} stale ones; an owner is looping an action", cMaxQueued, dropped);
-        }
-    }
+    TrimBacklog(aAnimationComponent, 0);
 }
 
 void AnimationSystem::Serialize(World& aWorld, ClientReferencesMoveRequest& aMovementSnapshot, LocalComponent& localComponent, LocalAnimationComponent& animationComponent, FormIdComponent& formIdComponent)

@@ -3,6 +3,10 @@
 #include <TiltedOnlinePCH.h>
 #include <VersionDb.h>
 
+#ifdef SKYRIMVR
+#include <tlhelp32.h>
+#endif
+
 namespace
 {
 #ifndef SKYRIMVR
@@ -75,6 +79,52 @@ std::string GetSKSEStyleExeVersion()
 
     return exeBuild;
 }
+
+#ifdef SKYRIMVR
+// Find sksevr_<anything>.dll among the modules the process has actually loaded.
+//
+// Building the name from the exe version was the wrong idea twice over. The first time the trimming was wrong
+// ("1_4_15" cut to "1_"); that was fixed on 2026-09-25 and the warning came back the next morning, this time
+// reading `Looked for 'sksevr_.dll', built from exe version ''` -- VersionDb has no loaded version string at this
+// point, so there was nothing to build a name out of at all. Both failures share a cause: guessing at a filename
+// the loader can simply be asked for.
+//
+// The consequence was not cosmetic. Everything gated on "is SKSE here" was off for the whole session while
+// sksevr_1_4_15.dll was plainly in the process (Seen's crash dump lists it).
+bool IsScriptExtenderModuleLoaded(std::wstring& aFoundName)
+{
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+    if (snapshot == INVALID_HANDLE_VALUE)
+        return false;
+
+    std::wstring prefix(kScriptExtenderName);
+    prefix += L'_';
+
+    MODULEENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+
+    bool found = false;
+    if (Module32FirstW(snapshot, &entry))
+    {
+        do
+        {
+            std::wstring name(entry.szModule);
+            std::wstring lowered = name;
+            std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
+
+            if (lowered.compare(0, prefix.size(), prefix) == 0 && lowered.size() > 4 && lowered.compare(lowered.size() - 4, 4, L".dll") == 0)
+            {
+                aFoundName = name;
+                found = true;
+                break;
+            }
+        } while (Module32NextW(snapshot, &entry));
+    }
+
+    CloseHandle(snapshot);
+    return found;
+}
+#endif
 } // namespace
 
 #ifdef SKYRIMVR
@@ -86,27 +136,19 @@ bool g_ScriptExtenderStarting = false;
 bool IsScriptExtenderLoaded()
 {
 #ifdef SKYRIMVR
-    // VR never loads SKSE itself (see main.cpp), so the handle above is always null here. Ask the process
-    // instead: the preloader has brought sksevr_<version>.dll in by the time anything asks.
-    const auto version = GetSKSEStyleExeVersion();
-    std::wstring moduleName(kScriptExtenderName);
-    moduleName += L'_';
-    moduleName.append(version.begin(), version.end());
-    moduleName += L".dll";
+    // VR never loads SKSE itself (see main.cpp), so the handle above is always null here. Ask the loader which
+    // modules are in the process rather than building a filename and hoping: see IsScriptExtenderModuleLoaded.
+    std::wstring foundName;
+    const bool found = IsScriptExtenderModuleLoaded(foundName);
 
-    const bool found = GetModuleHandleW(moduleName.c_str()) != nullptr;
-    if (!found)
+    static bool s_said = false;
+    if (!s_said)
     {
-        // The trimming was fixed on 2026-09-25 and the message came back anyway on 2026-09-26, so guessing at the
-        // string a second time is not the move: say what was looked for and what the version string was, and the
-        // next line of the log settles it.
-        static bool s_said = false;
-        if (!s_said)
-        {
-            s_said = true;
-            const std::string narrow(moduleName.begin(), moduleName.end());
-            spdlog::warn("Script extender not found. Looked for '{}', built from exe version '{}'.", narrow, version);
-        }
+        s_said = true;
+        if (found)
+            spdlog::info("Script extender found: {}", std::string(foundName.begin(), foundName.end()));
+        else
+            spdlog::warn("Script extender not found: no sksevr_*.dll is loaded in this process.");
     }
 
     return found;

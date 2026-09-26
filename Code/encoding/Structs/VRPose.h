@@ -52,6 +52,17 @@ struct VRPose
     void Deserialize(Buffer::Reader& aReader) noexcept;
 
     bool HasData{false};
+
+    //! This pose carries no bones at all: only RootPosition means anything, and Bones must not be applied.
+    //!
+    //! For a body whose skeleton is not a person's. The bone search is by name ("NPC L Hand [LHnd]" and the rest),
+    //! so a Dwarven sphere, a spider, a centurion -- anything without a humanoid rig -- failed it, and
+    //! CaptureBodyPose returned false and sent nothing whatever. Dragging one did nothing on the other screen
+    //! (2026-09-26, "we tried dragging dwemer spiders it did nothing, and spheres, nothing"). Where it is is
+    //! still worth sending even when how it is bent cannot be read, and the receiver shifts the whole node tree
+    //! by the difference instead of posing named bones.
+    bool NoBones{false};
+
     bool HasLegs{false}; // the entries from kPelvis on are valid
     std::array<Quaternion_NetQuantize, kBoneCount> Bones{};
 

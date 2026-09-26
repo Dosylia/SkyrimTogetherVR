@@ -46,7 +46,7 @@ $ErrorActionPreference = 'Stop'
 # mid-change while the working tree moved on. The version is a hash of the uncommitted diff, so the only safe habit
 # is to build all of them in one go -- and to say so loudly when they disagree.
 function Assert-VersionsMatch($botExe, $release) {
-    $botLine = & $botExe 2>&1 | Select-String -Pattern 'STBot (\S+)' | Select-Object -First 1
+    $botLine = & $botExe --version 2>&1 | Select-String -Pattern 'STBot (v\S+)' | Select-Object -First 1
     if (-not $botLine) { return }
     $botVer = $botLine.Matches[0].Groups[1].Value
 
@@ -168,7 +168,7 @@ $scriptList = @($Script -split ',' | ForEach-Object { $_.Trim() } | Where-Object
 # A bot whose version does not match the server's is refused at the door and exits 2 with no checks run, which the
 # summary then reports as "0 of 1 passed" -- a failure that looks like a broken test and is actually a stale build.
 # It has happened twice (2026-09-25, 2026-09-26). Name it before running anything.
-$botStamp = & $bot 2>&1 | Select-String -Pattern 'STBot (\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -First 1
+$botStamp = & $bot --version 2>&1 | Select-String -Pattern 'STBot (v\S+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -First 1
 if (-not $botStamp) {
     $usage = & $bot 2>&1 | Select-Object -First 1
     if ($usage -notmatch 'Usage') { Write-Host "Could not read the bot's version" -ForegroundColor Yellow }

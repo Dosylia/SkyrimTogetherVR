@@ -188,30 +188,100 @@ void TESObjectREFR::SetLeveledCreature(TESActorBase* apOriginalBase, TESActorBas
 
 using TiltedPhoques::Serialization;
 
-// TEMPORARY (2026-09-26): SlideDiag reported 339 of 339 moves of a remote body arriving with animation variables
-// that had not changed -- not most of them, all of them. A body that translates while the variables driving its
-// legs stay put is a body sliding, which is what Emma and Seen saw for half a session.
+// TEMPORARY (2026-09-26): SlideDiag reported that every single move of a remote body arrived with animation
+// variables that had not changed -- 54,392 of 54,392 on Emma's client, 136,296 of 137,408 on Seen's. A body that
+// translates while the variables driving its legs stay put is a body sliding, which is what they saw for half a
+// session.
 //
-// Every path out of SaveAnimationVariables below leaves aVariables untouched, and an untouched set is identical
-// to the last one -- exactly the symptom. Rather than read the early returns and pick a favourite, each says so.
+// The first pass at this named four of the early returns below and never fired once, which I read as "the reads
+// are working". It is not what it meant: the two outermost conditions -- no animation graph manager at all, and
+// an index past the end of the graph list -- skip the whole body of the function without touching any of them,
+// and an untouched AnimationVariables is an empty one, which compares equal to the last empty one. So "identical"
+// may mean "unchanged" or may mean "never filled", and the difference is the whole diagnosis.
+//
+// Every exit is named now, including those two, and the successful path reports how many variables it actually
+// read. A zero there says the sender never filled them; a healthy count says the sender is fine and the fault is
+// downstream.
 #ifdef SKYRIMVR
-#define TP_ANIMVARS_GAVE_UP(reason)                                                                                    do                                                                                                                 {                                                                                                                      if (formID == 0x14)                                                                                                {                                                                                                                      static std::chrono::steady_clock::time_point s_next;                                                               static uint32_t s_since = 0;                                                                                        ++s_since;                                                                                                          const auto animVarNow = std::chrono::steady_clock::now();                                                           if (animVarNow >= s_next)                                                                                           {                                                                                                                       s_next = animVarNow + std::chrono::seconds(10);                                                                      spdlog::warn("AnimVarDiag: no animation variables for the local player -- {} ({} since the last line). The others see a body that slides.", reason, s_since);                 s_since = 0;                                                                                                    }                                                                                                               }                                                                                                               } while (false)
+namespace
+{
+void ReportAnimVarExit(const uint32_t aFormId, const char* acpReason) noexcept
+{
+    static std::chrono::steady_clock::time_point s_next;
+    static uint32_t s_since = 0;
+    static uint32_t s_player = 0;
+    static const char* s_pLastReason = "";
+    static uint32_t s_lastId = 0;
+
+    ++s_since;
+    if (aFormId == 0x14)
+        ++s_player;
+    s_pLastReason = acpReason;
+    s_lastId = aFormId;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_next)
+        return;
+    s_next = now + std::chrono::seconds(10);
+    spdlog::warn("AnimVarDiag: animation variables were not read {} times ({} of them for the local player); last was {:X} -- {}. An unread set is an empty set, and the others see a body that slides.",
+                 s_since, s_player, s_lastId, s_pLastReason);
+    s_since = 0;
+    s_player = 0;
+}
+
+void ReportAnimVarRead(const uint32_t aFormId, const size_t aBooleans, const size_t aFloats, const size_t aIntegers) noexcept
+{
+    static std::chrono::steady_clock::time_point s_next;
+    static uint32_t s_reads = 0;
+    static uint32_t s_empty = 0;
+
+    ++s_reads;
+    if (aBooleans == 0 && aFloats == 0 && aIntegers == 0)
+        ++s_empty;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_next)
+        return;
+    s_next = now + std::chrono::seconds(10);
+    spdlog::info("AnimVarDiag: {} sets of animation variables read, {} of them empty; last was {:X} with {} booleans, {} floats, {} integers.", s_reads, s_empty, aFormId, aBooleans, aFloats,
+                 aIntegers);
+    s_reads = 0;
+    s_empty = 0;
+}
+} // namespace
+#define TP_ANIMVARS_GAVE_UP(reason) ReportAnimVarExit(formID, reason)
+#define TP_ANIMVARS_READ(b, f, i) ReportAnimVarRead(formID, b, f, i)
 #else
 #define TP_ANIMVARS_GAVE_UP(reason) ((void)0)
+#define TP_ANIMVARS_READ(b, f, i) ((void)0)
 #endif
 
 void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const noexcept
 {
     BSAnimationGraphManager* pManager = nullptr;
-    if (animationGraphHolder.GetBSAnimationGraph(&pManager))
+    if (!animationGraphHolder.GetBSAnimationGraph(&pManager))
+    {
+        TP_ANIMVARS_GAVE_UP("this reference has no animation graph manager");
+        return;
+    }
     {
         BSScopedLock<BSRecursiveLock> _{pManager->lock};
 
-        if (pManager->animationGraphIndex < pManager->animationGraphs.size)
+        if (pManager->animationGraphIndex >= pManager->animationGraphs.size)
+        {
+            TP_ANIMVARS_GAVE_UP("the animation graph index is past the end of the graph list");
+            pManager->Release();
+            return;
+        }
+
         {
             auto* pActor = Cast<Actor>(this);
             if (!pActor)
+            {
+                TP_ANIMVARS_GAVE_UP("this reference is not an actor");
+                pManager->Release();
                 return;
+            }
 
             const BShkbAnimationGraph* pGraph = nullptr;
 
@@ -223,12 +293,14 @@ void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const
             if (!pGraph)
             {
                 TP_ANIMVARS_GAVE_UP("the animation graph is missing");
+                pManager->Release();
                 return;
             }
 
             if (!pGraph->behaviorGraph || !pGraph->behaviorGraph->stateMachine || !pGraph->behaviorGraph->stateMachine->name)
             {
                 TP_ANIMVARS_GAVE_UP("the behaviour graph or its state machine is missing");
+                pManager->Release();
                 return;
             }
 
@@ -251,6 +323,7 @@ void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const
             if (!pDescriptor)
             {
                 TP_ANIMVARS_GAVE_UP("no descriptor for this behaviour, and the modded-behaviour patch did not make one");
+                pManager->Release();
                 return;
             }
 
@@ -259,6 +332,7 @@ void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const
             if (!pVariableSet)
             {
                 TP_ANIMVARS_GAVE_UP("the graph has no variable set");
+                pManager->Release();
                 return;
             }
 
@@ -289,6 +363,8 @@ void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const
                 if (pVariableSet->size > idx)
                     aVariables.Integers[i] = *reinterpret_cast<uint32_t*>(&pVariableSet->data[idx]);
             }
+
+            TP_ANIMVARS_READ(aVariables.Booleans.size(), aVariables.Floats.size(), aVariables.Integers.size());
         }
 
         pManager->Release();

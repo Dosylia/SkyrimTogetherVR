@@ -59,6 +59,127 @@ Only this week's work is still ticked. 44 items shipped between 2026-09-14 and 2
 unplayed item gets, and the git history keeps every word of them. What is left ticked is from 2026-09-25 and
 -26 and is genuinely unplayed -- that is the list to confirm on the next session.
 
+## Session of 2026-09-26, 10:43-11:30 (both logs plus the server's): five causes, all named
+
+The longest session so far and the most productive one, because for the first time the server's own log settled a
+question the two client logs could only argue about.
+
+### The invisible player is not a fade, not a misplacement. The copy is deleted and never asked for again.
+
+Three logs, one minute, and the whole thing falls out:
+
+    server  11:20:17  WorldDiag: player 'Queen Emma' entered interior cell 34FD2; removed for 'Seen the strong'
+    server  11:20:21  WorldDiag: player 'Seen the strong' entered interior cell 34FD2; sent again for 'Queen Emma'
+    Emma    11:20:21  Character with remote id 20 is already spawned.
+    Emma    11:20:22  Temporary Remote Deleted FF00119B / Actor removed, form id: FF00119B
+    Emma    11:20:58  MagicService::OnNotifyRemoveSpell: could not find actor server id 20
+    Emma    11:21:01  ObjectService::OnActivateNotify: could not find actor server id 20
+    Emma    11:21:31  (the copy is back, because a *second* load door fired the whole sequence again)
+
+The server only re-sends a character when **that character** changes cell. It has no handler for the other case: a
+player whose own cell unloads and takes every remote copy standing in it down with it. Seen's spawn arrived one
+second before that teardown, hit "already spawned" and only nudged the old copy's position -- and then the old copy
+was deleted. Seventy seconds of Seen being invisible, and only a second load door fixed it.
+
+That also explains why this always reads as "the person going first cannot see the person following": the one who
+goes through the door first is the one whose cell unloads.
+
+- [x] **[untested] The client announces its cell again when it tears down a remote copy for a local reason.**
+      `CharacterService::CancelServerAssignment` now calls `DiscoveryService::RequestCellReannounce`, which waits
+      1.5 s (a load door deletes copies over several frames) and then re-dispatches `CellChangeEvent`. The server
+      re-sends every character in the cell, onto an empty slot this time. The server's leave-cell cleanup bails as
+      soon as it finds a player still in the cell, which is us, so nothing else is disturbed.
+
+### Dwarven spheres are not fighting: the animation replay queue has no bound on the path that fills it
+
+`ReplayDiag` prints how many actions are queued. On Seen's client a Dwarven Centurion Master reached **5,123** and
+Neloth **17,411**; Emma's worst was 2,689. `AnimationSystem::Update` plays at most one action per frame, so 17,411
+queued is six minutes of replay: the automaton was playing what it did before the fight started, all the way
+through the fight. That is "not fighting at all".
+
+The cap was written on 2026-09-24 and put in `AddAction` -- the single-action path. Actions also arrive in the
+movement snapshot (`OnReferencesMoveRequest`) and in the spawn replay chain, and neither was bounded. The session
+report's "Animation backlog trimmed 0" was true and meant nothing.
+
+- [x] **[untested] The cap is `AnimationSystem::TrimBacklog` now and every push path calls it.** The server caps a
+      replay chain at 32, well under the 96 here, so a fresh spawn is never trimmed.
+
+### The health bar after a death: the copy is pinned at the floor and nothing ever lifts it
+
+Seen died at 10:48:29. His copy on Emma's side was held at 25 health by the "a copy never goes down" rule while his
+own went to zero, the copy was rebuilt at 10:48:43, a stale death delta drove it to -275 and it was floored to 25
+again -- and then it **stayed at 25 for ninety seconds**: 25 at 10:48:46, 66 at 10:49:16, 66 at 10:49:46, 230 at
+10:50:16. No correction line in any of it.
+
+Because only *changes* go on the wire. Seen's health went -275 -> 315 while Emma had no copy of him to receive it,
+and after that it did not change, so nothing was ever sent again. What Emma saw was the copy's own regeneration
+crawling the bar back up, which reads exactly like watching somebody heal.
+
+- [x] **[untested] Health, magicka and stamina are re-sent every 3 s for a player whether or not they moved.**
+      Three floats per player per three seconds, and every copy becomes self-correcting: a missed change, a floored
+      value, a copy that regenerated on its own, all repaired within one period instead of never.
+
+### The friend's health bar "needs to be initialised once", measured
+
+Emma's words, and the count behind them: the session started at 10:43:50 and `WSEnemyMeters` first appeared in the
+menu list at **10:47:58**, four minutes later. It was missing from 205 of 575 probes -- a third of the session.
+The crash fix of 2026-09-25 refuses to post to a menu that is not open, correctly, and says nothing; the meter is
+not part of the HUD until something has shown it once, and until then there is no bar over anyone's head.
+
+- [x] **[untested] When the meter is wanted and the menu is not there, the UI is asked to show it.** `kShow` with
+      no data, at most once every 2 s, which allocates nothing from the pooled factory -- that allocation is what
+      made the update dangerous. The next tick 250 ms later finds the menu open and posts the real target.
+
+### Dragging a Dwemer automaton did nothing, and could not have
+
+`CaptureBodyPose` starts with `FindBones`, which searches by human bone name ("NPC L Hand [LHnd]" and the rest). A
+Dwarven sphere, a spider or a centurion fails it, the function returns false, and **nothing whatever is sent** --
+not the bones, not even where the thing is.
+
+- [x] **[untested] A body with no readable skeleton sends its root position alone (`VRPose::NoBones`).** The
+      receiver shifts the whole node tree, and the flattened bone array with it, by the difference: rotations are
+      left to the local animation, only where it is changes, which is all a drag is. Added in all four places this
+      time -- message, sender, interpolation rebuild, receiver.
+- Only for a **dead** automaton: the sender's gate is `IsDead()` and within 600 units, because a living NPC has no
+      ragdoll to grab. If the spiders being dragged were alive, this changes nothing for them.
+
+### Sliding: the measurement was not measuring what I thought
+
+100% on Emma's client (54,392 of 54,392) and 99.2% on Seen's. The instrumentation added the same morning named
+four early returns out of `SaveAnimationVariables` and fired **zero** times, which I was about to read as "the
+reads are working".
+
+It is not what it meant. The two outermost conditions -- no animation graph manager, and an index past the end of
+the graph list -- skip the whole function without touching any of the four, and an untouched `AnimationVariables`
+is an *empty* one, which compares equal to the last empty one. So "identical" may mean "unchanged" or may mean
+"never filled", and which it is settles the diagnosis.
+
+- [x] Every exit is named now, including those two, and the successful path reports how many booleans, floats and
+      integers it read. **A zero there means the sender never fills them; a healthy count means the sender is fine
+      and the fault is downstream of it.** One session answers it.
+- [x] Four of those early returns leaked a `BSAnimationGraphManager` reference every time they fired -- the
+      function's own exit releases it and they returned straight past it. They release it now.
+
+### The script extender warning, finally read rather than guessed at
+
+`Looked for 'sksevr_.dll', built from exe version ''`. Not a trimming bug this time: `VersionDb` has no loaded
+version string at that point, so there was nothing to build a filename out of at all. Both failures share a cause
+-- guessing at a filename the loader can simply be asked for.
+
+- [x] **[untested] The loaded modules are enumerated and the one called `sksevr_*.dll` is found by prefix.** No
+      version string involved. It logs which file it found, so the next log says so in one line either way.
+
+### Emma's crash at 11:30:43: not named, and not guessed at
+
+`c0000005, execute at 0x0` -- a call through a null function pointer, from `SkyrimVR.exe+0x3b2823`, with four
+frames in the same `+0x3b0xxx` range (a recursive traversal) and **no mod frames on the stack at all**. It is on
+thread 16928, the renderer frame-end thread where the body sync runs, 0.7 s after that thread posed a remote body.
+That is suggestive and it is not evidence; the game exe is Steam-encrypted here so the caller cannot be named
+offline. Two remote actors had been deleted in the seven seconds before it (FF001193 at 11:30:36, FF001191 at
+11:30:39), which is the shape of a use-after-free but not proof of one.
+
+- Left open deliberately. Nothing shipped for it this round.
+
 ### Goal 1: the "drives a game menu directly" class is closed (2026-09-26)
 
 The enemy-meter crash was not a null pointer, it was **building a UI message by hand and posting it to a menu
