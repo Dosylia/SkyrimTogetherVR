@@ -5,6 +5,8 @@
 #include <Messages/AuthenticationResponse.h>
 #include <Messages/ClientReferencesMoveRequest.h>
 #include <Messages/EnterExteriorCellRequest.h>
+#include <Messages/EnterInteriorCellRequest.h>
+#include <Messages/NotifyPlayerCellChanged.h>
 #include <Messages/Message.h>
 #include <Messages/NotifyActorValueChanges.h>
 #include <Messages/NotifyDeathStateChange.h>
@@ -526,6 +528,66 @@ void Bot::SendCellEntry() noexcept
     spdlog::info("Cell entry sent: grid ({}, {})", grid.X, grid.Y);
 }
 
+// Follow the host through a load door.
+//
+// A headless bot cannot walk through a door -- there is no door, only coordinates -- so when Emma went into
+// Windhelm on 2026-09-26 the bot stayed in the exterior cell and the server quite correctly stopped sending it
+// to her. That made the one bug worth testing, the copy that vanishes at a cell change, untestable without a
+// second real player.
+//
+// It does not need a door. The server already broadcasts NotifyPlayerCellChanged to everyone else, so the bot
+// can be told where the host went and simply say it is there too: announce the same cell and put itself at the
+// host's coordinates. That is a teleport, which is exactly what a load door is from the network's point of view.
+void Bot::FollowHostIntoCell(const GameId& acCell, const GameId& acWorldSpace) noexcept
+{
+    if (!m_hasCharacter)
+        return;
+
+    const KnownPlayer* pHost = Host();
+    if (!pHost)
+        return;
+
+    m_cell = acCell;
+    m_worldSpace = acWorldSpace;
+    m_standaloneCell = false;
+
+    // Beside the host rather than inside them, and at their height: an interior has no terrain to stand on and
+    // the exterior z the bot was carrying would put it through the floor or in the sky.
+    m_position = pHost->Position + glm::vec3(m_options.Spacing, 0.f, 0.f);
+    // Whatever it was walking towards is in the cell it just left.
+    m_walkTarget = m_position;
+
+    if (acWorldSpace == GameId{})
+    {
+        EnterInteriorCellRequest enter{};
+        enter.CellId = acCell;
+        SendMsg(enter);
+        spdlog::info("Host went into interior cell {:X}:{:X}; following to ({:.0f}, {:.0f}, {:.0f})", acCell.ModId, acCell.BaseId, m_position.x, m_position.y, m_position.z);
+    }
+    else
+    {
+        const auto grid = GridCellCoords::CalculateGridCellCoords(m_position.x, m_position.y);
+
+        EnterExteriorCellRequest enter{};
+        enter.WorldSpaceId = acWorldSpace;
+        enter.CellId = acCell;
+        enter.CurrentCoords = grid;
+        SendMsg(enter);
+
+        ShiftGridCellRequest shift{};
+        shift.WorldSpaceId = acWorldSpace;
+        shift.PlayerCell = acCell;
+        shift.CenterCoords = grid;
+        SendMsg(shift);
+
+        spdlog::info("Host went out into worldspace {:X}:{:X} cell {:X}; following to grid ({}, {})", acWorldSpace.ModId, acWorldSpace.BaseId, acCell.BaseId, grid.X, grid.Y);
+    }
+
+    // The move has to go out too, or the server keeps the old position and the copy the host sees stays where
+    // the bot used to be -- outdoors, while she is inside.
+    SendMovement();
+}
+
 void Bot::SendMovement() noexcept
 {
     if (!m_serverId)
@@ -762,6 +824,24 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         spdlog::info("Player character {:X} of player {} '{}' at ({:.0f}, {:.0f}, {:.0f}), health {:.0f}{}", message.ServerId, message.PlayerId, pPlayer->Name, pPlayer->Position.x, pPlayer->Position.y,
                      pPlayer->Position.z, pPlayer->Health, message.IsDead ? ", dead" : "");
         Record(Collect::Spawn, fmt::format("spawn {:X} health {:.1f}{}", message.ServerId, pPlayer->Health, message.IsDead ? " dead" : ""));
+        return;
+    }
+
+    if (opcode == NotifyPlayerCellChanged::Opcode)
+    {
+        const auto& message = static_cast<const NotifyPlayerCellChanged&>(acMessage);
+        for (auto& player : m_players)
+        {
+            if (player.PlayerId != message.PlayerId)
+                continue;
+            player.CellId = message.CellId;
+            player.WorldSpaceId = message.WorldSpaceId;
+            break;
+        }
+
+        const KnownPlayer* pHost = Host();
+        if (pHost && pHost->PlayerId == message.PlayerId && !m_options.Standalone)
+            FollowHostIntoCell(message.CellId, message.WorldSpaceId);
         return;
     }
 
@@ -1170,6 +1250,54 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         m_healthRestoreAt = now + 500ms;
         m_healthRestorePending = true;
         spdlog::info("Respawn sent; health back to {:.0f} in 500 ms", m_maxHealth);
+        return true;
+    }
+
+    // Walk into an interior, without a door.
+    //
+    // The bug this exists for: a player whose own cell unloads deletes every remote copy standing in it, the
+    // server is never told, and the copy is gone until something else happens to re-send it. Seen was invisible
+    // for seventy seconds that way on 2026-09-26. Until now it could only be reproduced by two people and a load
+    // door, which is not a test.
+    //
+    // A cell change is only a message. The bot says it is in an interior and the server treats it exactly as it
+    // treats a player walking through a door, which is the whole of what the bug needs.
+    if (name == "cell")
+    {
+        if (args.empty())
+        {
+            spdlog::error("[script] cell needs a hex cell id, or 'out' to go back to the worldspace");
+            return true;
+        }
+
+        // Coming out has to put the worldspace back. The first run of the doorloss pair went inside, came out
+        // announcing worldspace 0, and the server withheld the bot from its partner for ever -- "other
+        // worldspace". That was this command losing it, not the mod.
+        static GameId s_worldSpaceBeforeInterior{};
+
+        if (args[0] == "out")
+        {
+            m_cell = GameId{};
+            m_worldSpace = s_worldSpaceBeforeInterior;
+            m_standaloneCell = false;
+            SendCellEntry();
+            SendMovement();
+            spdlog::info("[script] back out into worldspace {:X}:{:X}", m_worldSpace.ModId, m_worldSpace.BaseId);
+            return true;
+        }
+
+        const uint32_t baseId = static_cast<uint32_t>(std::strtoul(args[0].c_str(), nullptr, 16)) & 0x00FFFFFF;
+        s_worldSpaceBeforeInterior = m_worldSpace;
+        m_cell = GameId{m_skyrimModId, baseId};
+        m_worldSpace = GameId{};
+        m_standaloneCell = false;
+
+        EnterInteriorCellRequest enter{};
+        enter.CellId = m_cell;
+        SendMsg(enter);
+        SendMovement();
+
+        spdlog::info("[script] entered interior cell {:X}:{:X}", m_cell.ModId, m_cell.BaseId);
         return true;
     }
 

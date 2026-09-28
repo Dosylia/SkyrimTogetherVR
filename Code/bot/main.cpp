@@ -11,6 +11,7 @@
 //   equip <hex form id> [left|both] [spell]
 //   unequip <hex form id> [left|both]
 //   health <value>  damage <n>  die (health -4)  respawn
+//   cell <hex id> | cell out       enter an interior cell, or go back outside (no door needed)
 //   disconnect  reconnect  loop  stop
 //   start <x> <y>                   where to look for the host (same as --x --y)
 

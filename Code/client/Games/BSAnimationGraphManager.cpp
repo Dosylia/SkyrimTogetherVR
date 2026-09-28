@@ -11,9 +11,9 @@ SortedMap<uint32_t, String> BSAnimationGraphManager::DumpAnimationVariables(bool
 {
     SortedMap<uint32_t, String> variables;
 
-    if (animationGraphIndex < animationGraphs.size)
+    if (const uint32_t index = ResolveGraphIndex(); index < animationGraphs.size)
     {
-        const auto pGraph = animationGraphs.Get(animationGraphIndex);
+        const auto pGraph = animationGraphs.Get(index);
         if (pGraph)
         {
             const auto pDb = pGraph->hkxDB;
@@ -54,6 +54,22 @@ SortedMap<uint32_t, String> BSAnimationGraphManager::DumpAnimationVariables(bool
     return variables;
 }
 
+uint32_t BSAnimationGraphManager::ResolveGraphIndex(const int aForceIndex) const noexcept
+{
+    if (aForceIndex >= 0)
+        return static_cast<uint32_t>(aForceIndex);
+
+    if (animationGraphIndex < animationGraphs.size)
+        return animationGraphIndex;
+
+    // Out of range. With one graph in the list there is nothing else it could mean; with more than one there is
+    // no way to guess, so the value is handed back unchanged and the caller's own bounds check rejects it.
+    if (animationGraphs.size == 1)
+        return 0;
+
+    return animationGraphIndex;
+}
+
 uint64_t BSAnimationGraphManager::GetDescriptorKey(int aForceIndex)
 {
     using TiltedPhoques::FHash::Crc64;
@@ -62,9 +78,9 @@ uint64_t BSAnimationGraphManager::GetDescriptorKey(int aForceIndex)
     variableNames.reserve(8192);
     std::map<uint32_t, const char*> variables;
 
-    if (animationGraphIndex < animationGraphs.size)
+    if (const uint32_t index = ResolveGraphIndex(aForceIndex); index < animationGraphs.size)
     {
-        const auto pGraph = aForceIndex == -1 ? animationGraphs.Get(animationGraphIndex) : animationGraphs.Get(aForceIndex);
+        const auto pGraph = animationGraphs.Get(index);
 
         if (pGraph)
         {

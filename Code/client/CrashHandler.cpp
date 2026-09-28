@@ -1,3 +1,4 @@
+#include <RecentDeletes.h>
 #include <BranchInfo.h>
 #include "CrashHandler.h"
 #include <DbgHelp.h>
@@ -187,6 +188,100 @@ bool Inside() noexcept
 }
 } // namespace CrashGuard
 
+// Capture the objects the crashing registers point at, and nothing else.
+//
+// On 2026-09-27 Seen's dump answered the big question -- not one frame of our code anywhere on the 583-slot
+// stack, the whole fault is inside the game's image -- and then stopped dead at the next one. The fault is a
+// virtual call through a null slot, and the object it was called on (Rcx = 0x9d48e610) was **not in the dump**:
+// MiniDumpNormal keeps stacks and data segments, not the heap. Without that object there is no way to see
+// whether it had been freed, which is the whole question.
+//
+// Full memory is 7 GB and minutes to write, and indirect-memory produced truncated dumps (see below), so
+// neither is an option. This is the narrow version: a few kilobytes around each pointer-looking register, plus
+// the vtable each one points to. A handful of small ranges, added only at crash time.
+namespace
+{
+struct ExtraRange
+{
+    ULONG64 Base;
+    ULONG Size;
+};
+
+ExtraRange g_extraRanges[24]{};
+size_t g_extraCount = 0;
+size_t g_extraNext = 0;
+
+bool RangeIsReadable(ULONG64 aAddress, SIZE_T aSize) noexcept
+{
+    MEMORY_BASIC_INFORMATION info{};
+    if (!VirtualQuery(reinterpret_cast<LPCVOID>(aAddress), &info, sizeof(info)))
+        return false;
+    if (info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD) || (info.Protect & PAGE_NOACCESS))
+        return false;
+    return aAddress + aSize <= reinterpret_cast<ULONG64>(info.BaseAddress) + info.RegionSize;
+}
+
+void AddExtraRange(ULONG64 aAddress, ULONG aSize) noexcept
+{
+    if (g_extraCount >= std::size(g_extraRanges) || aAddress < 0x10000)
+        return;
+    // Page-align downwards so the whole object is caught whatever the pointer pointed into.
+    const ULONG64 base = aAddress & ~static_cast<ULONG64>(0xFFF);
+    for (size_t i = 0; i < g_extraCount; ++i)
+        if (g_extraRanges[i].Base == base)
+            return;
+    if (!RangeIsReadable(base, aSize))
+        return;
+    g_extraRanges[g_extraCount++] = {base, aSize};
+}
+
+void CollectCrashObjects(PEXCEPTION_POINTERS apInfo) noexcept
+{
+    g_extraCount = 0;
+    g_extraNext = 0;
+    if (!apInfo || !apInfo->ContextRecord)
+        return;
+
+    const CONTEXT& c = *apInfo->ContextRecord;
+    const ULONG64 candidates[] = {c.Rcx, c.Rdx, c.Rbx, c.Rsi, c.Rdi, c.Rbp, c.R8, c.R9, c.R10, c.R11, c.R12, c.R13, c.R14, c.R15};
+
+    for (const ULONG64 value : candidates)
+    {
+        AddExtraRange(value, 0x1000);
+
+        // And whatever its first qword points at -- for an object that is its vtable, which is the thing worth
+        // reading: a freed object has a null or foreign one.
+        if (!RangeIsReadable(value, sizeof(ULONG64)))
+            continue;
+        ULONG64 first = 0;
+        std::memcpy(&first, reinterpret_cast<const void*>(value), sizeof(first));
+        AddExtraRange(first, 0x1000);
+    }
+}
+
+BOOL CALLBACK CrashDumpCallback(PVOID, const PMINIDUMP_CALLBACK_INPUT apInput, PMINIDUMP_CALLBACK_OUTPUT apOutput) noexcept
+{
+    if (!apInput || !apOutput)
+        return FALSE;
+
+    if (apInput->CallbackType == MemoryCallback)
+    {
+        if (g_extraNext >= g_extraCount)
+        {
+            apOutput->MemoryBase = 0;
+            apOutput->MemorySize = 0;
+            return FALSE; // done adding
+        }
+        apOutput->MemoryBase = g_extraRanges[g_extraNext].Base;
+        apOutput->MemorySize = g_extraRanges[g_extraNext].Size;
+        ++g_extraNext;
+        return TRUE;
+    }
+
+    return TRUE;
+}
+} // namespace
+
 LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 {
     // A fault inside a guarded section is caught and recovered further up this thread's stack. Reporting it would
@@ -248,6 +343,16 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 
         LogCrashContext(pExceptionInfo);
 
+        // Which object the faulting code was working on, against the ones we deleted. Rcx holds `this` for a
+        // virtual call in the Microsoft x64 convention, which is what these crashes have been.
+        if (pExceptionInfo && pExceptionInfo->ContextRecord)
+        {
+            const CONTEXT& cr = *pExceptionInfo->ContextRecord;
+            const uint64_t regs[] = {cr.Rax, cr.Rcx, cr.Rdx, cr.Rbx, cr.Rsi, cr.Rdi, cr.Rbp,
+                                     cr.R8,  cr.R9,  cr.R10, cr.R11, cr.R12, cr.R13, cr.R14, cr.R15};
+            RecentDeletes::Report(regs, std::size(regs));
+        }
+
 #if (IS_MASTER)
         volatile static bool bMiniDump = false;
 #else
@@ -292,9 +397,14 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
 
                 if (hDumpFile != INVALID_HANDLE_VALUE)
                 {
+                    CollectCrashObjects(pExceptionInfo);
+                    MINIDUMP_CALLBACK_INFORMATION callback{};
+                    callback.CallbackRoutine = &CrashDumpCallback;
+                    callback.CallbackParam = nullptr;
+
                     dumpWritten = MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), hDumpFile,
                                                     (MINIDUMP_TYPE)dumpSettings, (pExceptionInfo) ? &M : NULL, NULL,
-                                                    NULL);
+                                                    &callback);
                     if (!dumpWritten)
                         dumpError = GetLastError();
                 }

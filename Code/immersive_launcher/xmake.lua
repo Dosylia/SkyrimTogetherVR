@@ -71,4 +71,12 @@ target("SkyrimImmersiveLauncherVR")
     add_defines("SKYRIMVR")
     add_deps("SkyrimTogetherClientVR")
     add_ldflags("/WHOLEARCHIVE:SkyrimTogetherClientVR", { force = true })
+    -- A linker map, so a crash address can be turned back into a function name.
+    --
+    -- The launcher replaces the game's executable, so a coredump shows one 89.8 MB module holding both the
+    -- game's code and ours and the module name answers nothing. dbghelp against the PDB would, but it refused
+    -- to load symbols on 2026-09-27 and a whole evening went on guessing which code a stack belonged to. A map
+    -- is a sorted list of addresses and names in a text file: no debugger, no PDB matching, twenty lines of
+    -- Python to read. Keep it next to the build it came from.
+    add_ldflags("/MAP", { force = true })
     build_launcher()

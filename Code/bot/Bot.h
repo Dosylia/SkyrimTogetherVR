@@ -173,6 +173,8 @@ private:
     bool MoveTowards(const glm::vec3& acTarget, float aSpeed, float aDt) noexcept;
 
     const KnownPlayer* Host() const noexcept;
+    //! Move into the cell the host just entered, so a load door does not leave the bot outside.
+    void FollowHostIntoCell(const GameId& acCell, const GameId& acWorldSpace) noexcept;
     KnownPlayer* FindPlayerCharacter(uint32_t aServerId) noexcept;
     std::optional<glm::vec2> GuessStart() const noexcept;
     GameId Skyrim(uint32_t aBaseId) const noexcept { return GameId(m_skyrimModId, aBaseId); }

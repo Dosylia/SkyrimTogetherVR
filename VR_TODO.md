@@ -64,6 +64,164 @@ unplayed item gets, and the git history keeps every word of them. What is left t
 The longest session so far and the most productive one, because for the first time the server's own log settled a
 question the two client logs could only argue about.
 
+### Weapon touch, and why the first version felt random (2026-09-26)
+
+Emma wanted to feel her blade against Lydia's axe. The probe shipped first, on its own, precisely so the feature
+was not built on an assumption: it pulsed both controllers once a second for thirty seconds and she felt it, so
+SkyrimVR is on OpenVR's legacy input and `TriggerHapticPulse` is a real path. The probe has been removed now that
+it has answered.
+
+The first working version fired, but only sometimes. Her log said why in one line:
+
+    VRWeaponTouch: 'WEAPON' has nothing measurable below it; treating the weapon as a point at the grip
+
+A sword was a **dot in her fist**. The blade search walked the attach node's child nodes and a weapon is usually
+one geometry with no children at all -- the blade lives in the vertices. So contact only fired when her hilt came
+within 14 cm of Lydia's, which is exactly "sometimes it works and sometimes it doesn't".
+
+- [x] **[untested] The blade is measured from the node's world bound** (`kWorldBoundOffset`, 0xB0, straight after
+      the world transform). The centre of a sword's bound sits halfway down the blade, so the grip and the centre
+      give the direction and, doubled, the tip. The read is validated -- a radius outside 4 to 300 units, or a
+      centre more than 400 units from the grip, is not a bound -- and a rejection prints the raw values and the
+      node's three rotation axes, so a wrong offset names itself instead of putting a blade through the floor.
+- [x] **[untested] Each hand is its own segment now, alongside the weapon rather than instead of it.** The old
+      code used the hand only when nothing was equipped, which is why "with my bare hand nothing" and why a
+      sword hid the hand entirely.
+
+### The invisible copy has a regression test now, and it needed a new bot command (2026-09-26)
+
+The bug only reproduced with two people and a load door, which is not a test. A cell change is only a message,
+so the bot got a `cell <hex>` / `cell out` command and the pair `doorloss` reproduces Emma's exact case: one bot
+goes into an interior, the second follows three seconds later -- late enough that the spawn it is sent lands
+while its own old cell is still being torn down -- and both check they can still see each other, inside and then
+outside again.
+
+Three failures before it was honest, and none of them were the product:
+
+1. `cell out` did not restore the worldspace, so the bot came back into worldspace 0 and the server withheld it
+   for ever ("other worldspace"). That was the new command losing it.
+2. The two halves left the cell at different moments, so one checked three seconds after the other had
+   legitimately gone.
+3. The actor disconnected 16 ms before the watcher's last check. The actor now outlives its partner.
+
+- [x] **`doorloss` passes, and is in the standard pair list.** The log of the run that failed on (3) is the
+      evidence that the fix itself works: `back out into worldspace 3C` at 17:55:55.176 and the copy restored at
+      17:55:55.223, 47 ms later.
+- The bot cannot test **sliding**: `grep Variables Code/bot/Bot.cpp` returns nothing, so its copy never has
+      animation variables and always slides whatever the client does. Judge sliding against Seen or an NPC.
+- The bot spawns by worldspace, so it must be given the host's: on 2026-09-26 it sat in Tamriel (3C) while Emma
+      was in 1691D, same grid, and the server correctly withheld everything. Pass `--worldspace`.
+
+### Player sliding: found, and it was never the merge (2026-09-26, 14:02)
+
+Emma's live log, on the build with every exit named:
+
+    AnimVarDiag (sending): 23 variables in range, 0 skipped by the bounds check (0.0%);
+                           the set says size 100 and the descriptor wants up to index 75
+    AnimVarDiag: animation variables were not read 5391 times (225 of them for the local player);
+                 last was A2C94 -- the animation graph index is past the end of the graph list
+
+So the bounds check the 2026-09-22 merge added is innocent -- nothing is skipped by it, anywhere. The cause is the
+outer guard, one of the two that had no instrumentation on them at all until that morning, and it is absurd on
+inspection: the player's branch reads graph **0** whatever the manager's index says, and the guard rejected the
+player on that index anyway. Emma's own body was thrown out about twenty-three times a second -- every movement
+snapshot -- before reaching the line that would have ignored the index entirely.
+
+- [x] **[untested] Each side checks the index it is going to use.** `cGraphIndex = cIsPlayer ? 0 : animationGraphIndex`,
+      and the guard tests that. For the player it is now unreachable whenever a graph exists at all.
+- [x] The same exit now prints the index and the list size, so the ~5,100 per 10 s that are **NPCs** -- where the
+      index genuinely is used -- get their own answer next session.
+- The lesson, for the third time this week: instrument the exits that log nothing before believing a diagnostic
+  that reports zero. Two of the exits here were invisible, and the one that mattered was one of them.
+
+### Weapon haptics: the probe before the feature (2026-09-26)
+
+Emma: "when my hand goes against Lydia's axe I do not feel it, even when I have a sword." Checked her list --
+PLANCK gives her an NPC's body, the parry mod only fires on an incoming attack and scales its pulse by the stamina
+the parry costs, HIGGS is hands against grabbable objects. Weapon-touching-weapon is a real gap, and for another
+*player's* weapon nothing else could fill it: only this mod knows where that weapon is.
+
+Everything needed is already here -- `IVRSystem` from the game's own openvr_api.dll (as VRDashboard does), and
+both `GetTrackedDeviceIndexForControllerRole` and `TriggerHapticPulse` in the header we compile against.
+
+- [x] **[untested] `VRHaptics::RunProbe` pulses both controllers once a second for 30 s, ten seconds into a
+      session, and says so.** SkyrimVR should be on OpenVR's legacy input, where that call works; if it has moved
+      to the action system the call is accepted and silently ignored, and every line of a weapon-collision feature
+      would have been built on sand. One session answers it for the cost of a file that is then deleted.
+
+### The bot follows the host through load doors now (2026-09-26)
+
+A headless bot cannot walk through a door, so when Emma entered Windhelm the bot stayed in the exterior cell and
+the server correctly stopped sending it to her -- which made the one bug most worth testing, the copy that
+vanishes at a cell change, untestable without a second real player.
+
+It does not need a door. The server already broadcasts `NotifyPlayerCellChanged` to everyone else.
+
+- [x] **[untested] The bot handles that message, and when it is the host's, announces the same cell and puts
+      itself at the host's coordinates.** Interior or exterior, plus an immediate movement send so the copy the
+      host sees is not left standing outdoors. Standalone bots ignore it, so the pair tests are unaffected.
+
+### Three corrections from Emma, 2026-09-26 (all three were right)
+
+**The crash count was inflated because I counted the ones they cause on purpose.** My own note says end-of-session
+crashes are quit crashes; I then counted all 32 in the log history and read a trend off them. Split by what the
+45 seconds before each one contains:
+
+| | crashes while clearly playing | a menu was up first | nothing either way |
+|---|---|---|---|
+| 19 Sep - 26 Sep | **5** | 22 | 5 |
+
+The five: 09-19 10:39, 09-21 19:55, 09-23 18:46, 09-26 09:06, 09-26 11:30. That is five real crashes in eight
+days, not thirty-two, and the honest reading of the trend is that it is flat and very low rather than falling.
+Caveat in the other direction: the 22 "a menu was up" include Loading and Fader menus, which are also a door
+transition, so some of those may be load crashes rather than quits. Worth separating if one is ever reported.
+
+**"NPCs below floor level" is not measuring what the goal says.** `SinkDiag` fires when an actor is more than 16
+units (about 23 cm, so not a millimetre -- Emma asked) lower than where it was placed **on the previous frame**.
+That is a fall, not a depth. It cannot see the thing the goal is about: a body that settles half inside the floor
+and stays there produces no reports at all, because it is not moving.
+
+What it actually caught in the whole 10:43-11:30 session, both clients:
+
+    Emma:  1 placement, 2536 units, FF001131   |  1 placement, 1961 units, FF001191
+    Seen:  654 / 1546 / 586 / 525 / 36 / 55 units, all single placements
+
+Eight events in an hour, none repeating, and six of the eight are 0.5 m to 36 m in a single frame -- the size of a
+door transition or a teleport, not a body sinking. Only the 36 and 55 (0.5-0.8 m) are even the right order of
+magnitude, and they happened once each.
+
+- Downgraded from a goal to a watch item. Nobody has reported *seeing* an NPC standing in the floor since the
+  goal was written, and the number that justified it turns out to be measuring falls. If it is seen again, the
+  measurement to build is the residual after ForcePosition -- the copy's z against the z the network asked for,
+  held over time -- not a frame-to-frame delta.
+
+**Sliding is a regression from the merge of 2026-09-22, and Emma knew when it started.** "Sliding was introduced
+since the merge with main (for players sliding), it was not here before." The merge is a920247d, and of everything
+it brought in, the only thing on the animation path is `SaveAnimationVariables` and `LoadAnimationVariables` --
+where it wrapped every read and every write in a new bounds check:
+
+    -   if (pVariableSet->data[idx] != 0)
+    +   if (pVariableSet->size > idx && pVariableSet->data[idx] != 0)
+
+    -   aVariables.Floats[i] = *reinterpret_cast<float*>(&pVariableSet->data[idx]);
+    +   if (pVariableSet->size > idx)
+    +       aVariables.Floats[i] = ...
+
+If that bound is never satisfied on VR, the symptom is exactly what both logs show. The sender's arrays keep the
+zeros they were pre-assigned, so consecutive snapshots are identical -- SlideDiag at 100% -- and the receiver
+writes nothing into its graph, so the legs never move while the body does. No early return is taken, nothing is
+null, nothing logs and nothing crashes, which is precisely why the instrumentation written that morning found
+nothing: it was watching the exits, and this path does not take one.
+
+`hkbVariableValueSet` is modelled from Skyrim SE (`data` at 0x10, `size` at 0x18) with no VR variant, so either
+the offset or the meaning of that field may differ here.
+
+- [x] **[untested] The bound itself is counted now, on both halves.** How many indices were in range, how many
+      the check skipped, what the set reports as its size, and the largest index the descriptor asks for -- one
+      line every 10 s for sending and one for receiving. **`skipped` far above zero with `size` far below the max
+      index confirms it.** The fix then belongs on what that field means on VR, not on removing a check that was
+      added to stop an out-of-bounds read.
+
 ### The invisible player is not a fade, not a misplacement. The copy is deleted and never asked for again.
 
 Three logs, one minute, and the whole thing falls out:

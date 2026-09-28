@@ -105,6 +105,7 @@ private:
     void RunEnemyMeterUpdates() noexcept;
     void RunRemotePlayerDiag() noexcept;
     void RunOrphanedRemoteDiag() noexcept;
+    void RunWeaponTouch() noexcept;
 
 public:
     static std::chrono::steady_clock::time_point LastMoveSentAt() noexcept;

@@ -27,6 +27,16 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept;
 //! Measurement only: watch a dead body this client does **not** own for signs of being handled here.
 void ObserveRemoteBodyMotion(Actor* apActor) noexcept;
 
+//! Weapon touch: a controller pulse when your blade or your hand meets somebody else's weapon.
+//!
+//! Driven from the game thread, once per frame, around the loop that already walks every tracked actor:
+//! BeginWeaponTouch, then ConsiderForWeaponTouch for each, then EndWeaponTouch. Works against NPCs and against
+//! other players' copies alike -- the copy's weapon is a node like any other, though it is only in the right
+//! place once the remote hand offset is fixed.
+void BeginWeaponTouch() noexcept;
+void ConsiderForWeaponTouch(Actor* apActor) noexcept;
+void EndWeaponTouch() noexcept;
+
 //! A pose without data clears the actor's pose.
 void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept;
 void ClearRemotePose(uint32_t aFormId) noexcept;

@@ -25,19 +25,26 @@ Get-ChildItem (Join-Path $ClientFolder 'logs') -Filter 'tp_client*.log' -ErrorAc
 Add-File (Join-Path $ClientFolder 'logs\cef_debug.log')
 Add-File (Join-Path $ClientFolder 'logs\dashboard_frame.bmp')
 
-# Newest SKSE crash log (Crash Logger), if one was written in the last day.
+# Every SKSE crash log (Crash Logger) from the last day, not just the newest.
+#
+# This took only the most recent one, and on 2026-09-26 that cost a whole evening: Seen crashed four times and
+# the bundle carried a single dump, from a session that was not among them. A Crash Logger stack names modules
+# and functions; the stack our own handler scans out of the raw stack memory does not. Four small text files
+# beat one, and without them the only thing left to do is guess -- which is exactly what happened.
 $skse = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'My Games\Skyrim VR\SKSE'
 Get-ChildItem $skse -Filter 'crash-*.log' -ErrorAction SilentlyContinue |
     Where-Object { $_.LastWriteTime -gt (Get-Date).AddDays(-1) } |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1 |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 8 |
     ForEach-Object { Add-File $_.FullName }
 
 # Newest crash dump from the last day. They are large, but compress well.
 $dumps = @(Get-ChildItem $ClientFolder -Filter 'crash_*.dmp' -ErrorAction SilentlyContinue)
 $overwrite = Join-Path (Split-Path (Split-Path $ClientFolder -Parent) -Parent) 'overwrite\Root'
 $dumps += @(Get-ChildItem $overwrite -Filter 'crash_*.dmp' -ErrorAction SilentlyContinue)
+# Two, not one: a crash and the one before it are often the pair that tells them apart. They are large, so not
+# more than two.
 $dumps | Where-Object { $_.LastWriteTime -gt (Get-Date).AddDays(-1) } |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1 |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 2 |
     ForEach-Object { Add-File $_.FullName }
 
 # Build of the client, from the first log line that names it.

@@ -30,6 +30,15 @@ struct BSAnimationGraphManager
 
     uint32_t animationGraphIndex; // A8 - 5C
 
+    //! Which entry of animationGraphs to actually read.
+    //!
+    //! On VR `animationGraphIndex` does not hold an index. Emma's log of 2026-09-26 15:04 has it reading
+    //! 1,099,950,232 and 2,234,779,136 against a list of **one** graph, five thousand times per ten seconds --
+    //! the SE offset (0xB0) points at something else there. Every actor observed failing had exactly one graph,
+    //! and for a list of one there is only one answer.
+    //! @param aForceIndex A caller that already knows which graph it wants (the player always wants 0); -1 to ask.
+    uint32_t ResolveGraphIndex(int aForceIndex = -1) const noexcept;
+
     SortedMap<uint32_t, String> DumpAnimationVariables(bool aPrintVariables);
     uint64_t GetDescriptorKey(int aForceIndex = -1);
     uint32_t ReSendEvent(BSFixedString* apEventName);

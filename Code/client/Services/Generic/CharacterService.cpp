@@ -9,6 +9,8 @@
 #include <Services/TransportService.h>
 #include <Services/InventoryService.h>
 #include <Services/DiscoveryService.h>
+#include <RecentDeletes.h>
+#include <CopyRemovalPolicy.h>
 
 #include <Games/References.h>
 #include <Games/Misc/SubtitleManager.h>
@@ -212,6 +214,83 @@ void ReleaseGhostOf(const uint32_t aCopyFormId) noexcept
         EnableGhost(cGhost);
         return;
     }
+}
+
+// The teardown of a remote copy is back to exactly what it was before 2026-09-27, and this note is why.
+//
+// Three variations were tried in one afternoon and each replaced one bug with another:
+//   - delete one frame later  -> still a use-after-free; Seen's dump had the actor in Rdi 1930 ms after.
+//   - never delete            -> 652 copies piled up in Emma's world in five minutes and ate her framerate.
+//   - disable, delete after 5 s -> her Seekers went invisible (nothing re-enables a disabled copy), and the
+//                                  crash came back anyway with the actor still in Rcx **24 seconds** later.
+//
+// Twenty-four seconds means no delay is safe, and disabling breaks the copy's own recovery path, which relies
+// on the actor being *gone* so a fresh one can be spawned. The original behaviour is at least the one the rest
+// of the system is built around, and it is the baseline the user calls "perfect". What stays from the attempt
+// is the evidence: RecentDeletes still records every deletion and the crash handler still checks it against
+// every register, so the next crash says plainly whether this path is involved.
+//
+// What it does NOT say yet is who holds the pointer for twenty-four seconds. A combat target is the obvious
+// suspect -- Emma shot the Seeker that then went wrong -- and that is the next thing to look at, on evidence
+// rather than by rearranging this code again.
+
+// Copies disabled and waiting for the game to release them. The rules are in CopyRemovalPolicy.h, kept
+// separate and free of game types so the one thing that kept going wrong -- the reasoning -- is unit tested.
+// The bound is the safety property: this list can never hold more than kMaxWaiting, whatever the game does.
+struct WaitingCopy
+{
+    uint32_t FormId{};
+    std::chrono::steady_clock::time_point QueuedAt{};
+};
+
+TiltedPhoques::Vector<WaitingCopy> s_waitingCopies;
+
+uint32_t OutstandingHandles(const Actor* apActor) noexcept
+{
+    return static_cast<uint32_t>(apActor->handleRefObject.refCount) & 0x3FF;
+}
+
+void FreeCopy(Actor* apActor, const uint32_t aFormId, const char* acpWhy) noexcept
+{
+    const uint32_t refWord = static_cast<uint32_t>(apActor->handleRefObject.refCount);
+    RecentDeletes::Record(apActor, aFormId, refWord & 0x3FF, refWord, 0);
+    spdlog::info("Temporary Remote Deleted {:X} ({})", aFormId, acpWhy);
+    apActor->Delete();
+}
+
+void RunWaitingCopies() noexcept
+{
+    if (s_waitingCopies.empty())
+        return;
+
+    static std::chrono::steady_clock::time_point s_next;
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_next)
+        return;
+    s_next = now + 250ms;
+
+    TiltedPhoques::Vector<WaitingCopy> stillWaiting;
+    stillWaiting.reserve(s_waitingCopies.size());
+
+    for (const WaitingCopy& waiting : s_waitingCopies)
+    {
+        Actor* pActor = Cast<Actor>(TESForm::GetById(waiting.FormId));
+        if (!pActor || pActor->IsDeleted() || !pActor->IsTemporary())
+            continue; // gone already, which is the outcome we wanted
+
+        const auto waitedMs = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now - waiting.QueuedAt).count());
+        const bool overBound = stillWaiting.size() >= CopyRemovalPolicy::kMaxWaiting;
+
+        if (CopyRemovalPolicy::ShouldRelease(OutstandingHandles(pActor), waitedMs, overBound))
+        {
+            FreeCopy(pActor, waiting.FormId, overBound ? "the waiting list was full" : "the game let go of it");
+            continue;
+        }
+
+        stillWaiting.push_back(waiting);
+    }
+
+    s_waitingCopies.swap(stillWaiting);
 }
 
 void ReleaseAllGhosts() noexcept
@@ -497,6 +576,12 @@ void CharacterService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
         RunRemotePlayerDiag();
         RunOrphanedRemoteDiag();
     }
+    {
+        PerfScope perfScope("CharacterService::RunWeaponTouch");
+        RunWeaponTouch();
+    }
+    RunWaitingCopies();
+
     {
         PerfScope perfScope("CharacterService::RunFactionsUpdates");
         RunFactionsUpdates();
@@ -1899,7 +1984,76 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
         {
             if (pActor->IsTemporary() && !IsProcessExiting())
             {
+                // Deleted on a later frame, not here.
+                //
+                // Seen's dump of 2026-09-27 12:09 proved this by address rather than by timing: the object the
+                // game made a virtual call on, Rcx = 0x9ceabe10, is exactly the actor FF001178 that this line
+                // had just deleted. Its first vtable had already been overwritten with heap garbage. The game
+                // was still holding the pointer and still using it.
+                //
+                // This runs from the game's own "that reference is gone" notification, which fires while the
+                // game is partway through disposing of the actor -- during a cell unload, dozens at a time.
+                // Freeing it underneath that is the race. The work still happens, one frame later, from the
+                // service update, by which point the game has finished with it.
                 spdlog::info("Temporary Remote Deleted {:X}", aFormId);
+
+                // Who still had a claim on it, captured before the delete because afterwards it is gone. The
+                // outstanding handle count is the one that matters: a BSPointerHandle is exactly how the game
+                // keeps hold of an actor across time, and a pointer that survived 24 seconds (2026-09-27 16:05)
+                // was being kept by something.
+                uint32_t claims = 0;
+                if (const PlayerCharacter* pPlayer = PlayerCharacter::Get())
+                {
+                    if (pPlayer->GetCombatTarget() == pActor)
+                        claims |= RecentDeletes::kPlayerCombatTarget;
+                }
+                if (pActor->currentProcess)
+                    claims |= RecentDeletes::kHasProcess;
+                if (pActor->GetNiNode())
+                    claims |= RecentDeletes::kHas3D;
+                if (pActor->actorState.IsDeadOrDying())
+                    claims |= RecentDeletes::kDeadOrDying;
+
+                // Anyone else fighting it. Only the actors this mod already tracks, which is the set that
+                // matters and keeps this to a short loop.
+                {
+                    auto combatView = m_world.view<FormIdComponent>();
+                    for (auto other : combatView)
+                    {
+                        Actor* pOther = Cast<Actor>(TESForm::GetById(combatView.get<FormIdComponent>(other).Id));
+                        if (pOther && pOther != pActor && pOther->GetCombatTarget() == pActor)
+                        {
+                            claims |= RecentDeletes::kOtherCombatTarget;
+                            break;
+                        }
+                    }
+                }
+
+                const uint32_t refWord = static_cast<uint32_t>(pActor->handleRefObject.refCount);
+                const uint32_t handles = refWord & 0x3FF;
+                RecentDeletes::Record(pActor, aFormId, handles, refWord, claims);
+
+                if (CopyRemovalPolicy::OnRemoved(handles, s_waitingCopies.size()) == CopyRemovalPolicy::Action::WaitDisabled)
+                {
+                    // Disabled, not freed: silent, no AI, not drawn, and nothing dangling. It costs a slot in a
+                    // list that cannot grow past kMaxWaiting.
+                    pActor->Disable();
+                    s_waitingCopies.push_back(WaitingCopy{aFormId, std::chrono::steady_clock::now()});
+                    ReleaseGhostOf(aFormId);
+                    DeleteRemoteEntityComponents(aEntity);
+                    return;
+                }
+
+                // Nothing holds it, or the waiting list is full: free it here.
+                //
+                // Waiting for the handles to reach zero was tried on 2026-09-27 and put Emma straight back into
+                // the pile-up that had already cost her one session: the copies are dead Seekers the game keeps
+                // claims on, the claims do not clear while the cell is loaded, so nothing was ever freed and her
+                // frame rate went again. Twice with the same failure is enough -- nothing that can accumulate
+                // ships again without a mechanism that provably cannot accumulate.
+                //
+                // So this is the old behaviour, which costs Seen a crash and costs Emma nothing. The
+                // DeleteClaim line above still records the handles, which is how the cause is known at all.
                 pActor->Delete();
                 ReleaseGhostOf(aFormId);
 
@@ -2494,6 +2648,22 @@ void CharacterService::RunOrphanedRemoteDiag() noexcept
 #endif
 }
 
+// Every frame, because a haptic pulse that arrives a tenth of a second after the blades meet is not a feel, it
+// is a notification. The work is one form lookup per tracked actor and a distance test; everything further than
+// arm's reach is dropped before any skeleton is touched.
+void CharacterService::RunWeaponTouch() noexcept
+{
+#ifdef SKYRIMVR
+    VRBodySync::BeginWeaponTouch();
+
+    auto view = m_world.view<FormIdComponent>();
+    for (auto entity : view)
+        VRBodySync::ConsiderForWeaponTouch(Cast<Actor>(TESForm::GetById(view.get<FormIdComponent>(entity).Id)));
+
+    VRBodySync::EndWeaponTouch();
+#endif
+}
+
 void CharacterService::RunRemotePlayerDiag() noexcept
 {
     static std::chrono::steady_clock::time_point s_next;
@@ -2560,6 +2730,7 @@ void CharacterService::RunRemotePlayerDiag() noexcept
 #else
 void CharacterService::RunRemotePlayerDiag() noexcept {}
 void CharacterService::RunOrphanedRemoteDiag() noexcept {}
+void CharacterService::RunWeaponTouch() noexcept {}
 #endif
 
 void CharacterService::RunRemoteUpdates() noexcept

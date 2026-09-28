@@ -343,7 +343,10 @@ void DiscoveryService::VisitForms() noexcept
             }
         }
 
-        m_dispatcher.trigger(ActorRemovedEvent(formId));
+        // Once. The merge of 2026-09-22 (a920247d) added a second trigger above the erase and left the
+        // original below it, so every removal has been dispatched twice ever since -- to this service's
+        // listeners and to every other one. Upstream's intent was to move it before the erase, not to have
+        // both.
         m_forms.erase(formId);
         m_dispatcher.trigger(ActorRemovedEvent(formId));
     }

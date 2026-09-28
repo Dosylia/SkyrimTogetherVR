@@ -229,31 +229,85 @@ void ReportAnimVarExit(const uint32_t aFormId, const char* acpReason) noexcept
     s_player = 0;
 }
 
-void ReportAnimVarRead(const uint32_t aFormId, const size_t aBooleans, const size_t aFloats, const size_t aIntegers) noexcept
+// Which brings us to what this is really for.
+//
+// sliding was introduced since the merge with main (for players sliding), it was not here
+// before. The merge is a920247d, 2026-09-22, and of everything it touched the only thing on the animation path
+// is this function and its twin below -- where it wrapped every read and every write in `pVariableSet->size > idx`.
+//
+// If that bound is never satisfied on VR, the effect is exactly the symptom: the sender fills its arrays with the
+// zeros it pre-assigned them and nothing else, so consecutive snapshots are identical (SlideDiag 100%), and the
+// receiver writes nothing into its graph, so the legs never move while the body does. Nothing logs, nothing
+// crashes, and no early return is taken -- which is why the first instrumentation found nothing.
+//
+// So this counts the bound itself: how many indices were in range, how many were skipped, the set's reported size
+// and the largest index the descriptor asks for. `skipped` far above zero with `size` far below `max index` is the
+// answer, and the fix is then about what that field means on VR rather than about the check being wrong to exist.
+// The same exit, with the two numbers that decide whether it is reasonable. For the player it is now
+// unreachable (the index used is 0 and the list is non-empty whenever there is a graph at all); for an NPC an
+// index past the end may be honest, and the counts say how often and by how much.
+void ReportAnimVarIndex(const uint32_t aFormId, const uint32_t aIndex, const uint32_t aSize, const bool aIsPlayer) noexcept
 {
     static std::chrono::steady_clock::time_point s_next;
-    static uint32_t s_reads = 0;
-    static uint32_t s_empty = 0;
+    static uint32_t s_since = 0;
+    static uint32_t s_player = 0;
+    static uint32_t s_lastIndex = 0;
+    static uint32_t s_lastSize = 0;
+    static uint32_t s_lastId = 0;
 
-    ++s_reads;
-    if (aBooleans == 0 && aFloats == 0 && aIntegers == 0)
-        ++s_empty;
+    ++s_since;
+    if (aIsPlayer)
+        ++s_player;
+    s_lastIndex = aIndex;
+    s_lastSize = aSize;
+    s_lastId = aFormId;
 
     const auto now = std::chrono::steady_clock::now();
     if (now < s_next)
         return;
     s_next = now + std::chrono::seconds(10);
-    spdlog::info("AnimVarDiag: {} sets of animation variables read, {} of them empty; last was {:X} with {} booleans, {} floats, {} integers.", s_reads, s_empty, aFormId, aBooleans, aFloats,
-                 aIntegers);
-    s_reads = 0;
-    s_empty = 0;
+    spdlog::warn("AnimVarDiag: the graph index was past the end {} times ({} of them the local player, which should now be impossible); last was {:X} wanting index {} of {} graphs.", s_since,
+                 s_player, s_lastId, s_lastIndex, s_lastSize);
+    s_since = 0;
+    s_player = 0;
+}
+
+void ReportAnimVarBounds(const uint32_t aFormId, const bool aWriting, const uint32_t aSetSize, const size_t aInRange, const size_t aSkipped, const uint32_t aMaxIndex) noexcept
+{
+    static std::chrono::steady_clock::time_point s_next[2];
+    static size_t s_inRange[2] = {0, 0};
+    static size_t s_skipped[2] = {0, 0};
+    static uint32_t s_size[2] = {0, 0};
+    static uint32_t s_maxIndex[2] = {0, 0};
+    static uint32_t s_lastId[2] = {0, 0};
+
+    const int slot = aWriting ? 1 : 0;
+    s_inRange[slot] += aInRange;
+    s_skipped[slot] += aSkipped;
+    s_size[slot] = aSetSize;
+    s_maxIndex[slot] = aMaxIndex;
+    s_lastId[slot] = aFormId;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now < s_next[slot])
+        return;
+    s_next[slot] = now + std::chrono::seconds(10);
+
+    const size_t total = s_inRange[slot] + s_skipped[slot];
+    const double share = total ? (100.0 * s_skipped[slot] / total) : 0.0;
+    spdlog::info("AnimVarDiag ({}): {} variables in range, {} skipped by the bounds check ({:.1f}%); the set says size {} and the descriptor wants up to index {}; last actor {:X}.",
+                 aWriting ? "receiving" : "sending", s_inRange[slot], s_skipped[slot], share, s_size[slot], s_maxIndex[slot], s_lastId[slot]);
+    s_inRange[slot] = 0;
+    s_skipped[slot] = 0;
 }
 } // namespace
 #define TP_ANIMVARS_GAVE_UP(reason) ReportAnimVarExit(formID, reason)
-#define TP_ANIMVARS_READ(b, f, i) ReportAnimVarRead(formID, b, f, i)
+#define TP_ANIMVARS_BOUNDS(w, sz, ok, skip, mx) ReportAnimVarBounds(formID, w, sz, ok, skip, mx)
+#define TP_ANIMVARS_INDEX(i, sz, pl) ReportAnimVarIndex(formID, i, sz, pl)
 #else
 #define TP_ANIMVARS_GAVE_UP(reason) ((void)0)
-#define TP_ANIMVARS_READ(b, f, i) ((void)0)
+#define TP_ANIMVARS_BOUNDS(w, sz, ok, skip, mx) ((void)0)
+#define TP_ANIMVARS_INDEX(i, sz, pl) ((void)0)
 #endif
 
 void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const noexcept
@@ -267,13 +321,6 @@ void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const
     {
         BSScopedLock<BSRecursiveLock> _{pManager->lock};
 
-        if (pManager->animationGraphIndex >= pManager->animationGraphs.size)
-        {
-            TP_ANIMVARS_GAVE_UP("the animation graph index is past the end of the graph list");
-            pManager->Release();
-            return;
-        }
-
         {
             auto* pActor = Cast<Actor>(this);
             if (!pActor)
@@ -283,12 +330,29 @@ void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const
                 return;
             }
 
-            const BShkbAnimationGraph* pGraph = nullptr;
+            // The player is a special case two lines below -- it always reads graph 0, whatever the manager's
+            // current index is -- and the guard that used to stand here tested that index anyway. So a player
+            // whose animationGraphIndex sits past the end of the list was thrown out *before* reaching the line
+            // that would have ignored the index entirely.
+            //
+            // That is player sliding, and it is what Emma reported appearing after the merge of 2026-09-22.
+            // Her log of 2026-09-26 14:02 has this exit firing for the local player 225 to 264 times per ten
+            // seconds -- about twenty-three times a second, which is every single movement snapshot. Every one
+            // of them sent an empty set of animation variables, consecutive empty sets are identical, and a
+            // body that translates while its variables never change is a body gliding across the floor.
+            //
+            // Each side now checks the index it is actually going to use.
+            const bool cIsPlayer = pActor->formID == 0x14;
+            const uint32_t cGraphIndex = pManager->ResolveGraphIndex(cIsPlayer ? 0 : -1);
 
-            if (pActor->formID == 0x14)
-                pGraph = pManager->animationGraphs.Get(0);
-            else
-                pGraph = pManager->animationGraphs.Get(pManager->animationGraphIndex);
+            if (cGraphIndex >= pManager->animationGraphs.size)
+            {
+                TP_ANIMVARS_INDEX(cGraphIndex, pManager->animationGraphs.size, cIsPlayer);
+                pManager->Release();
+                return;
+            }
+
+            const BShkbAnimationGraph* pGraph = pManager->animationGraphs.Get(cGraphIndex);
 
             if (!pGraph)
             {
@@ -340,31 +404,53 @@ void TESObjectREFR::SaveAnimationVariables(AnimationVariables& aVariables) const
             aVariables.Floats.assign(pDescriptor->FloatLookupTable.size(), 0.f);
             aVariables.Integers.assign(pDescriptor->IntegerLookupTable.size(), 0);
 
+            size_t inRange = 0, skipped = 0;
+            uint32_t maxIndex = 0;
+
             for (size_t i = 0; i < pDescriptor->BooleanLookUpTable.size(); ++i)
             {
                 const auto idx = pDescriptor->BooleanLookUpTable[i];
+                maxIndex = std::max(maxIndex, static_cast<uint32_t>(idx));
 
-                if (pVariableSet->size > idx && pVariableSet->data[idx] != 0)
-                    aVariables.Booleans[i] = true;
+                if (pVariableSet->size > idx)
+                {
+                    ++inRange;
+                    if (pVariableSet->data[idx] != 0)
+                        aVariables.Booleans[i] = true;
+                }
+                else
+                    ++skipped;
             }
 
             for (size_t i = 0; i < pDescriptor->FloatLookupTable.size(); ++i)
             {
                 const auto idx = pDescriptor->FloatLookupTable[i];
+                maxIndex = std::max(maxIndex, static_cast<uint32_t>(idx));
 
                 if (pVariableSet->size > idx)
+                {
+                    ++inRange;
                     aVariables.Floats[i] = *reinterpret_cast<float*>(&pVariableSet->data[idx]);
+                }
+                else
+                    ++skipped;
             }
 
             for (size_t i = 0; i < pDescriptor->IntegerLookupTable.size(); ++i)
             {
                 const auto idx = pDescriptor->IntegerLookupTable[i];
+                maxIndex = std::max(maxIndex, static_cast<uint32_t>(idx));
 
                 if (pVariableSet->size > idx)
+                {
+                    ++inRange;
                     aVariables.Integers[i] = *reinterpret_cast<uint32_t*>(&pVariableSet->data[idx]);
+                }
+                else
+                    ++skipped;
             }
 
-            TP_ANIMVARS_READ(aVariables.Booleans.size(), aVariables.Floats.size(), aVariables.Integers.size());
+            TP_ANIMVARS_BOUNDS(false, pVariableSet->size, inRange, skipped, maxIndex);
         }
 
         pManager->Release();
@@ -378,9 +464,11 @@ void TESObjectREFR::LoadAnimationVariables(const AnimationVariables& aVariables)
     {
         BSScopedLock<BSRecursiveLock> _{pManager->lock};
 
-        if (pManager->animationGraphIndex < pManager->animationGraphs.size)
+        // The receiving half. A remote copy whose index reads as garbage never has its variables applied, so
+        // its legs do not move however good the message was -- the other half of the same sliding.
+        if (const uint32_t index = pManager->ResolveGraphIndex(); index < pManager->animationGraphs.size)
         {
-            const auto* pGraph = pManager->animationGraphs.Get(pManager->animationGraphIndex);
+            const auto* pGraph = pManager->animationGraphs.Get(index);
 
             if (!pGraph)
                 return;
@@ -410,35 +498,54 @@ void TESObjectREFR::LoadAnimationVariables(const AnimationVariables& aVariables)
             if (!pVariableSet)
                 return;
 
+            size_t loadInRange = 0, loadSkipped = 0;
+            uint32_t loadMaxIndex = 0;
+
             for (size_t i = 0; i < pDescriptor->BooleanLookUpTable.size(); ++i)
             {
                 const auto idx = pDescriptor->BooleanLookUpTable[i];
+                loadMaxIndex = std::max(loadMaxIndex, static_cast<uint32_t>(idx));
 
                 if (pVariableSet->size > idx)
                 {
+                    ++loadInRange;
                     pVariableSet->data[idx] = aVariables.Booleans.size() > i ? aVariables.Booleans[i] : false;
                 }
+                else
+                    ++loadSkipped;
             }
 
             for (size_t i = 0; i < pDescriptor->FloatLookupTable.size(); ++i)
             {
                 const auto idx = pDescriptor->FloatLookupTable[i];
+                loadMaxIndex = std::max(loadMaxIndex, static_cast<uint32_t>(idx));
 
                 if (pVariableSet->size > idx)
                 {
+                    ++loadInRange;
                     *reinterpret_cast<float*>(&pVariableSet->data[idx]) = aVariables.Floats.size() > i ? aVariables.Floats[i] : 0.f;
                 }
+                else
+                    ++loadSkipped;
             }
 
             for (size_t i = 0; i < pDescriptor->IntegerLookupTable.size(); ++i)
             {
                 const auto idx = pDescriptor->IntegerLookupTable[i];
+                loadMaxIndex = std::max(loadMaxIndex, static_cast<uint32_t>(idx));
 
                 if (pVariableSet->size > idx)
                 {
+                    ++loadInRange;
                     *reinterpret_cast<uint32_t*>(&pVariableSet->data[idx]) = aVariables.Integers.size() > i ? aVariables.Integers[i] : 0;
                 }
+                else
+                    ++loadSkipped;
             }
+
+            // The receiving half of the same bound the merge of 2026-09-22 added. If this one is skipping
+            // everything, the graph never learns what the owner's legs are doing however good the message was.
+            TP_ANIMVARS_BOUNDS(true, pVariableSet->size, loadInRange, loadSkipped, loadMaxIndex);
         }
 
         pManager->Release();

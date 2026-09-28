@@ -1,6 +1,7 @@
 #include <TiltedOnlinePCH.h>
 
 #include <Games/Skyrim/VRBodySync.h>
+#include <Games/Skyrim/VRHaptics.h>
 
 #include <Actor.h>
 #include <Games/ActorExtension.h>
@@ -34,6 +35,12 @@ constexpr uint32_t kNiAVObjectSize = 0x138;
 constexpr uint32_t kChildrenOffset = 0x110;
 constexpr uint32_t kNiAVObjectSize = 0x110;
 #endif
+// NiAVObject::worldBound, straight after the world transform (0x7C + 0x34). A NiBound is a centre and a radius.
+// Read only with ValidWorldBound below, which refuses anything that is not the size and place of a weapon: the
+// offset is inferred from the two transforms either side of it rather than measured, and a wrong read must
+// announce itself rather than quietly put a blade through the floor.
+constexpr uint32_t kWorldBoundOffset = 0xB0;
+
 constexpr uint32_t kVTableGetRttiSlot = 2; // NiObject::GetRTTI
 constexpr uint32_t kVTableAsNodeSlot = 3;  // NiObject::AsNode
 
@@ -963,10 +970,557 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose, const glm::vec3& acWo
     }
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------
+// Weapon touch: feeling somebody else's blade against yours.
+//
+// Emma, 2026-09-26: "when my hand goes against Lydia's axe I do not feel it, even when I have a sword". Nothing in
+// her list does this. PLANCK gives an NPC's *body*; the parry mod only fires on an incoming attack and scales its
+// pulse by the stamina the parry costs, so resting a blade on a held axe is silent by design; HIGGS is hands
+// against grabbable objects. And for another *player's* weapon nothing but this mod could do it anyway, because
+// only this mod knows where that weapon is.
+//
+// The probe of the same day proved a pulse reaches the controllers (29 of them, both hands), so this is built on
+// a fact rather than an assumption about OpenVR's input model.
+//
+// Nothing here guesses at geometry. A weapon is a line from the hand's attach node to the far end of whatever is
+// attached below it, and that far end is *measured* by walking the children and taking the most distant one --
+// using the same node offsets the body sync has been reading correctly all week. A weapon with no child nodes
+// falls back to a point at the node, and says so once, so the log tells us which case the game actually gives.
+struct Segment
+{
+    glm::vec3 A{};
+    glm::vec3 B{};
+    bool Valid = false;
+};
+
+// Distance between two line segments. The usual clamped-parameter solution; degenerate segments (a point) fall
+// out of it correctly because the denominators are guarded.
+float SegmentDistance(const Segment& acP, const Segment& acQ) noexcept
+{
+    const glm::vec3 d1 = acP.B - acP.A;
+    const glm::vec3 d2 = acQ.B - acQ.A;
+    const glm::vec3 r = acP.A - acQ.A;
+    const float a = glm::dot(d1, d1);
+    const float e = glm::dot(d2, d2);
+    const float f = glm::dot(d2, r);
+
+    float s = 0.f, t = 0.f;
+    constexpr float cEps = 1e-5f;
+
+    if (a <= cEps && e <= cEps)
+        return glm::length(acP.A - acQ.A);
+
+    if (a <= cEps)
+    {
+        t = glm::clamp(f / e, 0.f, 1.f);
+    }
+    else
+    {
+        const float c = glm::dot(d1, r);
+        if (e <= cEps)
+        {
+            s = glm::clamp(-c / a, 0.f, 1.f);
+        }
+        else
+        {
+            const float b = glm::dot(d1, d2);
+            const float denom = a * e - b * b;
+            s = denom > cEps ? glm::clamp((b * f - c * e) / denom, 0.f, 1.f) : 0.f;
+            t = (b * s + f) / e;
+            if (t < 0.f)
+            {
+                t = 0.f;
+                s = glm::clamp(-c / a, 0.f, 1.f);
+            }
+            else if (t > 1.f)
+            {
+                t = 1.f;
+                s = glm::clamp((b - c) / a, 0.f, 1.f);
+            }
+        }
+    }
+
+    return glm::length((acP.A + d1 * s) - (acQ.A + d2 * t));
+}
+
+// How long the thing in this hand is, and which way it points.
+//
+// The first attempt walked the child nodes and took the most distant one. On Emma's session of 2026-09-26 17:19
+// that found nothing at all -- "'WEAPON' has nothing measurable below it" -- and the weapon collapsed to a point
+// at the grip. That is why the contact felt random: a sword was a dot in her fist, so it only fired when her
+// *hilt* came within 14 cm of Lydia's, and hitting the axe with the middle of the blade did nothing.
+//
+// A weapon mesh is usually one geometry attached at the grip: no child nodes to find, because the blade lives in
+// the vertices. What does describe those vertices is the node's world bound -- a centre and a radius. The centre
+// of a sword's bound sits down the middle of the blade, so the grip and the centre together give both the
+// direction and, doubled, the length.
+struct NiBoundRead
+{
+    glm::vec3 Centre{};
+    float Radius = 0.f;
+    bool Valid = false;
+};
+
+NiBoundRead ReadWorldBound(void* apObject, const glm::vec3& acGrip) noexcept
+{
+    NiBoundRead out;
+    if (!apObject)
+        return out;
+
+    const glm::vec3 centre = ToGlm(At<NiPoint3>(apObject, kWorldBoundOffset));
+    const float radius = At<float>(apObject, kWorldBoundOffset + 0xC);
+
+    // What a weapon actually looks like. A dagger is about 20 units, a greatsword about 90; anything outside
+    // this is not a bound, it is whatever else lives at that offset.
+    if (!std::isfinite(radius) || radius < 4.f || radius > 300.f)
+        return out;
+    if (!std::isfinite(centre.x) || !std::isfinite(centre.y) || !std::isfinite(centre.z))
+        return out;
+    if (glm::distance(centre, acGrip) > 400.f)
+        return out;
+
+    out.Centre = centre;
+    out.Radius = radius;
+    out.Valid = true;
+    return out;
+}
+
+// Find the world bound by its shape, because guessing its offset was wrong.
+//
+// 0xB0 -- straight after the world transform, which is where SE keeps it -- reads centre (-0.3, -0.9, 0.1) and
+// radius **-0.9** on Seen's VR client. A negative radius is not a radius, and that triple is almost exactly the
+// node's first rotation axis, so the read lands inside the transform. VR's NiAVObject is 0x28 bytes larger than
+// SE's and the bound is not where SE keeps it.
+//
+// Rather than pick another number and ship it, this walks the object once and reports every offset whose four
+// floats actually look like a bound around this weapon: a centre within a few hundred units of the grip and a
+// radius the size of a blade. One session names the offset; then it becomes a constant and this goes away.
+void ReportWeaponShape(void* apAttach, const glm::vec3& acGrip, const NiBoundRead& acAtGuess) noexcept
+{
+    static bool s_said = false;
+    if (s_said)
+        return;
+    s_said = true;
+
+    // Once per session, so a VirtualQuery is affordable -- and required, because this walks past the end of what
+    // the client models. Reading unmapped memory is how a diagnostic becomes the bug it was sent to find.
+    if (!IsReadable(apAttach, kNiAVObjectSize + 0x40))
+    {
+        spdlog::warn("VRWeaponTouch shape: this node is not readable far enough to look for a bound; not looking.");
+        return;
+    }
+
+    const glm::mat3 rot = ToGlm(At<NiTransform>(apAttach, kWorldOffset).rotate);
+    spdlog::info("VRWeaponTouch shape: grip ({:.1f}, {:.1f}, {:.1f}); the guess at +{:X} was {}; node axes x({:.2f}, {:.2f}, {:.2f}) y({:.2f}, {:.2f}, {:.2f}) z({:.2f}, {:.2f}, {:.2f})", acGrip.x,
+                 acGrip.y, acGrip.z, kWorldBoundOffset, acAtGuess.Valid ? "accepted" : "rejected", rot[0][0], rot[0][1], rot[0][2], rot[1][0], rot[1][1], rot[1][2], rot[2][0], rot[2][1], rot[2][2]);
+
+    // The attach node alone found nothing on three separate sessions (2026-09-26 19:19, 19:38 and 09-27 09:07),
+    // so the geometry hanging under it is the next place to look: a mesh's bound belongs to the mesh, not to the
+    // empty node it is parented to. Each candidate is checked for readability of its own, because a child here
+    // may be any NetImmerse object and not all of them are the size of an NiAVObject.
+    const auto scan = [&acGrip](void* pObject, const char* acpWhat, std::string& aHits)
+    {
+        if (!IsReadable(pObject, kNiAVObjectSize + 0x40))
+            return;
+        for (uint32_t offset = 0x80; offset + 0x10 <= kNiAVObjectSize; offset += 4)
+        {
+            const glm::vec3 centre = ToGlm(At<NiPoint3>(pObject, offset));
+            const float radius = At<float>(pObject, offset + 0xC);
+            if (!std::isfinite(radius) || radius < 4.f || radius > 300.f)
+                continue;
+            if (!std::isfinite(centre.x) || !std::isfinite(centre.y) || !std::isfinite(centre.z))
+                continue;
+            const float away = glm::distance(centre, acGrip);
+            if (away > 400.f)
+                continue;
+            aHits += fmt::format("{} +{:X}: centre {:.0f} from the grip, radius {:.1f}; ", acpWhat, offset, away, radius);
+        }
+    };
+
+    std::string hits;
+    scan(apAttach, "attach", hits);
+
+    // One level of children is enough: the weapon mesh is parented straight to the attach node.
+    int child = 0;
+    if (void* pNode = AsNode(apAttach))
+    {
+        void** pChildren = At<void**>(pNode, kChildrenOffset + 0x8);
+        const uint16_t capacity = At<uint16_t>(pNode, kChildrenOffset + 0x10);
+        for (uint16_t i = 0; pChildren && i < capacity && child < 6; ++i)
+        {
+            if (!pChildren[i])
+                continue;
+            ++child;
+            const char* pName = GetName(pChildren[i]);
+            scan(pChildren[i], pName && *pName ? pName : "child", hits);
+        }
+    }
+
+    if (hits.empty())
+        spdlog::warn("VRWeaponTouch shape: nothing in the attach node or its {} children looks like a bounding sphere. The blade cannot be measured this way.", child);
+    else
+        spdlog::info("VRWeaponTouch shape: offsets that do look like a bound -- {}", hits);
+}
+
+// What one actor is holding, plus the hands themselves -- "my hand against her axe" is the request, and a hand
+// is just a very short weapon.
+//
+// The searching and the reading are deliberately separated. The first version of this did four full skeleton
+// searches per nearby actor **per frame**, each one a breadth-first walk making a virtual call on every node it
+// touched -- and its own comment claimed it did not. For sixteen actors at 45 fps that is millions of virtual
+// calls a second, on objects other threads create and destroy as the game streams actors in and out. Emma's
+// crash of 2026-09-26 18:26 is the first in eight days and thirty-three crashes with HIGGS on the stack, and it
+// landed 68 ms after two actors were deleted during her respawn. That is not proof, and the stack has no frame
+// of ours on it, but walking freed node trees at that rate is a defect whether or not it caused that crash.
+//
+// So: the search runs at most twice a second, and what it stores is checked before it is trusted. Between
+// searches only plain memory is read -- a transform and a bound -- which costs nothing and cannot call into a
+// freed object.
+struct HeldSide
+{
+    void* pAttach = nullptr;   // the WEAPON / SHIELD node, if anything is equipped
+    void* pAttachVTable = nullptr;
+    void* pTipNode = nullptr;  // a distinct far node (a bow limb), when the weapon has one
+    void* pTipVTable = nullptr;
+    void* pHand = nullptr;
+    void* pHandVTable = nullptr;
+    bool UseBound = false;     // no far node: the tip comes from the world bound instead
+};
+
+struct Holding
+{
+    HeldSide Right{};
+    HeldSide Left{};
+    Segment RightWeapon{};
+    Segment LeftWeapon{};
+    Segment RightHand{};
+    Segment LeftHand{};
+    std::chrono::steady_clock::time_point SearchAt{};
+    void* pRoot = nullptr;
+};
+
+// Skyrim hands a freed node's memory straight to the next allocation, so a pointer that is still non-null may
+// belong to something else entirely. The vtable it had when it was found is the cheapest witness to that.
+bool StillTheSame(void* apNode, void* apVTable) noexcept
+{
+    return apNode && apVTable && *static_cast<void**>(apNode) == apVTable;
+}
+
+void SearchSide(void* apRoot, const char* acpAttachName, const char* acpHandName, HeldSide& aSide) noexcept
+{
+    aSide = HeldSide{};
+
+    if (void* pHand = FindShallowest(apRoot, acpHandName))
+    {
+        aSide.pHand = pHand;
+        aSide.pHandVTable = *static_cast<void**>(pHand);
+    }
+
+    void* pAttach = FindShallowest(apRoot, acpAttachName);
+    if (!pAttach)
+        return;
+
+    aSide.pAttach = pAttach;
+    aSide.pAttachVTable = *static_cast<void**>(pAttach);
+
+    // A weapon made of several nodes (a bow's limbs, a staff's head) has a far node to track, which beats a
+    // bounding sphere because it is an actual position. One made of a single mesh does not, and its blade is
+    // described only by the bound -- which is the case Emma hit: "'WEAPON' has nothing measurable below it".
+    const glm::vec3 grip = ToGlm(At<NiTransform>(pAttach, kWorldOffset).translate);
+    float best = 0.f;
+
+    TiltedPhoques::Vector<void*> queue;
+    queue.push_back(pAttach);
+    for (size_t head = 0; head < queue.size() && head < 256; ++head)
+    {
+        void* pObject = queue[head];
+        if (head > 0)
+        {
+            const float d = glm::distance(grip, ToGlm(At<NiTransform>(pObject, kWorldOffset).translate));
+            if (d > best && d < 400.f)
+            {
+                best = d;
+                aSide.pTipNode = pObject;
+            }
+        }
+
+        void* pNode = AsNode(pObject);
+        if (!pNode)
+            continue;
+        void** pChildren = At<void**>(pNode, kChildrenOffset + 0x8);
+        const uint16_t capacity = At<uint16_t>(pNode, kChildrenOffset + 0x10);
+        if (!pChildren)
+            continue;
+        for (uint16_t i = 0; i < capacity; ++i)
+            if (pChildren[i])
+                queue.push_back(pChildren[i]);
+    }
+
+    if (aSide.pTipNode && best > 8.f)
+    {
+        aSide.pTipVTable = *static_cast<void**>(aSide.pTipNode);
+        return;
+    }
+
+    aSide.pTipNode = nullptr;
+    aSide.UseBound = false; // see ReadSide: nothing is read from a bound on the per-frame path
+    ReportWeaponShape(pAttach, grip, NiBoundRead{});
+}
+
+// Per frame. Nothing here searches, and nothing here makes a virtual call.
+void ReadSide(const HeldSide& acSide, Segment& aWeapon, Segment& aHand) noexcept
+{
+    aWeapon.Valid = false;
+    aHand.Valid = false;
+
+    if (StillTheSame(acSide.pHand, acSide.pHandVTable))
+    {
+        const glm::vec3 p = ToGlm(At<NiTransform>(acSide.pHand, kWorldOffset).translate);
+        if (std::isfinite(p.x))
+        {
+            aHand.A = p;
+            aHand.B = p;
+            aHand.Valid = true;
+        }
+    }
+
+    if (!StillTheSame(acSide.pAttach, acSide.pAttachVTable))
+        return;
+
+    const glm::vec3 grip = ToGlm(At<NiTransform>(acSide.pAttach, kWorldOffset).translate);
+    if (!std::isfinite(grip.x))
+        return;
+
+    glm::vec3 tip = grip;
+
+    if (StillTheSame(acSide.pTipNode, acSide.pTipVTable))
+    {
+        tip = ToGlm(At<NiTransform>(acSide.pTipNode, kWorldOffset).translate);
+    }
+    else
+    {
+        // No far node, so no blade -- and deliberately no bounding-sphere read here any more.
+        //
+        // That read was added at 17:43 on 2026-09-26 and is the one thing present in the builds that crashed and
+        // absent from the ones that did not: f8c31b6 ran two hours clean and bb5b10b one hour clean, both without
+        // it; a469765 and 52cbc9b crashed three times between them, always within half a second of remote actors
+        // being deleted. It was a raw sixteen-byte read at an offset inferred rather than measured, running every
+        // frame on every weapon node near the player, and Seen's log had already reported it returning a negative
+        // radius -- so it was buying nothing and costing sessions.
+        //
+        // The hand segment still covers this side, which is what bb5b10b did for an hour without incident. The
+        // blade comes back when SearchSide's one-shot scan names the real offset.
+        return;
+    }
+
+    if (!std::isfinite(tip.x) || glm::distance(grip, tip) > 400.f)
+        return;
+
+    aWeapon.A = grip;
+    aWeapon.B = tip;
+    aWeapon.Valid = true;
+}
+
+// The cache, and the lock it should always have had.
+//
+// This mod's actor work runs on a thread pool -- eight distinct thread ids in one of Emma's sessions, and the
+// code around it says so in as many words ("Serialize, Actors are multi-threaded" in BehaviorVar::Patch; a
+// shared_mutex over the pose map here). The first version of this cache was a bare std::unordered_map that
+// every one of those threads inserted into and erased from, with no lock -- while the little vector of
+// candidates beside it *was* locked, so the hazard was recognised and then missed on the bigger structure.
+//
+// Concurrent insert and erase on an unordered_map corrupts the heap. A corrupted heap does not fault where it
+// was corrupted; it faults later, in whatever code next walks the damaged allocation, reading values like
+// 0xFFFFFFFFFFFFFFFF. That is why the crashes of 2026-09-26 landed at four different addresses inside the game
+// with no frame of ours on the stack, and why they looked like the game's fault.
+//
+// It is returned by value now, so nothing holds a pointer into the map after the lock is released.
+std::mutex s_heldLock;
+
+bool ResolveHolding(Actor* apActor, Holding& aOut) noexcept
+{
+    static std::unordered_map<uint32_t, Holding> s_held;
+
+    if (!apActor)
+        return false;
+    void* pRoot = apActor->GetNiNode();
+    if (!pRoot)
+        return false;
+
+    const auto now = std::chrono::steady_clock::now();
+
+    std::lock_guard lock(s_heldLock);
+
+    Holding& held = s_held[apActor->formID];
+
+    // Twice a second, or whenever the 3D was rebuilt under us. Everything else is reads.
+    if (held.pRoot != pRoot || now >= held.SearchAt)
+    {
+        held.pRoot = pRoot;
+        held.SearchAt = now + std::chrono::milliseconds(500);
+        SearchSide(pRoot, "WEAPON", "NPC R Hand [RHnd]", held.Right);
+        SearchSide(pRoot, "SHIELD", "NPC L Hand [LHnd]", held.Left);
+    }
+
+    ReadSide(held.Right, held.RightWeapon, held.RightHand);
+    ReadSide(held.Left, held.LeftWeapon, held.LeftHand);
+
+    if (s_held.size() > 64)
+    {
+        for (auto it = s_held.begin(); it != s_held.end();)
+            it = (it->second.SearchAt + std::chrono::seconds(10) < now) ? s_held.erase(it) : std::next(it);
+    }
+
+    aOut = held;
+    return true;
+}
+
+// Everything the local player could touch this frame, filled on the game thread and read at the end of it.
+std::mutex s_touchLock;
+TiltedPhoques::Vector<uint32_t> s_touchCandidates;
+
 } // namespace
 
 namespace VRBodySync
 {
+// TEMPORARY placement note: this runs from the game thread, where the actor list is safe to walk, rather than at
+// the renderer's frame end where the body sync lives. A frame-old transform is nothing for a haptic pulse.
+void BeginWeaponTouch() noexcept
+{
+    std::lock_guard lock(s_touchLock);
+    s_touchCandidates.clear();
+}
+
+void ConsiderForWeaponTouch(Actor* apActor) noexcept
+{
+    if (!apActor)
+        return;
+
+    const PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer || apActor == pPlayer)
+        return;
+
+    // Only what is within reach. A blade is under two metres and an arm is less; 300 units of slack is generous
+    // and keeps the per-frame work to the two or three actors actually next to you.
+    const glm::vec3 delta = static_cast<glm::vec3>(apActor->position) - static_cast<glm::vec3>(pPlayer->position);
+    if (glm::dot(delta, delta) > 300.f * 300.f)
+        return;
+
+    std::lock_guard lock(s_touchLock);
+    if (s_touchCandidates.size() < 16)
+        s_touchCandidates.push_back(apActor->formID);
+}
+
+void EndWeaponTouch() noexcept
+{
+    TiltedPhoques::Vector<uint32_t> candidates;
+    {
+        std::lock_guard lock(s_touchLock);
+        candidates = s_touchCandidates;
+    }
+    if (candidates.empty())
+        return;
+
+    // One thread at a time through the whole pass. Another already doing it means this frame's answer is
+    // already being worked out; a second copy of it is waste, not safety.
+    static std::mutex s_passLock;
+    std::unique_lock pass(s_passLock, std::try_to_lock);
+    if (!pass.owns_lock())
+        return;
+
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer)
+        return;
+
+    // Not while dying, respawning or loading. The 3D is being torn down and rebuilt through all of those, which
+    // is exactly where Emma's crash of 18:26 sat -- 0.7 s after "PlayerService: respawning player" and 68 ms
+    // after two actors were deleted. Nothing about feeling a blade is worth a frame taken during a teardown.
+    if (pPlayer->actorState.IsDeadOrDying() || pPlayer->actorState.IsBleedingOut())
+        return;
+
+    Holding mine;
+    if (!ResolveHolding(pPlayer, mine))
+        return;
+
+    // How close counts as contact. A weapon mesh is thinner than this, but the segment is a line down its middle
+    // and both blades have width; 10 units is about 14 cm, which is a touch rather than a near miss.
+    constexpr float cTouch = 10.f;
+
+    struct Side
+    {
+        const Segment* pWeapon;
+        const Segment* pHand;
+        bool RightHand;
+    };
+    const Side sides[2] = {{&mine.RightWeapon, &mine.RightHand, true}, {&mine.LeftWeapon, &mine.LeftHand, false}};
+
+    // Safe only because the pass above is serialised.
+    static float s_lastDistance[2] = {1e9f, 1e9f};
+    static std::chrono::steady_clock::time_point s_nextLog{};
+    const auto now = std::chrono::steady_clock::now();
+
+    for (const Side& side : sides)
+    {
+        if (!side.pWeapon->Valid && !side.pHand->Valid)
+            continue;
+
+        float nearest = 1e9f;
+        uint32_t nearestId = 0;
+        const char* pWhat = "?";
+
+        for (const uint32_t formId : candidates)
+        {
+            Actor* pOther = Cast<Actor>(TESForm::GetById(formId));
+            if (!pOther)
+                continue;
+            Holding theirs;
+            if (!ResolveHolding(pOther, theirs))
+                continue;
+
+            for (const Segment* pTheir : {&theirs.RightWeapon, &theirs.LeftWeapon, &theirs.RightHand, &theirs.LeftHand})
+            {
+                if (!pTheir->Valid)
+                    continue;
+                for (const Segment* pMineSide : {side.pWeapon, side.pHand})
+                {
+                    if (!pMineSide->Valid)
+                        continue;
+                    const float d = SegmentDistance(*pMineSide, *pTheir);
+                    if (d < nearest)
+                    {
+                        nearest = d;
+                        nearestId = formId;
+                        pWhat = pMineSide == side.pWeapon ? "weapon" : "hand";
+                    }
+                }
+            }
+        }
+
+        const int slot = side.RightHand ? 0 : 1;
+        const float previous = s_lastDistance[slot];
+        s_lastDistance[slot] = nearest;
+
+        if (nearest > cTouch)
+            continue;
+
+        // Strength from how hard the contact is: how fast the gap is closing, plus how deep the overlap is. A
+        // blade resting against another still buzzes faintly, which is the point -- it is touch, not a hit.
+        const float closing = glm::max(0.f, previous - nearest);
+        const float depth = (cTouch - nearest) / cTouch;
+        const float strength = glm::clamp(0.25f + depth * 0.45f + closing * 0.08f, 0.f, 1.f);
+
+        VRHaptics::Pulse(side.RightHand, static_cast<uint16_t>(strength * 3999.f));
+
+        if (now >= s_nextLog)
+        {
+            s_nextLog = now + std::chrono::seconds(5);
+            spdlog::info("VRWeaponTouch: {} {} is {:.1f} units from something on {:X}, closing {:.1f}; pulsing at {:.2f}", side.RightHand ? "right" : "left", pWhat, nearest, nearestId, closing,
+                         strength);
+        }
+    }
+}
+
 void OnFrameEnd() noexcept
 {
     TiltedPhoques::Vector<std::pair<uint32_t, RemotePose>> poses;
