@@ -1,0 +1,44 @@
+# The standing half of the cellwalk pair. It does not move; it is the thing the other bot walks away from and
+# back to.
+#
+# It has its own check to make, though. The actor returns announcing only exterior cell entries, and the server
+# answers that by sending the actor what is in range of it. The reverse direction -- the actor being sent to
+# *this* bot -- goes through CharacterService::OnCharacterExteriorCellChange, which the exterior-enter has always
+# raised. So this side is the control: if it were to break, the fix to the other direction would be the suspect.
+
+log cellwalk watcher
+waitfor connected 45
+collect spawn ownership death
+record cellwalk watcher
+
+waitfor known other 40
+expect known other
+expect actors == 2
+
+log waiting while they walk out of range
+wait 20
+
+log waiting for them to come back
+waitfor known other 90
+expect known other
+
+# One copy of them, not two. A copy left behind by a removal that missed is a body nobody owns standing in the
+# world, and re-sending characters on a path that did not use to send them is exactly the sort of change that
+# could cause it -- so this is the assertion that says the fix did not buy one bug with another.
+expect actors == 2
+expect alive other
+expect connected
+
+# Outlive the actor, whose checks come later than these: it is still walking home when this side's last check
+# passes, and its assertions are about what it can see -- so a watcher that stops here takes the thing being
+# asserted about with it. The first run of this pair failed exactly that way (2026-09-28 21:28:02.956, "Player 1
+# 'W-cellwalk' left", four actor checks failing against an empty world a few seconds later) and the doorloss
+# pair carries the same note for the same reason.
+log holding on so the actor finishes its checks
+wait 60
+expect connected
+
+record off
+report bot-cellwalk-watcher.txt
+log done
+stop

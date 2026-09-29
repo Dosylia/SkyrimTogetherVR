@@ -12,7 +12,7 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
 
     if (NoBones != acRhs.NoBones)
         return false;
-    if (HasLegs != acRhs.HasLegs || HasFingers != acRhs.HasFingers)
+    if (HasFingers != acRhs.HasFingers)
         return false;
     if (HasFingers && Fingers != acRhs.Fingers)
         return false;
@@ -33,6 +33,14 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
         return false;
     if (NoBones)
         return true;
+
+    // Compared here rather than with the other flags above, because a boneless pose does not put this on the wire
+    // at all -- the serialiser skips it and the receiver reads back false. Comparing it unconditionally meant a
+    // boneless pose could never equal the pose rebuilt from it, so it would look changed on every frame and be
+    // re-sent for ever while standing still.
+    if (HasLegs != acRhs.HasLegs)
+        return false;
+
     const size_t count = HasLegs ? kBoneCount : kUpperBoneCount;
     return std::equal(Bones.begin(), Bones.begin() + count, acRhs.Bones.begin());
 }

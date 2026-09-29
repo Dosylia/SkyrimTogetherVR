@@ -120,6 +120,50 @@ void PlayerService::HandleExteriorCellEnter(const PacketEvent<EnterExteriorCellR
 
         pPlayer->SetCellComponent(cell);
 
+        // Give this player back everything that is in range of where they now are.
+        //
+        // This loop is why the handler exists in the same shape as its two siblings, and it was the only one of
+        // the three without it. Both of the others send in both directions: HandleInteriorCellEnter sends the
+        // arriving player the characters in their new cell, HandleGridCellShift sends them the characters in
+        // range of their new grid, and the matching CharacterService events send *them* to everybody else. This
+        // one only ever did the second half -- the mover was announced to the world, and the world was never
+        // announced back to the mover.
+        //
+        // The gap is reachable on foot. DiscoveryService::VisitExteriorCell raises the exterior-enter whenever
+        // the *current* grid changes, while the grid shift is raised only when the *centre* grid changes, so
+        // walking from one outdoor cell into the next takes this path alone. A copy lost in that moment -- torn
+        // down because its cell unloaded, which is the invisible-player case of 2026-09-26 -- had nothing to
+        // bring it back until the centre grid happened to move, which can be several cells of walking later.
+        //
+        // Re-sending a character that is already spawned is harmless: CharacterService::OnCharacterSpawn finds
+        // the existing copy, refreshes its ownership epoch and leaves its position alone unless nothing has
+        // arrived for it in two seconds.
+        auto characterView = m_world.view<CellIdComponent, CharacterComponent, OwnerComponent>();
+        for (auto character : characterView)
+        {
+            const auto& ownedComponent = characterView.get<OwnerComponent>(character);
+            if (ownedComponent.GetOwner() == pPlayer)
+                continue;
+
+            const auto& characterCellComponent = characterView.get<CellIdComponent>(character);
+            const auto& characterComponent = characterView.get<CharacterComponent>(character);
+
+            // The same range test the movement broadcasts use, dragons included, so a character is sent here
+            // exactly when its updates would be.
+            if (!cell.IsInRange(characterCellComponent, characterComponent.IsDragon()))
+                continue;
+
+            if (characterComponent.IsPlayer())
+                spdlog::info("WorldDiag: '{}' entered exterior cell {:X} in worldspace {:X} grid ({}, {}); sending player ({:X}) back to them",
+                             pPlayer->GetUsername().c_str(), cell.Cell.BaseId, cell.WorldSpaceId.BaseId, cell.CenterCoords.X, cell.CenterCoords.Y,
+                             World::ToInteger(character));
+
+            CharacterSpawnRequest spawnMessage;
+            CharacterService::Serialize(m_world, character, &spawnMessage);
+
+            pPlayer->Send(spawnMessage);
+        }
+
         SendPlayerCellChanged(pPlayer);
     }
 }

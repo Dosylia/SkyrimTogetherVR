@@ -111,6 +111,10 @@ struct KnownPlayer
     Tints FaceTints{};
     Inventory InventoryContent{};
     float Health{};
+    //! How many times the server has sent this character to us. The server re-sends a character to put a stale or
+    //! missing copy right, so this counts repairs -- and a repair that never arrives is a copy left wrong, which
+    //! is the whole invisible-player family of bugs. Assertable as `spawns other >= 2`.
+    uint32_t Spawns{};
 };
 
 class Bot final : public TiltedPhoques::Client
@@ -204,6 +208,12 @@ private:
     bool m_gridReported{false};
     //! True when the cell id is one this bot invented for its grid square rather than a real one from a host.
     bool m_standaloneCell{false};
+    //! Whether announcing a cell also sends the grid shift. Off makes the bot behave like a real client whose
+    //! *current* grid changed while its *centre* grid did not -- walking from one outdoor cell into the next,
+    //! which sends the exterior-enter alone. The bot always sent both, so the server's handling of that message
+    //! on its own could not be tested: whatever the exterior-enter failed to do, the grid shift did a moment
+    //! later. See the cellwalk pair.
+    bool m_sendGridShift{true};
     std::string m_serverVersion;
 
     glm::vec3 m_position{};

@@ -1,0 +1,21 @@
+# Short and focused, unlike the six-minute script of 14:05 that ran past its own runtime cap.
+# The bot can follow through load doors now, so this is mostly about that.
+#
+#   STBot.exe scripts\live-doors.txt --server 127.0.0.1:10578 --name Bot --hostlog "E:\FUS\tools\Skyrim Together VR\logs\tp_client.log"
+
+log PHASE 1 (20 s) -- standing next to you. Can you see a second body at all?
+wait 20
+
+log PHASE 2 (30 s) -- walking a straight line back and forth. WATCH THE LEGS: walking, or gliding?
+walk rel 600 0 140
+walk rel -600 0 140
+
+log PHASE 3 (120 s) -- following you. GO THROUGH A LOAD DOOR now, and back out again.
+log         I should still be beside you on the other side. That is the bug we are testing.
+follow 250 120
+
+log PHASE 4 (40 s) -- staying put. Come and put your hand or your sword against MY weapon.
+wait 40
+
+log done
+stop

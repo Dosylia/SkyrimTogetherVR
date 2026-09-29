@@ -1,0 +1,36 @@
+# The one that follows three seconds later. See doorloss-actor.txt for what this pair is about.
+#
+# The three seconds matter: the spawn this bot is sent for its partner arrives while its own old cell is still
+# being torn down, which is the ordering that lost Seen for seventy seconds.
+
+log doorloss watcher: waiting for the other bot
+waitfor connected 45
+waitfor players >= 1 60
+collect spawn ownership
+record doorloss-watcher
+
+log both of us are outside
+expect players >= 1
+expect known other
+
+log t+11: following it inside
+wait 11
+cell 165A9
+
+log t+20: THE TEST -- we are both in the same interior, so it must still be there
+wait 9
+expect players >= 1
+expect known other
+
+log t+34: going back out
+wait 14
+cell out
+
+log t+48: outside together again
+wait 14
+expect players >= 1
+expect known other
+expect connected
+
+log done
+stop

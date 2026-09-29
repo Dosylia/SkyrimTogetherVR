@@ -1,3 +1,5 @@
+#include <string>
+
 #include <catch2/catch.hpp>
 
 #include <CopyRemovalPolicy.h>
@@ -63,4 +65,57 @@ TEST_CASE("a waiting copy gives up eventually", "[copyremoval]")
 TEST_CASE("the oldest go when the list is over its bound", "[copyremoval]")
 {
     REQUIRE(ShouldRelease(5, 0, true));
+}
+
+// Why a copy was freed, which the log could not previously say.
+//
+// The 2026-09-27 session read as 16 copies the game had "let go of". Every one had been queued exactly 60000 ms
+// earlier and still had 2 handles on it: the give-up path, printed in the words of the success path. These
+// assertions are the check that wording cannot drift back together.
+
+TEST_CASE("freeing a copy says which of the three reasons it was", "[copyremoval]")
+{
+    REQUIRE(ReleaseReason(0, 10, false) == Released::HandlesGone);
+    REQUIRE(ReleaseReason(2, 10, false) == Released::NotYet);
+    REQUIRE(ReleaseReason(2, kMaxWaitMs, false) == Released::WaitedOut);
+    REQUIRE(ReleaseReason(2, 10, true) == Released::ListFull);
+
+    // Zero handles is safe on any grounds, so it outranks both give-up paths: there is nothing left to dangle.
+    REQUIRE(ReleaseReason(0, kMaxWaitMs, true) == Released::HandlesGone);
+}
+
+TEST_CASE("only the give-up paths leave something holding a dangling pointer", "[copyremoval]")
+{
+    REQUIRE_FALSE(FreedWhileHeld(Released::HandlesGone));
+    REQUIRE_FALSE(FreedWhileHeld(Released::NotYet));
+    REQUIRE(FreedWhileHeld(Released::WaitedOut));
+    REQUIRE(FreedWhileHeld(Released::ListFull));
+}
+
+TEST_CASE("the three reasons do not share a description", "[copyremoval]")
+{
+    // The whole defect was two different outcomes printing the same sentence.
+    const std::string gone = Describe(Released::HandlesGone);
+    const std::string waited = Describe(Released::WaitedOut);
+    const std::string full = Describe(Released::ListFull);
+
+    REQUIRE(gone != waited);
+    REQUIRE(gone != full);
+    REQUIRE(waited != full);
+}
+
+TEST_CASE("ShouldRelease still agrees with the reason it is derived from", "[copyremoval]")
+{
+    for (uint32_t handles = 0; handles < 4; ++handles)
+    {
+        for (uint32_t waited : {0u, kMaxWaitMs - 1, kMaxWaitMs, kMaxWaitMs * 2})
+        {
+            for (bool overBound : {false, true})
+            {
+                INFO("handles " << handles << " waited " << waited << " overBound " << overBound);
+                REQUIRE(ShouldRelease(handles, waited, overBound) ==
+                        (ReleaseReason(handles, waited, overBound) != Released::NotYet));
+            }
+        }
+    }
 }

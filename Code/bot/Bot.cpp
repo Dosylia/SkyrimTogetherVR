@@ -519,13 +519,19 @@ void Bot::SendCellEntry() noexcept
     enter.CurrentCoords = grid;
     SendMsg(enter);
 
-    ShiftGridCellRequest shift{};
-    shift.WorldSpaceId = m_worldSpace;
-    shift.PlayerCell = m_cell;
-    shift.CenterCoords = grid;
-    SendMsg(shift);
+    // A real client sends these two on different triggers: the exterior-enter when the grid square it stands in
+    // changes, the grid shift when the *centre* of the loaded block moves. Walking into the next cell along
+    // sends the first alone, which is a case this bot could not produce while it always sent both.
+    if (m_sendGridShift)
+    {
+        ShiftGridCellRequest shift{};
+        shift.WorldSpaceId = m_worldSpace;
+        shift.PlayerCell = m_cell;
+        shift.CenterCoords = grid;
+        SendMsg(shift);
+    }
 
-    spdlog::info("Cell entry sent: grid ({}, {})", grid.X, grid.Y);
+    spdlog::info("Cell entry sent: grid ({}, {}){}", grid.X, grid.Y, m_sendGridShift ? "" : " (exterior enter only, no grid shift)");
 }
 
 // Follow the host through a load door.
@@ -791,6 +797,7 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
             m_players.emplace_back();
             pPlayer = &m_players.back();
         }
+        ++pPlayer->Spawns;
         pPlayer->ServerId = message.ServerId;
         pPlayer->PlayerId = message.PlayerId;
         pPlayer->Position = FromNet(message.Position);
@@ -1301,6 +1308,25 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return true;
     }
 
+    // Announce cells the way a client walking between neighbouring outdoor cells does: the exterior-enter only.
+    //
+    // The bot has always sent the grid shift alongside it, so the server's handling of an exterior-enter on its
+    // own was never exercised -- and that handler was the one of the three cell handlers that did not send the
+    // arriving player what is around them. Anything it failed to do, the grid shift did a moment later, in the
+    // test but not in the game.
+    if (name == "gridshift")
+    {
+        if (args.empty() || (args[0] != "on" && args[0] != "off"))
+        {
+            spdlog::error("[script] gridshift needs 'on' or 'off'");
+            return true;
+        }
+
+        m_sendGridShift = args[0] == "on";
+        spdlog::info("[script] grid shift {}", m_sendGridShift ? "on: cell changes send both messages" : "off: cell changes send the exterior enter alone");
+        return true;
+    }
+
     if (name == "disconnect")
     {
         spdlog::info("[script] disconnecting on purpose");
@@ -1656,6 +1682,48 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
             held += fmt::format("{}{:X}", held.empty() ? "" : " ", item);
         aOutWhy = fmt::format("{:X} holds [{}]", id, held.empty() ? std::string("nothing") : held);
         return holding;
+    }
+
+    if (what == "spawns")
+    {
+        // spawns <who> <op> <n>: how many times the server has sent us that character.
+        //
+        // The server re-sends a character to put a copy right that is stale or missing, so this counts repairs.
+        // It is the only way a test can see a repair that *should* have happened and did not: a copy that was
+        // never sent again is indistinguishable from one that is simply still correct, right up until the moment
+        // the player it belongs to turns out to be invisible.
+        if (acArgs.size() < 4)
+            return std::nullopt;
+
+        uint32_t id = kNoId;
+        if (!parseId(1, id))
+            return std::nullopt;
+
+        float wanted = 0.f;
+        if (!ParseFloat(acArgs[3], wanted))
+            return std::nullopt;
+
+        const KnownPlayer* pPlayer = nullptr;
+        for (const auto& player : m_players)
+        {
+            if (player.ServerId == id)
+            {
+                pPlayer = &player;
+                break;
+            }
+        }
+
+        const auto count = pPlayer ? static_cast<float>(pPlayer->Spawns) : 0.f;
+        aOutWhy = pPlayer ? fmt::format("{:X} has been sent to us {} time(s)", id, pPlayer->Spawns)
+                          : std::string("nobody else is here yet");
+
+        const std::string& op = acArgs[2];
+        if (op == "==") return count == wanted;
+        if (op == ">=") return count >= wanted;
+        if (op == "<=") return count <= wanted;
+        if (op == ">") return count > wanted;
+        if (op == "<") return count < wanted;
+        return std::nullopt;
     }
 
     if (what == "actors")

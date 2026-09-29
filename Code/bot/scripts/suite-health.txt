@@ -1,0 +1,20 @@
+log Health and death sync
+waitfor connected 45
+collect health death ownership
+record health and death
+expect players >= 1
+health 100
+wait 2
+log taking 30 damage
+damage 30
+wait 3
+log dying
+die
+wait 8
+log respawning
+respawn
+wait 6
+expect connected
+record off
+report bot-health.txt
+stop

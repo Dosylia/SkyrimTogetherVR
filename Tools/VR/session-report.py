@@ -70,6 +70,9 @@ MEASURED = [
     ('Stale copy: inventory', r'came back with a different inventory'),
     ('Impossible jumps caught', r'JumpDiag:'),
     ('Sliding', r'SlideDiag:'),
+    ('Copies claimed at removal', r'DeleteClaim: deleting'),
+    ('Copies held back', r'Temporary Remote Held'),
+    ('Copies let go naturally', r'Temporary Remote Deleted \w+: the game let go'),
 ]
 
 PROBLEMS = [
@@ -79,6 +82,7 @@ PROBLEMS = [
     ('Bones the renderer cannot use', r'renderer cannot use'),
     ('Local VR pose unreadable',   r'could not read the local VR pose'),
     ('Starved interpolation',      r'updates had no future point'),
+    ('Copy freed while still held', r'CopyFreedHeld:'),
 ]
 
 COPY_WORDS = re.compile(r"copy words \[([^\]]*)\].*player words \[([^\]]*)\]")
@@ -110,6 +114,14 @@ OBJECT_MOVE = re.compile(r'ObjectMove: ([0-9A-F]+) moved ([0-9.]+) units')
 JUMP = re.compile(r'JumpDiag: a buffered point was ([0-9.]+) units from the one before it, at \(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\).*?(\d+) since')
 BACKLOG = re.compile(r'newest buffered tick (-?\d+) to (-?\d+) ms ahead of playback, (\d+) updates had no future point')
 BODY_GRAB = re.compile(r'BodyGrabDiag: remote body ([0-9A-F]+) has been moving here for (\d+) ms, ([0-9.]+) units')
+
+# The copy-removal path, which is what four failed attempts and one confirmed use-after-free were about.
+# DeleteClaim fires when a remote copy is deleted while something still holds a handle to it; the reason in
+# brackets on a "Temporary Remote Deleted" line says how a held-back copy eventually went.
+DELETE_CLAIM = re.compile(r'DeleteClaim: deleting ([0-9A-F]+) while something still holds it -- (.*?), (\d+) outstanding handle')
+TEMP_DELETED = re.compile(r'Temporary Remote Deleted ([0-9A-F]+)(?:: (.*)| \(([^)]*)\))?')
+TEMP_HELD = re.compile(r'Temporary Remote Held ([0-9A-F]+): (\d+) handle\(s\).*?(\d+) of (\d+) slots used')
+FREED_HELD = re.compile(r'CopyFreedHeld: ([0-9A-F]+) freed (?:after (\d+) ms|(immediately)) with (\d+) handle\(s\) still outstanding -- (.*)')
 
 
 def analyse(lines):
@@ -241,6 +253,100 @@ def analyse(lines):
         out.append(('A body handled here',
                     '%d reports, longest continuous movement %d ms, across %d bodies. A claim rule has to tell this apart from a settling ragdoll.'
                     % (len(grabs), longest, len(set(g[0] for g in grabs)))))
+
+    out.extend(copies(lines))
+    return out
+
+
+def copies(lines):
+    """How remote copies were removed, which is the question four failed attempts were about.
+
+    The history worth keeping in mind while reading these numbers: deleting a copy immediately gave a
+    use-after-free 1930 ms later; never deleting piled 652 copies up until the sound and framerate went; a
+    five-second delay crashed at 24 seconds; and waiting for the handles to clear piled them up again. The
+    current rule holds a copy back until nothing claims it, with a bound so the pile cannot return.
+
+    Two numbers decide whether that is working. Force-freed is the dangerous one -- a copy deleted while
+    something still held it, because the list was full, which is the original crash by another route. Still
+    waiting at the end says whether the bound is doing the holding instead of the handles clearing, and if it
+    is saturated then the protection is only partly engaged and the bound is what needs raising.
+    """
+    # Each outcome now logs its own line, after the decision rather than before it. Older logs (before
+    # 2026-09-28) wrote a bare "Temporary Remote Deleted" ahead of the branch, so held-back copies and freed
+    # ones are indistinguishable there and the counts below will read as all-clean. The CopyFreedHeld lines are
+    # the ones that matter, and their absence in an old log means the log could not say, not that it was fine.
+    claims = [m.groups() for m in (DELETE_CLAIM.search(l) for l in lines) if m]
+    held = [m.groups() for m in (TEMP_HELD.search(l) for l in lines) if m]
+    freed_held = [m.groups() for m in (FREED_HELD.search(l) for l in lines) if m]
+    deletes = [m.groups() for m in (TEMP_DELETED.search(l) for l in lines) if m]
+
+    if not claims and not deletes and not held:
+        return []
+
+    out = []
+    # Only the colon form is trustworthy. A bare line, or the bracketed one, comes from a build whose wording
+    # covered more than one outcome, so it is counted as unknown rather than folded into a total that reads as
+    # a clean result.
+    reasons = [why or '' for _f, why, _bracket in deletes]
+    clean = sum(1 for r in reasons if 'nothing held it' in r)
+    let_go = sum(1 for r in reasons if 'let go' in r)
+    legacy = sum(1 for r in reasons if not r)
+
+    # The two forced outcomes are counted from CopyFreedHeld, which is written on both of the paths that take
+    # them -- the copy forced off the list, and the one freed on arrival because the list was already full. Only
+    # the first of those also writes a "Deleted" line, so counting these from the Deleted lines undercounts.
+    waited_out = sum(1 for _f, _w, _i, _h, why in freed_held if 'waited out' in why)
+    list_full = sum(1 for _f, _w, _i, _h, why in freed_held if 'full' in why)
+
+    if freed_held:
+        verdict = ('FORCED: %d copies were freed while something still held a handle to them. That is exactly '
+                   'the use-after-free condition the wait exists to prevent, so the protection is only partly '
+                   'engaged -- kMaxWaiting or kMaxWaitMs is what needs raising.' % len(freed_held))
+    elif legacy:
+        verdict = ('this log predates the per-outcome lines (2026-09-28), so it cannot say which copies were '
+                   'freed while still held. Read it as unknown, not as clean.')
+    else:
+        verdict = 'no copy was freed while something still held it, which is what the wait is for'
+
+    out.append(('Copies removed',
+                '%d freed with nothing holding them, %d let go naturally after waiting, %d waited out the limit, '
+                '%d forced out by a full list, %d held back, %d still waiting at the end%s. %s'
+                % (clean, let_go, waited_out, list_full, len(held),
+                   max(0, len(held) - let_go - waited_out - list_full),
+                   ', %d from an older build that did not say' % legacy if legacy else '', verdict)))
+
+    if held:
+        used = [int(h[2]) for h in held]
+        cap = int(held[0][3])
+        saturated = sum(1 for u in used if u >= cap)
+        out.append(('The waiting list',
+                    'peaked at %d of %d slots; %d of %d copies arrived to find it full. %s'
+                    % (max(used), cap, saturated, len(used),
+                       'It has room to spare, so the bound is not what is limiting the wait.' if saturated == 0
+                       else 'It is saturating, so copies are being freed by the bound rather than by the game '
+                            'letting go -- the bound is what needs raising.')))
+
+    if freed_held:
+        waits = [int(w) for _f, w, _imm, _h, _why in freed_held if w]
+        handles = [int(h) for _f, _w, _imm, h, _why in freed_held]
+        out.append(('Copies freed while still held',
+                    '%d of them, %d handle(s) outstanding on average%s. Each one is a pointer the game still '
+                    'holds to memory that has just been released.'
+                    % (len(freed_held), sum(handles) / float(len(handles)),
+                       ', waited %d to %d ms' % (min(waits), max(waits)) if waits else '')))
+
+    if claims:
+        reasons = Counter()
+        for _form, what, _handles in claims:
+            for piece in what.split(', '):
+                reasons[piece] += 1
+        handles = [int(h) for _f, _w, h in claims]
+        out.append(('What was holding them',
+                    '%d removals had a claim on them. Most common: %s. Handles outstanding: %d to %d, mean %.1f. '
+                    'Handles are what matter -- a copy with zero of them is safe to delete whatever else is '
+                    'listed, and one with handles is not, however long it has waited.'
+                    % (len(claims), '; '.join('%s (%d)' % (k, v) for k, v in reasons.most_common(4)),
+                       min(handles), max(handles), sum(handles) / float(len(handles)))))
 
     return out
 

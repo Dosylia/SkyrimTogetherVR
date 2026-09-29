@@ -254,7 +254,10 @@ void FreeCopy(Actor* apActor, const uint32_t aFormId, const char* acpWhy) noexce
 {
     const uint32_t refWord = static_cast<uint32_t>(apActor->handleRefObject.refCount);
     RecentDeletes::Record(apActor, aFormId, refWord & 0x3FF, refWord, 0);
-    spdlog::info("Temporary Remote Deleted {:X} ({})", aFormId, acpWhy);
+    // Colon, not brackets, and a reason that names one outcome only. Logs written before 2026-09-28 used
+    // "(the game let go of it)" for both the success and the give-up path, so the punctuation is what tells a
+    // reader -- and session-report.py -- that a line can be trusted to mean what it says.
+    spdlog::info("Temporary Remote Deleted {:X}: {}", aFormId, acpWhy);
     apActor->Delete();
 }
 
@@ -280,10 +283,19 @@ void RunWaitingCopies() noexcept
 
         const auto waitedMs = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now - waiting.QueuedAt).count());
         const bool overBound = stillWaiting.size() >= CopyRemovalPolicy::kMaxWaiting;
+        const uint32_t handles = OutstandingHandles(pActor);
+        const auto reason = CopyRemovalPolicy::ReleaseReason(handles, waitedMs, overBound);
 
-        if (CopyRemovalPolicy::ShouldRelease(OutstandingHandles(pActor), waitedMs, overBound))
+        if (reason != CopyRemovalPolicy::Released::NotYet)
         {
-            FreeCopy(pActor, waiting.FormId, overBound ? "the waiting list was full" : "the game let go of it");
+            FreeCopy(pActor, waiting.FormId, CopyRemovalPolicy::Describe(reason));
+
+            // Said separately and loudly, because this is the case the wait exists to prevent and the old
+            // wording hid it: every release of 2026-09-27 was reported as the game letting go, and every one of
+            // them was actually this -- 60 s elapsed with two handles still outstanding.
+            if (CopyRemovalPolicy::FreedWhileHeld(reason))
+                spdlog::warn("CopyFreedHeld: {:X} freed after {} ms with {} handle(s) still outstanding -- {}",
+                             waiting.FormId, waitedMs, handles, CopyRemovalPolicy::Describe(reason));
             continue;
         }
 
@@ -1995,8 +2007,6 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
                 // game is partway through disposing of the actor -- during a cell unload, dozens at a time.
                 // Freeing it underneath that is the race. The work still happens, one frame later, from the
                 // service update, by which point the game has finished with it.
-                spdlog::info("Temporary Remote Deleted {:X}", aFormId);
-
                 // Who still had a claim on it, captured before the delete because afterwards it is gone. The
                 // outstanding handle count is the one that matters: a BSPointerHandle is exactly how the game
                 // keeps hold of an actor across time, and a pointer that survived 24 seconds (2026-09-27 16:05)
@@ -2035,6 +2045,13 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
 
                 if (CopyRemovalPolicy::OnRemoved(handles, s_waitingCopies.size()) == CopyRemovalPolicy::Action::WaitDisabled)
                 {
+                    // Logged after the decision, not before it. The old line said "Temporary Remote Deleted"
+                    // ahead of the branch, so the log could not tell a copy that was safely freed from one that
+                    // was forced out because the list was full from one that was merely held back -- three very
+                    // different outcomes, all written the same way, in the log this whole investigation reads.
+                    spdlog::info("Temporary Remote Held {:X}: {} handle(s) still on it, disabled and queued ({} of {} slots used)",
+                                 aFormId, handles, s_waitingCopies.size() + 1, CopyRemovalPolicy::kMaxWaiting);
+
                     // Disabled, not freed: silent, no AI, not drawn, and nothing dangling. It costs a slot in a
                     // list that cannot grow past kMaxWaiting.
                     pActor->Disable();
@@ -2054,6 +2071,20 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
                 //
                 // So this is the old behaviour, which costs Seen a crash and costs Emma nothing. The
                 // DeleteClaim line above still records the handles, which is how the cause is known at all.
+                if (handles == 0)
+                {
+                    spdlog::info("Temporary Remote Deleted {:X}: nothing held it", aFormId);
+                }
+                else
+                {
+                    // The bound turning a wait into an immediate delete. This is the old crash path, taken on
+                    // purpose rather than by accident, and it needs to be visible as such -- a session where
+                    // this is the common outcome is a session where the wait is not protecting anything and
+                    // kMaxWaiting is what needs raising.
+                    spdlog::warn("CopyFreedHeld: {:X} freed immediately with {} handle(s) still outstanding -- the waiting list was full ({} slots)",
+                                 aFormId, handles, CopyRemovalPolicy::kMaxWaiting);
+                }
+
                 pActor->Delete();
                 ReleaseGhostOf(aFormId);
 

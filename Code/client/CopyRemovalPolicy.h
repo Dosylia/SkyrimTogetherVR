@@ -55,12 +55,63 @@ inline Action OnRemoved(const uint32_t aHandles, const size_t aWaitingCount) noe
     return Action::WaitDisabled;
 }
 
-//! Whether a copy that is already waiting should be freed now.
+//! Why a waiting copy was freed. Worth distinguishing, because only one of these is the outcome the wait is
+//! for and the log could not tell them apart.
+//!
+//! The session of 2026-09-27 read as 16 copies "let go of" cleanly. They were not: every one of them was freed
+//! exactly 60000 ms after being queued, with 2 handles still outstanding -- Released::WaitedOut, the give-up
+//! path, reported in the same words as the success path. A diagnostic that cannot fail its own check is not a
+//! diagnostic, and this one had already been read as evidence that the wait was working.
+enum class Released
+{
+    NotYet,      //!< still held, keep waiting
+    HandlesGone, //!< what the wait is for: nothing claims it any more, so freeing it is safe
+    WaitedOut,   //!< gave up after kMaxWaitMs with handles still outstanding -- freed while held
+    ListFull,    //!< the bound forced it out early, also freed while held
+};
+
+//! Whether a copy that is already waiting should be freed now, and on what grounds.
 //! @param aHandles Its outstanding handles as of this check.
 //! @param aWaitedMs How long it has been waiting.
 //! @param aOverBound True when the list is over its limit and this is among the oldest that must go.
+inline Released ReleaseReason(const uint32_t aHandles, const uint32_t aWaitedMs, const bool aOverBound) noexcept
+{
+    if (aHandles == 0)
+        return Released::HandlesGone;
+
+    if (aOverBound)
+        return Released::ListFull;
+
+    if (aWaitedMs >= kMaxWaitMs)
+        return Released::WaitedOut;
+
+    return Released::NotYet;
+}
+
 inline bool ShouldRelease(const uint32_t aHandles, const uint32_t aWaitedMs, const bool aOverBound) noexcept
 {
-    return aHandles == 0 || aWaitedMs >= kMaxWaitMs || aOverBound;
+    return ReleaseReason(aHandles, aWaitedMs, aOverBound) != Released::NotYet;
+}
+
+//! Whether freeing on these grounds leaves something holding a dangling pointer.
+inline bool FreedWhileHeld(const Released aReason) noexcept
+{
+    return aReason == Released::WaitedOut || aReason == Released::ListFull;
+}
+
+//! What the log should say about it, in the words the session report counts.
+inline const char* Describe(const Released aReason) noexcept
+{
+    switch (aReason)
+    {
+    case Released::HandlesGone:
+        return "the game let go of it";
+    case Released::WaitedOut:
+        return "it waited out the limit and was freed while still held";
+    case Released::ListFull:
+        return "the waiting list was full";
+    default:
+        return "still waiting";
+    }
 }
 } // namespace CopyRemovalPolicy

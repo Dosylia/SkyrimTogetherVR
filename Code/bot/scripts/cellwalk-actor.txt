@@ -1,0 +1,62 @@
+# Walks out of range and back, announcing the way back the way a player walking between outdoor cells does.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Pair cellwalk
+#
+# There are three ways a client tells the server it changed cell, and until 2026-09-28 only two of them sent the
+# arriving player what is around them. HandleInteriorCellEnter loops the characters in the new cell and sends
+# them; HandleGridCellShift loops the characters in range and sends them; HandleExteriorCellEnter sent nothing
+# back at all. It announced the mover to everybody else and left the mover with whatever it happened to be
+# holding.
+#
+# That gap is reachable on foot, not just through a door. DiscoveryService::VisitExteriorCell raises the
+# exterior-enter whenever the grid square the player stands in changes, and raises the grid shift only when the
+# *centre* of the loaded block moves -- so walking from one outdoor cell into the next takes the exterior-enter
+# path alone, several times, before a grid shift ever happens.
+#
+# The bot could not reproduce that, because SendCellEntry always sent both messages one after the other: whatever
+# the exterior-enter failed to do, the grid shift did a moment later. `gridshift off` is what makes the bot walk
+# like a client instead.
+
+log cellwalk actor
+waitfor connected 45
+collect spawn ownership
+record cellwalk actor
+
+waitfor players >= 1 30
+expect known me
+
+log settling where the other player can see me
+wait 8
+waitfor known other 40
+expect known other
+
+# Out of the other bot's range, announced normally. The server stops sending each of us to the other, and the
+# copy the far side holds is dropped -- this is the same journey the range pair makes.
+log walking five cells east, announcing normally
+walk rel 20000 0 3000
+wait 12
+expect connected
+
+# Now walk back the way a person walks: each cell boundary announced as an exterior cell entry, with no grid
+# shift behind it to cover for it.
+log coming back, announcing only the exterior cell change
+gridshift off
+walk rel -20000 0 3000
+wait 6
+
+# The assertion. Back in range, the server owes this bot the other player again, and the only message that can
+# carry that is a spawn arriving on the exterior-enter path. Two spawns: the one on the way in at the start, and
+# this one. If the count is still one, nothing re-sent them and this bot is standing next to somebody it cannot
+# see -- which is what the other side experiences as a player going invisible.
+log the other player should have been sent to me again
+waitfor spawns other >= 2 60
+expect spawns other >= 2
+expect known other
+expect actors == 2
+expect connected
+
+gridshift on
+record off
+report bot-cellwalk-actor.txt
+log done
+stop

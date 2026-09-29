@@ -1,0 +1,12 @@
+log Soak: sit in the world beside the host and watch the stream
+waitfor connected 45
+collect all
+record soak beside host
+expect players >= 1
+log holding position for 90 seconds, fight something
+wait 90
+expect players >= 1
+expect connected
+record off
+report bot-soak.txt
+stop

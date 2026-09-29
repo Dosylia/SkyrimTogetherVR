@@ -12,7 +12,7 @@
 
 param(
     [string]$Server = '127.0.0.1:10578',
-    [string[]]$Pairs = @('relay', 'pvp', 'churn2', 'range', 'equip', 'deadfar', 'doorloss'),
+    [string[]]$Pairs = @('relay', 'pvp', 'churn2', 'range', 'equip', 'deadfar', 'cellwalk'),
     [int]$MaxRuntime = 300,
     # Two bots per pair, and the server refuses the ninth player: GameServer:uMaxPlayerCount defaults to 8 and its
     # own description says going above that is not recommended. That setting belongs to the server people actually
@@ -50,6 +50,15 @@ $release = (Resolve-Path (Join-Path $PSScriptRoot '..\..\build\windows\x64\relea
 $bot = Join-Path $release 'STBot.exe'
 $serverExe = Join-Path $release 'SkyrimTogetherServer.exe'
 
+# The bot reads its scripts from the release folder, and nothing in the build puts them there. They were copied
+# by hand, which drifted both ways: the doorloss pair existed only in the release folder and was never added to
+# the repo, so a clean build would have lost it, while the repo's copies could sit unused for a run. Sync them
+# here, so the scripts that run are the scripts that are tracked.
+$scriptSource = (Resolve-Path (Join-Path $PSScriptRoot '..\..\Code\bot\scripts')).Path
+$scriptDest = Join-Path $release 'scripts'
+if (-not (Test-Path $scriptDest)) { New-Item -ItemType Directory -Path $scriptDest | Out-Null }
+Copy-Item -Path (Join-Path $scriptSource '*.txt') -Destination $scriptDest -Force
+
 $startedServer = $false
 if (-not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
     Start-Process -FilePath $serverExe -WorkingDirectory $release -WindowStyle Minimized | Out-Null
@@ -84,7 +93,12 @@ for ($i = 0; $i -lt $batch.Count; $i++) {
     $watcherScript = Join-Path $release "scripts\$pair-watcher.txt"
     $actorScript = Join-Path $release "scripts\$pair-actor.txt"
     if (-not (Test-Path $watcherScript) -or -not (Test-Path $actorScript)) {
-        Write-Host "Missing scripts for pair '$pair'" -ForegroundColor Red
+        # A failure, not a note. 'doorloss' sat in the default list until 2026-09-28 with no scripts behind it:
+        # the run printed one red line, carried on, and reported success, so the suite read as green while the
+        # invisible-copy regression it was named for was never run at all. A test that does not exist must not
+        # be able to pass.
+        Write-Host "Missing scripts for pair '$pair' -- expected $actorScript and $watcherScript" -ForegroundColor Red
+        $failures++
         continue
     }
 

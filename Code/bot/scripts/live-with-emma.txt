@@ -1,0 +1,50 @@
+# A bot that joins Emma's live session as a second player, so the things that need two players can be
+# looked at without waiting for Seen. Written 2026-09-26 while she was in game.
+#
+#   STBot.exe scripts\live-with-emma.txt --server 127.0.0.1:10578 --name Bot
+#
+# Each phase is announced in the log and paced so there is time to look. Nothing here asserts: Emma's eyes are
+# the test, and her tp_client.log carries the measurements.
+
+log PHASE 1 -- standing still next to you for 20 s. Do you see a body at all?
+wait 20
+
+log PHASE 2 -- walking a long straight line and back, 40 s. WATCH THE LEGS: walking or gliding?
+walk rel 700 0 140
+walk rel -700 0 140
+walk rel 700 0 140
+walk rel -700 0 140
+
+log PHASE 3 -- circling you, 30 s, so the legs are seen side on as well as head on
+walk rel 0 500 140
+walk rel 500 0 140
+walk rel 0 -500 140
+walk rel -500 0 140
+
+log PHASE 4 -- following you for 60 s. Walk off through a LOAD DOOR and back. Am I still there afterwards?
+follow 250 60
+
+log PHASE 5 -- health. Full, then hurt in steps, then near death. Watch the bar over my head.
+health 100
+wait 6
+health 70
+wait 6
+health 40
+wait 6
+health 12
+wait 8
+
+log PHASE 6 -- dying now, staying down 45 s. TRY TO DRAG THE BODY, then let go.
+die
+wait 45
+
+log PHASE 7 -- back up, full health. Does the bar read full again straight away?
+respawn
+health 100
+wait 25
+
+log PHASE 8 -- following you again for 90 s. Go wherever you like; doors and cells are the interesting part.
+follow 250 90
+
+log done
+stop

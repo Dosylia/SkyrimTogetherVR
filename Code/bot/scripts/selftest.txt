@@ -1,0 +1,10 @@
+log self test of the testing controls
+waitfor connected 45
+collect health death ownership
+record selftest
+expect players >= 1
+wait 3
+record off
+report bot-selftest.txt
+log done
+stop

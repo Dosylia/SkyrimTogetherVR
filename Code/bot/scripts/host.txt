@@ -1,0 +1,5 @@
+log standalone host, holds the world open
+waitfor connected 40
+collect none
+wait 240
+stop

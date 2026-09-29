@@ -1,0 +1,20 @@
+log Presence, movement and reconnect
+waitfor connected 45
+collect spawn ownership party
+record presence
+expect players >= 1
+log walking a short way
+walk rel 400 0 150
+wait 2
+walk rel -400 0 150
+wait 2
+log disconnecting on purpose
+disconnect
+wait 4
+log reconnecting
+reconnect
+waitfor connected 45
+expect players >= 1
+record off
+report bot-presence.txt
+stop

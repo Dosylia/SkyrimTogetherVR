@@ -1,0 +1,46 @@
+# The one that goes in first. Its partner, doorloss-watcher.txt, follows three seconds later.
+#
+# Emma's bug, 2026-09-26 11:20: she and Seen both went into the same interior, one behind the other, and the one
+# who went FIRST could not see the one who followed -- "the person going first seems to not see the person
+# following". Her own cell unloaded on the way in and took his copy with it; the server was never told.
+#
+# Both halves check while BOTH are inside. The first version of this pair had them leave at different moments
+# and failed on that instead, which says nothing about the bug.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools/VR/run-bot-tests.ps1 -Pair doorloss
+
+log doorloss actor: joining
+waitfor connected 45
+waitfor players >= 1 60
+collect spawn ownership
+record doorloss-actor
+
+expect players >= 1
+expect known other
+
+log t+8: going inside first
+wait 8
+cell 165A9
+
+log t+20: THE TEST -- the follower came in behind me and I must still see it
+wait 12
+expect players >= 1
+expect known other
+
+log t+34: going back out
+wait 14
+cell out
+
+log t+48: outside together again
+wait 14
+expect players >= 1
+expect known other
+expect connected
+
+# Outlive the watcher. Twice now this pair has failed on the actor and the watcher racing each other to
+# disconnect -- 16 ms apart on 2026-09-26 17:56 -- which says nothing about the bug being tested.
+log holding on so the watcher finishes first
+wait 8
+
+log done
+stop

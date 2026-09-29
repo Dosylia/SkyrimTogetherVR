@@ -59,6 +59,154 @@ Only this week's work is still ticked. 44 items shipped between 2026-09-14 and 2
 unplayed item gets, and the git history keeps every word of them. What is left ticked is from 2026-09-25 and
 -26 and is genuinely unplayed -- that is the list to confirm on the next session.
 
+## Work done without a session, 2026-09-28: tests, tooling, and one thing the log was getting wrong
+
+Five items agreed as safe to do alone, because each is either a test, a tool, or a log line -- nothing here
+changes how the game plays. Two of them turned up real defects.
+
+### The quantised rotation codec was losing a bucket on every hop, and never settled (2026-09-28)
+
+`VRPose` had no test at all, which is how a field could ship to three of the four places it needs to be in and
+go unnoticed for a day. Writing one immediately failed, and the cause was not in `VRPose`:
+`Quaternion_NetQuantize::Pack()` was not idempotent. Packing a pose, unpacking it and packing it again gave
+different bits for the same rotation, for ever, alternating between two encodings.
+
+Two separate faults, both now fixed and both covered:
+
+- [x] **[untested] The quantiser rounds to the nearest bucket instead of truncating.** `static_cast<uint32_t>`
+      truncates toward zero, so a component decoded out of bucket 75 re-quantised to 74.9999847 in float and
+      landed in bucket 74. Every pass through the codec walked the value down by a bucket, and the first pass
+      biased every component low by up to a full one instead of half. A relayed pose drifted a little each hop.
+- [x] **[untested] Packing settles on one encoding instead of oscillating between two.** "Smallest three" drops
+      whichever component is largest, so when two are nearly equal -- `(-0.6034, 0.6034, 0.4022, 0.3318)` is a
+      real example -- quantising moves them just enough that the decoded value has a *different* largest
+      component, and the negation that follows produces a completely different set of bits. `Pack()` now walks
+      the encodings to a fixed point, and where a near-tie gives a short cycle rather than a fixed point it takes
+      the lowest, which every member of the cycle works out for itself.
+
+This matters beyond neatness: `VRPose::operator==` compares packed forms and `VRBodySync` only sends a pose when
+the quantised bones differ from the ones it last sent. A bone sitting near a tie was reported as changed on
+every single frame while never moving, so it was re-sent for ever.
+
+The wire layout is unchanged -- same bits, same meaning -- so a new client and an old one still understand each
+other; the new one is simply half a bucket more accurate.
+
+- [x] **[untested] `VRPose::operator==` compares `HasLegs` only when the pose has bones.** The serialiser skips
+      that flag entirely for a boneless pose and the receiver reads back `false`, so comparing it unconditionally
+      meant such a pose could never equal the pose rebuilt from it. Latent today, because every boneless sender
+      path clears `HasLegs` explicitly -- but it is the same "a field in one place and not the others" shape that
+      has now bitten this struct twice.
+
+Tests: `Code/tests/vrpose.cpp` (every combination of the six optional flags), `Code/tests/quantize.cpp`
+(idempotence and an eight-hop relay).
+
+### `AnimationVariables` is correct, and now has the tests to keep it that way (2026-09-28)
+
+The only stateful thing on the wire: it sends what changed and the receiver reconstructs the rest, so a decoding
+bug there does not glitch one frame, it leaves a body in a state nobody sent until that variable changes again.
+Hand-rolled bit packing, three counts that have to line up, and no test.
+
+- [x] **[untested] `Code/tests/animvars.cpp`**: every boolean count from 0 to 70 (the packing loop walks one byte
+      at a time, so the counts either side of a multiple of eight are where it would break), a 64-packet run
+      checking both ends still agree, counts changing mid-stream in both directions, and the extremes of both
+      value types. **No defect found.** Worth recording as a result rather than a non-event: the format is sound,
+      and a late joiner is safe because `CharacterData` seeds them with a full state before any diff.
+
+### The crash tooling is in the repo, and it now refuses to guess (2026-09-28)
+
+The minidump reader, the linker-map symboliser and the ring reader existed only in a scratch directory that gets
+wiped. They are `Tools/VR/minidump.py`, `Tools/VR/mapsym.py` and `Tools/VR/explain-dump.py`, with
+`Tools/VR/README-crash.md` saying which to reach for.
+
+Two bugs were fixed on the way in. The ring reader had the ring's address hardcoded -- already stale, since every
+build moves it -- and read entries at a 24-byte stride when `RecentDeletes::Entry` is 32, so everything after the
+first entry was garbage. Both are gone: the address comes from the map by symbol name now.
+
+- [x] **[untested] A map from the wrong build is refused rather than used.** Pointed at a dump from 2026-09-13,
+      two weeks before `RecentDeletes` was written, the tool read a current-build address and reported
+      "0 actor deletions recorded this session". A stale map does not fail, it names the wrong functions
+      convincingly. `explain-dump.py` now compares the map's timestamp against the dump's module timestamp.
+
+### The copy-removal log was reporting the give-up path as a success (2026-09-28)
+
+Extending `session-report.py` to cover the waiting list meant reading what those lines actually say, and they
+did not say what I had taken them to mean. From the session of 2026-09-27:
+
+- The 16 copies reported as `(the game let go of it)` were **not**. Every one was freed exactly 60000 ms after
+  being queued with **2 handles still outstanding** -- `kMaxWaitMs` giving up, printed in the words of the
+  success path, because the reason string was chosen by `overBound ? "the waiting list was full" : "the game let
+  go of it"` and had no third case.
+- The bare `Temporary Remote Deleted` line was written **before** the branch was taken, so a copy that was safely
+  freed, one forced out because the list was full, and one merely held back all logged identically.
+
+So the earlier reading of that session -- "460 held back, 16 released, 0 force-freed" -- was not evidence that
+the wait was working. The log could not have said either way.
+
+- [x] **[untested] Each outcome logs its own line, after the decision.** `Temporary Remote Held` when a copy is
+      queued (with how many of the 24 slots are in use), `Temporary Remote Deleted {form}: {reason}` with one
+      reason per outcome, and a `CopyFreedHeld:` warning on both paths that free a copy something still holds.
+      `CopyRemovalPolicy::ReleaseReason` returns which of the three it was, so the distinction is testable rather
+      than a string built at the call site; `Code/tests/copyremoval.cpp` asserts the three descriptions cannot
+      collapse back into one.
+- [x] **[untested] `session-report.py` reads all of it**, and reports an older log as *unknown* rather than
+      folding it into a total that looks clean.
+
+**Open, and needing Emma's call rather than mine:** if the next session shows `CopyFreedHeld` firing often, then
+`kMaxWaiting` (24) or `kMaxWaitMs` (60 s) is too small and the wait is not protecting anything. That is a change
+to how the game behaves under load, and the last four attempts at this path each cost a play session, so it is
+not one to make unasked.
+
+### Walking into the next outdoor cell never gave you back what was around you (2026-09-28)
+
+There are three ways a client says it changed cell, and only two of them sent the arriving player what is near
+them. `HandleInteriorCellEnter` loops the characters in the new cell and sends them; `HandleGridCellShift` loops
+the characters in range and sends them; `HandleExteriorCellEnter` sent nothing back. It announced the mover to
+everyone else -- that half always worked, through `CharacterService::OnCharacterExteriorCellChange` -- and left
+the mover holding whatever it happened to have.
+
+Reachable on foot, not only through a door. `DiscoveryService::VisitExteriorCell` raises the exterior-enter
+whenever the grid square the player *stands in* changes, and raises the grid shift only when the *centre* of the
+loaded block moves, so walking from one outdoor cell into the next takes the exterior-enter path alone, several
+times over, before a grid shift ever happens. A copy lost in that window had nothing to bring it back.
+
+- [x] **[untested in play] `HandleExteriorCellEnter` sends the arriving player the characters in range**, with
+      the same range test the movement broadcasts use. Re-sending a character that is already spawned is
+      harmless: `OnCharacterSpawn` finds the existing copy, refreshes its ownership epoch, and leaves its
+      position alone unless nothing has arrived for it in two seconds.
+
+**Cost to weigh:** every exterior cell boundary now re-sends every in-range character. The cellwalk bot measured
+19 spawn messages for one other player across a ten-cell walk. With two players that is nothing; in a crowded
+exterior it is a burst per cell crossing, and that is the class of thing that has cost sessions before. If the
+next session shows the stream struggling outdoors, this is the first thing to look at.
+
+### The bot could not test that, and the suite was passing a test that did not exist (2026-09-28)
+
+Two problems in the harness, both found while trying to write the regression test for the above.
+
+- [x] **The bot can announce an exterior cell entry without a grid shift** (`gridshift off`). `SendCellEntry`
+      always sent both messages back to back, so the server's handling of the exterior-enter *alone* could never
+      be exercised: whatever it failed to do, the grid shift did a moment later -- in the test, but not in the
+      game.
+- [x] **`spawns <who> <op> <n>`**, the number of times the server has sent us a character. A re-send is a repair,
+      and this is the only way a script can see a repair that should have happened and did not; a copy that was
+      never sent again looks exactly like one that is still correct, right up until the player turns out to be
+      invisible.
+- [x] **The `cellwalk` pair** walks out of range, comes back announcing only exterior cell entries, and requires
+      the other player to have been sent again. All 7 pairs pass with it.
+- [x] **A missing pair script is a failure, not a note.** `doorloss` sat in the default pair list with no scripts
+      behind it: the run printed one red line, carried on, and reported success, so the suite read as green while
+      the invisible-copy regression it was named for never ran.
+- [x] **The bot scripts are synced from the repo before each run.** They were copied by hand and had drifted both
+      ways -- `doorloss-actor.txt`, `doorloss-watcher.txt` and seven others existed *only* in the release folder
+      and were never committed, so a clean build would have lost them. Now rescued into `Code/bot/scripts/`.
+
+**Not established:** the negative control. Building the server with the fix `#if 0`'d out produced a DLL that
+would not boot at all -- reproducibly, with the server stopped before the build, and never reaching its own
+first log line -- so "the pair fails without the fix" was never demonstrated. What *is* established is that the
+new code path fires (`WorldDiag: ... sending player (0) back to them`) and that the client receives the spawn in
+the same millisecond. That is the causal chain, but it is not a red-then-green, and it should not be described
+as one.
+
 ## Session of 2026-09-26, 10:43-11:30 (both logs plus the server's): five causes, all named
 
 The longest session so far and the most productive one, because for the first time the server's own log settled a
