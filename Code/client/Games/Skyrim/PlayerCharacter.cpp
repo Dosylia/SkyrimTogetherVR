@@ -11,6 +11,7 @@
 #include <Events/AddExperienceEvent.h>
 #include <Events/SetWaypointEvent.h>
 #include <Events/RemoveWaypointEvent.h>
+#include <Events/DroppedItemEvents.h>
 
 #include <World.h>
 
@@ -231,6 +232,11 @@ char TP_MAKE_THISCALL(HookPickUpObject, PlayerCharacter, TESObjectREFR* apObject
         event.OwnershipEpoch = ownershipToken->OwnershipEpoch;
         World::Get().GetRunner().Trigger(std::move(event));
     }
+
+    // Named before the pick-up runs: afterwards the reference is gone. DroppedItemService decides whether it was one of
+    // the items the server remembers, and if so tells everyone to take their copy off the floor.
+    if (apObject->IsTemporary())
+        World::Get().GetRunner().Trigger(ItemPickedUpEvent{apObject->formID});
 
     ScopedInventoryOverride _;
 

@@ -12,6 +12,10 @@
 #include <Messages/NotifyDeathStateChange.h>
 #include <Messages/NotifyHealthChangeBroadcast.h>
 #include <Messages/NotifyOwnershipTransfer.h>
+#include <Messages/NotifyDroppedItem.h>
+#include <Messages/NotifyDroppedItemRemoved.h>
+#include <Messages/RequestDroppedItemAdd.h>
+#include <Messages/RequestDroppedItemRemove.h>
 #include <Messages/NotifyPartyInfo.h>
 #include <Messages/NotifyPartyJoined.h>
 #include <Messages/PartyLeaveRequest.h>
@@ -1010,6 +1014,31 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         return;
     }
 
+    if (opcode == NotifyDroppedItem::Opcode)
+    {
+        const auto& message = static_cast<const NotifyDroppedItem&>(acMessage);
+        const bool cNew = m_drops.emplace(message.Id, message.Item.BaseId).second;
+        if (cNew)
+        {
+            spdlog::info("Dropped item {} is {:X}:{:X} x{} in cell {:X} at ({:.0f}, {:.0f}, {:.0f})", message.Id, message.Item.BaseId.ModId, message.Item.BaseId.BaseId,
+                         message.Item.Count, message.CellId.BaseId, message.Position.x, message.Position.y, message.Position.z);
+            Record(Collect::Spawn, fmt::format("drop {} {:X}", message.Id, message.Item.BaseId.BaseId));
+        }
+        return;
+    }
+
+    if (opcode == NotifyDroppedItemRemoved::Opcode)
+    {
+        const auto& message = static_cast<const NotifyDroppedItemRemoved&>(acMessage);
+        if (m_drops.erase(message.Id))
+        {
+            ++m_dropRemovals;
+            spdlog::info("Dropped item {} was picked up by somebody", message.Id);
+            Record(Collect::Spawn, fmt::format("drop {} removed", message.Id));
+        }
+        return;
+    }
+
     if (opcode == NotifyOwnershipTransfer::Opcode)
     {
         const auto& message = static_cast<const NotifyOwnershipTransfer&>(acMessage);
@@ -1366,6 +1395,45 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
 
         m_sendGridShift = args[0] == "on";
         spdlog::info("[script] grid shift {}", m_sendGridShift ? "on: cell changes send both messages" : "off: cell changes send the exterior enter alone");
+        return true;
+    }
+
+    // Drop an item where this bot stands. The server remembers it and gives it to everyone in range now, and to anyone
+    // who enters this cell later -- which is the part a two-player session could never test on purpose.
+    if (name == "dropitem")
+    {
+        if (args.empty())
+        {
+            spdlog::error("[script] dropitem needs a hex base form id, e.g. 'dropitem 12EB7' (an iron dagger)");
+            return true;
+        }
+
+        RequestDroppedItemAdd request{};
+        request.Item.BaseId = GameId(m_skyrimModId, static_cast<uint32_t>(std::strtoul(args[0].c_str(), nullptr, 16)) & 0x00FFFFFF);
+        request.Item.Count = -1; // the inventory change that made it, as the client sends it
+        request.CellId = m_cell;
+        request.WorldSpaceId = m_worldSpace;
+        request.Position = m_position;
+        SendMsg(request);
+
+        spdlog::info("[script] dropped {:X} at ({:.0f}, {:.0f}, {:.0f}) in cell {:X}", request.Item.BaseId.BaseId, m_position.x, m_position.y, m_position.z, m_cell.BaseId);
+        return true;
+    }
+
+    // Pick up an item the server has told this bot about.
+    if (name == "pickup")
+    {
+        if (m_drops.empty())
+        {
+            spdlog::warn("[script] pickup: nothing lying here that the server has mentioned");
+            return true;
+        }
+
+        RequestDroppedItemRemove request{};
+        request.Id = m_drops.begin()->first;
+        SendMsg(request);
+        spdlog::info("[script] picked up dropped item {}", request.Id);
+        m_drops.erase(m_drops.begin());
         return true;
     }
 
@@ -1841,6 +1909,26 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
             held += fmt::format("{}{:X}", held.empty() ? "" : " ", item);
         aOutWhy = fmt::format("{:X} holds [{}]", id, held.empty() ? std::string("nothing") : held);
         return holding;
+    }
+
+    if (what == "drops" || what == "dropremovals")
+    {
+        // drops <op> <n>: items lying in the world as the server has told this bot.
+        // dropremovals <op> <n>: how many of them somebody else picked up.
+        if (acArgs.size() < 3)
+            return std::nullopt;
+        float wanted = 0.f;
+        if (!ParseFloat(acArgs[2], wanted))
+            return std::nullopt;
+        const float value = what == "drops" ? static_cast<float>(m_drops.size()) : static_cast<float>(m_dropRemovals);
+        aOutWhy = fmt::format("{} dropped item(s) known, {} picked up by others", m_drops.size(), m_dropRemovals);
+        const std::string& op = acArgs[1];
+        if (op == "==") return value == wanted;
+        if (op == ">=") return value >= wanted;
+        if (op == "<=") return value <= wanted;
+        if (op == ">") return value > wanted;
+        if (op == "<") return value < wanted;
+        return std::nullopt;
     }
 
     if (what == "owned")

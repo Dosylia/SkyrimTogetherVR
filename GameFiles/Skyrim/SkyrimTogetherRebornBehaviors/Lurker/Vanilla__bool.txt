@@ -1,0 +1,10 @@
+bAnimationDriven
+bAllowRotation
+IsAttacking
+IsAttackReady
+IsRecoiling
+IsStaggering
+IsBashing
+IsBleedingOut
+bHeadTrackingOn
+bHeadTracking

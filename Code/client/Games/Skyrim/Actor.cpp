@@ -20,6 +20,7 @@
 #include <Games/Misc/MenuTopicManager.h>
 #include <Events/HitEvent.h>
 #include <Events/RemoveSpellEvent.h>
+#include <Events/DroppedItemEvents.h>
 
 #include <Games/TES.h>
 #include <World.h>
@@ -1302,11 +1303,26 @@ void* TP_MAKE_THISCALL(HookDropObject, Actor, void* apResult, TESBoundObject* ap
     if (apExtraData)
         apThis->GetItemFromExtraData(item, apExtraData);
 
+    // Our own placing of another player's item comes through here with the override held: that is not a drop by this
+    // player and must not be announced as one, or every placed item would be sent straight back as a new drop.
+    const bool cOwnDrop = !ScopedInventoryOverride::IsOverriden() && apThis == PlayerCharacter::Get();
+    Inventory::Entry dropped = item;
+
     QueueActorInventoryChange(apThis, InventoryChangeEvent(apThis->formID, std::move(item), true));
 
     ScopedInventoryOverride _;
 
-    return TiltedPhoques::ThisCall(RealDropObject, apThis, apResult, apObject, apExtraData, aCount, apLocation, apRotation);
+    void* pResult = TiltedPhoques::ThisCall(RealDropObject, apThis, apResult, apObject, apExtraData, aCount, apLocation, apRotation);
+
+    // The reference exists now, and where it lies is what the other players need -- not where the player stands.
+    if (cOwnDrop && apResult)
+    {
+        const auto* pHandle = static_cast<const BSPointerHandle<TESObjectREFR>*>(apResult);
+        if (TESObjectREFR* pDropped = TESObjectREFR::GetByHandle(pHandle->handle.iBits))
+            World::Get().GetRunner().Trigger(ItemDroppedEvent{pDropped->formID, dropped});
+    }
+
+    return pResult;
 }
 
 void Actor::DropOrPickUpObject(const Inventory::Entry& arEntry, NiPoint3* apLocation, NiPoint3* apRotation) noexcept

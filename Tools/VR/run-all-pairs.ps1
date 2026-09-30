@@ -12,7 +12,7 @@
 
 param(
     [string]$Server = '127.0.0.1:10578',
-    [string[]]$Pairs = @('relay', 'pvp', 'churn2', 'range', 'equip', 'deadfar', 'cellwalk', 'ownerchurn'),
+    [string[]]$Pairs = @('relay', 'pvp', 'churn2', 'range', 'equip', 'deadfar', 'cellwalk', 'ownerchurn', 'drops'),
     [int]$MaxRuntime = 300,
     # Two bots per pair, and the server refuses the ninth player: GameServer:uMaxPlayerCount defaults to 8 and its
     # own description says going above that is not recommended. That setting belongs to the server people actually

@@ -245,6 +245,10 @@ private:
     std::optional<glm::vec2> m_start;
 
     std::vector<KnownPlayer> m_players;
+    //! Items lying in the world as the server has told this bot, by the server's id: what `drops` counts and
+    //! `pickup any` takes. The server sends one when an item is dropped in range and again on entering its cell.
+    std::map<uint32_t, GameId> m_drops;
+    uint32_t m_dropRemovals{};
     std::vector<std::pair<uint32_t, std::string>> m_names; // player id -> username
 
     size_t m_pc = 0;

@@ -36,6 +36,9 @@
 #include <Camera/TESCamera.h> // Camera 1st person is only in Skyrim?
 #include <Camera/PlayerCamera.h>
 
+#include <TiltedCore/Filesystem.hpp>
+
+#include <fstream>
 #include <mutex>
 std::mutex mutex_lock;
 
@@ -64,6 +67,118 @@ const AnimationGraphDescriptor* BehaviorVarPatch(BSAnimationGraphManager* apMana
 // We'd like to be able to handle other vars for which this may be the case.
 namespace
 {
+enum class GuessedType
+{
+    Bool,
+    Int,
+    Float
+};
+
+// Which list a variable belongs in, from its name alone -- the graph's own type table is not mapped here, and guessing
+// Havok offsets on VR is not worth the risk for a diagnostic.
+//
+// It does not need to be perfect, only safe. TESObjectREFR reads and writes integer and float variables alike as the
+// raw 32-bit word (reinterpret_cast both ways), so filing one as the other still round-trips exactly. Only the bool
+// list loses anything, since it keeps 0 or 1. So a name goes there only when it says it is a bool. Checked against
+// the 757 variables of the 31 built-in descriptors on 2026-09-30: this rule put nothing in the bool list that was
+// not a bool.
+GuessedType GuessType(const TiltedPhoques::String& acName) noexcept
+{
+    const auto upperOrDigit = [](const char c) { return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; };
+
+    if (acName.size() > 1 && acName[0] == 'b' && upperOrDigit(acName[1]))
+        return GuessedType::Bool;
+    if (acName.size() > 2 && (acName[0] == 'I' || acName[0] == 'i') && acName[1] == 's' && upperOrDigit(acName[2]))
+        return GuessedType::Bool;
+    if (acName.size() > 1 && acName[0] == 'i' && upperOrDigit(acName[1]))
+        return GuessedType::Int;
+    return GuessedType::Float;
+}
+
+// A creature this mod has no descriptor for gets no animation sync at all: nothing of it is read, the other screen
+// gets an empty set, and the body slides wherever it goes. On 2026-09-27 that was three kinds of creature in
+// Apocrypha -- graph hashes 4d644aec1cadba38, 569b7acef002ee5e and d85347c754a5ac18, on Dragonborn forms -- which
+// have no descriptor among the 31 built in, and no replacer.
+//
+// A replacer can add one as data alone: ConstructModdedDescriptor needs no original, and builds the whole
+// descriptor from the variable lists. What it needs is the creature's variable names, which only the running game
+// has. So the first time a graph fails to match, its variables are written out here in the replacer folder format,
+// ready to review and copy into Data/SkyrimTogetherRebornBehaviors. Written under logs, which the loader never
+// reads, so nothing changes in play.
+template <class TVariables> void CaptureUnmatchedBehaviour(const uint64_t aHash, Actor* apActor, const TVariables& acVariables) noexcept
+{
+    static TiltedPhoques::Set<uint64_t> s_captured;
+    if (s_captured.find(aHash) != s_captured.end() || acVariables.empty())
+        return;
+    s_captured.insert(aHash);
+
+    try
+    {
+        const char* pName = apActor->baseForm ? apActor->baseForm->GetName() : nullptr;
+        std::string creature;
+        for (const char* p = pName ? pName : ""; *p; ++p)
+            if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9'))
+                creature += *p;
+        if (creature.empty())
+            creature = "Unnamed";
+
+        const auto folder = TiltedPhoques::GetPath() / "logs" / "behaviours" / fmt::format("{}_{:016x}", creature, aHash);
+        std::error_code error;
+        std::filesystem::create_directories(folder, error);
+        if (error)
+            return;
+
+        std::vector<std::string> bools, ints, floats, states;
+        for (const auto& [index, name] : acVariables)
+        {
+            const std::string text(name.c_str());
+            switch (GuessType(name))
+            {
+            case GuessedType::Bool: bools.push_back(text); break;
+            case GuessedType::Int: ints.push_back(text); break;
+            default: floats.push_back(text); break;
+            }
+            if (text.rfind("iState_", 0) == 0)
+                states.push_back(text);
+        }
+
+        const auto writeList = [&folder](const char* acpFile, const std::vector<std::string>& acNames)
+        {
+            std::ofstream file(folder / acpFile);
+            for (size_t i = 0; i < acNames.size(); ++i)
+                file << acNames[i] << (i + 1 < acNames.size() ? "\n" : "");
+        };
+        writeList("Captured__bool.txt", bools);
+        writeList("Captured__int.txt", ints);
+        writeList("Captured__float.txt", floats);
+
+        // The signature is the one thing that cannot be decided here: it has to be a variable no *other* graph
+        // has, or it becomes the next Cow/Deer/Goat tie. An iState_*Default is the usual choice; it is a
+        // candidate until the captures are compared.
+        writeList("Captured__sig.txt", {states.empty() ? acVariables.begin()->second.c_str() : states.front()});
+
+        std::ofstream about(folder / "about.txt");
+        about << fmt::format("graph hash {:016x} ({}), no descriptor and no replacer matched\n", aHash, aHash);
+        about << fmt::format("first seen on actor {:X}, base {:X} '{}'\n", apActor->formID, apActor->baseForm ? apActor->baseForm->formID : 0, pName ? pName : "");
+        about << fmt::format("{} variables: {} bool, {} int, {} float (typed by name; see GuessType)\n", acVariables.size(), bools.size(), ints.size(),
+                             floats.size());
+        about << "signature candidates (iState_*):";
+        for (const auto& state : states)
+            about << ' ' << state;
+        about << "\n\nThe lists name every variable. Before copying this folder into Data/SkyrimTogetherRebornBehaviors, trim them to\n"
+                 "what drives movement -- speeds, directions, states -- and check the signature is not in any other graph.\n\n";
+        for (const auto& [index, name] : acVariables)
+            about << fmt::format("{:4} {}\n", index, name.c_str());
+
+        spdlog::info(__FUNCTION__ ": wrote the {} variables of '{}' (graph {:016x}) to logs/behaviours for a replacer", acVariables.size(),
+                     pName ? pName : "?", aHash);
+    }
+    catch (...)
+    {
+        // A diagnostic. Never worth taking the game down for.
+    }
+}
+
 TiltedPhoques::String ToLowerCase(const TiltedPhoques::String& acStr)
 {
     TiltedPhoques::String lowerCaseStr(acStr);
@@ -426,6 +541,7 @@ const AnimationGraphDescriptor* BehaviorVar::Patch(BSAnimationGraphManager* apMa
             __FUNCTION__ ": no original behavior found for behavior hash {:x} (found on formID {:x}), adding to fail list",
             hash,
             hexFormID);
+        CaptureUnmatchedBehaviour(hash, apActor, pDumpVar);
         FailList(hash);
         return nullptr;
 

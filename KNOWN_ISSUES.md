@@ -176,8 +176,21 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   her in one save.
 - **Remote dragons:** the client grid check still passes `IsDragon = false` for entities without a
   local actor.
-- **Intermittent crash:** a script event sent to a freed temporary form during cell attach, seen once.
-  EngineFixesVR form caching is a suspect. A heap dump is needed if it repeats.
+- **Intermittent crash in the script engine on a freed temporary form -- a game/modlist crash, not ours.**
+  Fingerprint: top frame `SkyrimVR.exe+0x93CE17` (`SkyrimScript::HandlePolicy`, turning a script handle into an
+  object), `RDI = 0x3D`, `R15 = SkyrimVM*`, an access violation *executing* a heap-like address -- very often exactly
+  `0x2001D342D0`, with `RCX` a `BSDismemberSkinInstance*`: the form was freed, its memory reused by a skin instance, and
+  a virtual call reads past that object's vtable. The low word of `RSI` is the temporary form's id.
+  - **Emma's own Crash Logger folder has it ten times since 2024-12-21**, same top frame every time, most of them
+    before this mod existed. 2026-07-25 is byte-identical to Seen's crash of 2026-09-30 (address and `RCX` type), and
+    Skyrim Together first ran the game on 2026-09-12.
+  - 2026-09-30, co-op: Seen at 18:30:06 (form `FF00111E`, never touched by our code), then Emma at 18:30:46, same
+    address (form `FF00109C` -- the temporary base of a levelled Fox the game had removed two minutes earlier; our
+    levelled-NPC code had found it already matching and swapped nothing). `RecentDeletes` cleared our copy deletion
+    in both. Emma's dump: `overwrite\Root\crash_UTC_2026-09-30_16-30-47.dmp`.
+  - Suspects, unproven: EngineFixesVR form caching (a stale id-to-form cache entry would hand out exactly this
+    pointer), PapyrusTweaks (loaded on both machines). Whether co-op makes it more frequent is open: Emma's came 0.44 s
+    after spawning a batch of the other player's actors.
 
 ## 7. Debugging
 

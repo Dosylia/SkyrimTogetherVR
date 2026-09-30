@@ -1,0 +1,40 @@
+# Drops an item inside an interior while the other bot is outside, then waits for the other bot to come in, find it
+# and pick it up.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Pair drops
+#
+# Emma, 2026-09-30: items she dropped sessions ago were still on her floor and Seen could not see them. A drop used to
+# be replayed on the other side at the moment it happened, or never -- the server kept nothing, so anybody who was
+# not there when it hit the floor never got it. The server now remembers each dropped item and sends it to whoever
+# enters its cell. This side makes the drop; the other side proves it arrives late, and that a pick-up clears it here.
+
+log drops actor
+waitfor connected 45
+collect spawn
+record drops actor
+
+waitfor players >= 1 30
+expect known me
+waitfor known other 40
+
+log going inside, where the other bot is not
+wait 4
+cell 16BDB
+
+log dropping an iron dagger
+dropitem 12EB7
+
+# The dropper hears about its own drop too: that is how its client learns the id a later pick-up is named by.
+waitfor drops == 1 15
+expect drops == 1
+
+log waiting for the other bot to come in and pick it up
+waitfor dropremovals >= 1 90
+expect dropremovals == 1
+expect drops == 0
+expect connected
+
+record off
+report bot-drops-actor.txt
+log done
+stop

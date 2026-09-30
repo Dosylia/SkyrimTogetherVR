@@ -13,14 +13,6 @@
 #include <Messages/DrawWeaponRequest.h>
 
 #include <Setting.h>
-namespace
-{
-// On by default since 2026-09-26. Emma reported dropped items invisible to the other player and the reason
-// was this setting, not a missing feature: the receiving client has had the code to place them since
-// 2026-09-18, and the server was stripping the drop flag before it ever got there. Turned on rather than
-// documented, because an opt-in switch for something everyone wants is a feature nobody finds.
-Console::Setting bEnableItemDrops{"Gameplay:bEnableItemDrops", "Syncs dropped items by players", true};
-}
 
 InventoryService::InventoryService(World& aWorld, entt::dispatcher& aDispatcher)
     : m_world(aWorld)
@@ -94,7 +86,14 @@ void InventoryService::OnInventoryChanges(const PacketEvent<RequestInventoryChan
     notify.OwnershipEpoch = message.OwnershipEpoch;
     notify.Item = message.Item;
 
-    notify.Drop = bEnableItemDrops && !isRemoteNpcInteraction ? message.Drop : false;
+    // Never forwarded as a drop any more: DroppedItemService puts the item in the other worlds, where it actually
+    // lies, and remembers it. Forwarding the flag as well would make the dropper's copy drop a second one.
+    //
+    // (It was never forwarded in practice either. The setting that gated it, Gameplay:bEnableItemDrops, had its
+    // default changed to true on 2026-09-26, but every STServer.ini already said false, and a value in the ini beats
+    // a new default: 53 drops sent across every log, none received. The setting is gone, so it cannot be left off.)
+    notify.Drop = false;
+    (void)isRemoteNpcInteraction;
 
     const entt::entity cOrigin = static_cast<entt::entity>(message.ServerId);
     if (!GameServer::Get()->SendToPlayersInRange(notify, cOrigin, acMessage.GetSender()))

@@ -407,11 +407,34 @@ The earlier standing theory was the 2026-09-22 merge's `pVariableSet->size > idx
       `Patch` now logs `formID 14 inspected graph 0 of N (manager index X); Y variables found`, which should be
       followed at once by `found match ... humanoid_Master`. What is still owed a session is the visible half:
       that the other player stops seeing a body slide.
-- [ ] **The rest of the unread sets are NPCs with no replacer at all.** After the player recovered at 19:50, 230-540
-      reads per 10 s still failed. The hashes that are fail-listed and never match are `4d644aec1cadba38` (forms
-      `30397d6`, `30390ab`) and `569b7acef002ee5e` (`20390ce`, `20397d1`): actors from load-order slots 02 and 03
-      whose behaviour no loaded replacer signature recognises. Those are separate from the index bug -- one graph,
-      read correctly, genuinely unmatched -- and they are creatures that slide on the other screen.
+- [ ] **Creatures with no descriptor at all slide, whatever else is fixed.** After the player recovered at 19:50,
+      230-540 reads per 10 s still failed. Three graph hashes never match anything: `4d644aec1cadba38`,
+      `569b7acef002ee5e`, `d85347c754a5ac18`, all on Dragonborn forms (plugin 02 in Emma's order), seen in
+      Apocrypha -- most likely Seekers and Lurkers. They are **vanilla** graphs (only humanoid behaviours are
+      regenerated as loose files in FUS; creatures come from the archives), and the mod has no descriptor for
+      them: the 31 built in cover no Dragonborn creature but the Scrib, and no elk or fox either.
+      **The fix can be data only.** `ConstructModdedDescriptor` does not need an original descriptor -- with no
+      `__hash.txt` it builds the whole thing from the replacer's `__bool/__int/__float.txt` lists, and only
+      `__sig.txt` is required. What it needs is the creature's variable names, which only the running game has.
+      - [x] **[untested] `Patch` now captures them.** The first time a graph matches nothing in a session, its
+        variables are written to `logs/behaviours/<Creature>_<hash>/` in the replacer folder format, with an
+        `about.txt` naming the actor and listing every index. Under logs, which the loader never reads, so
+        nothing changes in play. Types are guessed from names, safely: ints and floats travel as the raw 32-bit
+        word, so filing one as the other round-trips exactly, and a name goes in the lossy bool list only when it
+        says it is a bool -- which held for all 757 variables of the built-in descriptors.
+      - [x] **[untested] Lurker and Netch replacers added (2026-09-30)**, from the first session's captures:
+        `4d644aec1cadba38` is the **Lurker** (86 variables; signature `iState_BenthicLurkerDefault`),
+        `d85347c754a5ac18` is the **Netch Calf** (45; `iState_NetchDefault`, which an adult netch should share). Both in
+        `GameFiles/Skyrim/SkyrimTogetherRebornBehaviors/` (so they ship with releases) and installed in Emma's MO2 mod.
+        The variables synced follow the built-in Wolf, SabreCat and Troll descriptors -- locomotion floats, state bools,
+        the `iSync*` ints -- and leave out foot-IK gains, camera, blend weights, state constants and the `CPR_*`
+        variables of an AI combat mod. Every name was checked against the capture; both signatures appear in no other
+        known graph. **Seen needs the two folders too**, or his side has no descriptor and still shows them sliding.
+      - [ ] **The Seeker** (`569b7acef002ee5e` most likely) was not met in that session; it will be captured the next
+        time one is, the same way.
+- The Cow/Deer/Goat tie is **minor**, not the cause of anything visible: six different graphs matched "Cow", and
+      each found all 21 of the cow's variables, because borrowed descriptors are looked up by name. At most a
+      species' own extra variables go unsynced.
       **Sender-side:** each client sends its own player's variables, so Seen needs this build before Emma sees
       *him* stop sliding.
 
@@ -693,8 +716,39 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       it back without a reconnect and logs which bone and what value. `CopyDiag` also now says whether the body
       hangs from the same scene as the player, which is the one remaining alternative cause.
 
-- [ ] **Dropped items not visible** to the other player. Sender logs `drop: true`, receiver logs
-      `Remote actor ... drops item`. Check both on the next drop. Reported with it (2026-09-20): when he drops
+- [x] **[untested in game] Dropped items are remembered by the server now (2026-09-30), and everything below is the
+      reason.** `DroppedItemService` on both sides:
+      - **Server:** every drop is recorded with where it lies, sent to everyone in range, sent again to anyone entering
+        its cell, and forgotten when picked up. The list is saved to `dropped_items.bin` next to the server, so it
+        outlives a restart. The `bEnableItemDrops` setting is **gone** -- it cannot be left off again -- and the old
+        path no longer forwards the drop flag, which would have made the dropper's copy drop a second item.
+      - **Client:** reports the player's drop from the reference the game made (so the position is where the item
+        lies), then for every item the server sends **adopts** one already on the floor (its own drop, or one its save
+        kept) or **places** it (given to the player and dropped straight back out at the spot, under the inventory
+        override, so nothing is sent twice). A pick-up of a remembered item is passed on, and everyone takes theirs off
+        the floor through the game's own Delete.
+      - **Earlier drops:** on connecting and on each cell change the client reads the game's own list of what this
+        player dropped (`ExtraDroppedItemList`, found by RTTI -- never by a guessed type number -- and walked with every
+        node checked readable) and announces those items. The server matches an announcement against what it already
+        knows before adding it. This is what brings back Emma's items from before 2026-09-30, and it is the least proven
+        part: it depends on that list surviving in the save and on its layout. It logs what it found either way.
+      - **Tested:** the `drops` bot pair (dropped indoors while the other bot is outside -- not sent; the other bot walks
+        in -- given to it within 46 ms; it picks up -- removed on the dropper's side), a server restart (item reloaded
+        and handed to a newcomer), and a unit test for all four messages including the announcement flag.
+      - **Owed a session:** that placing works in the headset (the item at the right spot, no stray "added" message),
+        that adopting finds your own item instead of placing a copy, and whether your old items come back.
+- ~~**Dropped items not visible**~~ to the other player -- **and the 2026-09-26 fix never ran.** It changed the
+      default of `bEnableItemDrops` to true in code, but the server reads `STServer.ini`, and both inis still say
+      `bEnableItemDrops=false` (the build folder's was rewritten on 2026-09-30 18:05, just before that session). A
+      value in the ini beats a new default. Across every log we have: 53 drops sent (Emma 47, Seen 6), **0 ever
+      received**. Two more gaps behind it, from the code:
+      - **Live only.** A drop is replayed on the other side at the moment it happens. The server keeps no record, and
+        each player loads their own save, so anything dropped before the other connected, out of range, or in another
+        session exists in one world only -- Emma's report of 2026-09-30, items dropped sessions ago that Seen cannot see.
+      - **Pickup is not synced.** Picking up is an activation, and `ObjectService::OnActivate` only syncs objects that
+        exist in a plugin; a dropped item is a temporary reference, so `GetServerModId` fails and nothing is sent. With
+        drops on, both players could pick up the same item -- likely why upstream shipped it off and "(Experimental)".
+      Sender logs `drop: true`, receiver logs `Remote actor ... drops item`. Reported with it (2026-09-20): when he drops
       something, his copy's body stays in place but "all his bones try to violently leave it". That is the VR
       pose fighting an animation: the drop plays a throw or ragdoll-style animation on the copy while the
       pose keeps writing the sender's bone rotations over it, so every bone jerks between the two each frame.
@@ -706,7 +760,10 @@ fights, and attacks the other player; sync of same-kind levelled bandits.
       and cell). Test: run `STBot.exe scripts\stand.txt`, then walk through the Whiterun gate and back out. The
       copy must go when you are inside and come back when you are out. If it does not come back, the server
       log names the decision that withheld it.
-- [ ] **Level-up and death end at the main menu, connected only (07:58, 11:46, 11:55, 14:42 x2, 15:08).** Solo
+- [ ] **Death ends at the main menu, connected only.** **Level-up is confirmed fixed** (Emma, 2026-09-30: gone for a
+      while, works perfectly). Death went through the same routine below, so it is probably gone too -- confirm on
+      the next death while connected, then delete this entry.
+      Original report, level-up and death (07:58, 11:46, 11:55, 14:42 x2, 15:08). Solo
       the level-up is fine (15:35 test): the attribute box closes from the level-up code itself
       (`SkyrimVR.exe+0x8d93d2`) and play goes on. Connected, the box is closed by `SkyrimVR.exe+0xf207f7`
       ("type 3, data yes") and a save load starts 6 ms later (Loading Menu, Mist Menu), which ends at the Main
@@ -1248,8 +1305,10 @@ What we know:
 
 - [ ] **CEF crash guard audit.** Before the VR menu is created, any overlay call is a hard crash. Check
       that every `OverlayService` / `ExecuteAsync` / `CefListValue` path is guarded.
-- [ ] **Intermittent crash:** a script event sent to a freed temporary reference during cell attach
-      (see `KNOWN_ISSUES.md`).
+- [ ] **Script-engine crash on a freed temporary form (`SkyrimVR.exe+0x93CE17`) -- the game's, not ours.** Emma has
+      it ten times in single-player Crash Logger logs since 2024-12, most before this mod existed; Seen and Emma both hit
+      it on 2026-09-30, 40 s apart, same address. Our code is in neither call chain and our copy deletion is cleared.
+      Only open question for us: whether co-op makes it more frequent. Evidence and suspects in `KNOWN_ISSUES.md`.
 
 ---
 

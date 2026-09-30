@@ -1,0 +1,39 @@
+# The late arrival. It stays outside while the other bot drops an item indoors, then walks in and must be given the
+# item on entry -- the case that could not happen at all before the server remembered drops -- and picks it up.
+
+log drops watcher
+waitfor connected 45
+collect spawn
+record drops watcher
+
+waitfor known other 40
+
+log staying outside while the other bot drops something indoors
+wait 15
+
+# Out of range when it was dropped, so it must not have arrived. If it has, the server is sending drops to everybody
+# regardless of where they are.
+expect drops == 0
+
+log going in after it
+cell 16BDB
+
+# The heart of it: an item dropped before this bot was there, given to it on entering the cell.
+waitfor drops == 1 20
+expect drops == 1
+
+log picking it up
+pickup
+wait 3
+expect drops == 0
+expect connected
+
+# Outlive the other side, whose last check is that the pick-up reached it.
+log holding on so the other side sees the pick-up
+wait 20
+expect connected
+
+record off
+report bot-drops-watcher.txt
+log done
+stop

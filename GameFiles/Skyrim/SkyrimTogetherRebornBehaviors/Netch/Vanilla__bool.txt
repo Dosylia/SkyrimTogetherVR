@@ -1,0 +1,5 @@
+bAnimationDriven
+bAllowRotation
+IsAttacking
+IsAttackReady
+IsRecoiling

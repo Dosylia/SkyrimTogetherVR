@@ -11,6 +11,7 @@
 #include <Services/PapyrusService.h>
 #include <Services/DiscordService.h>
 #include <Services/ObjectService.h>
+#include <Services/DroppedItemService.h>
 #include <Services/QuestService.h>
 #include <Services/ActorValueService.h>
 #include <Services/InventoryService.h>
@@ -47,6 +48,7 @@ World::World()
     ctx().emplace<PapyrusService>(m_dispatcher);
     ctx().emplace<DiscordService>(m_dispatcher);
     ctx().emplace<ObjectService>(*this, m_dispatcher, m_transport);
+    ctx().emplace<DroppedItemService>(*this, m_dispatcher, m_transport);
     ctx().emplace<CalendarService>(*this, m_dispatcher, m_transport);
     ctx().emplace<QuestService>(*this, m_dispatcher);
     ctx().emplace<PartyService>(*this, m_dispatcher, m_transport);

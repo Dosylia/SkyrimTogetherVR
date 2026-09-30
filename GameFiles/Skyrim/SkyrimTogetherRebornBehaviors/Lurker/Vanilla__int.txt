@@ -1,0 +1,4 @@
+iSyncIdleLocomotion
+iSyncTurnState
+iSyncDefaultState
+iStateRunWalk
