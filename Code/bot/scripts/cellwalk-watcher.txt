@@ -35,7 +35,7 @@ expect connected
 # 'W-cellwalk' left", four actor checks failing against an empty world a few seconds later) and the doorloss
 # pair carries the same note for the same reason.
 log holding on so the actor finishes its checks
-wait 60
+wait 100
 expect connected
 
 record off

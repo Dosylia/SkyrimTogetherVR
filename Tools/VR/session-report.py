@@ -195,8 +195,18 @@ def analyse(lines):
         # of 0 and 2 say nothing at all -- and on 2026-09-26 this analyser cheerfully concluded the opposite from
         # a session in which Seen cast spells and never touched a bow.
         drew_bow = any(BOW_SHOT.search(l) for l in lines)
-        if any(s >= 9 for s in states):
-            verdict = 'the attack state moves, so a nocked arrow can be replicated by syncing it'
+        # And presence needs the same care as absence. States 9 and 10 (bow draw, arrow attached) are reached just by
+        # raising a bow: on 2026-09-27 they appeared 55 times, always 8 -> 9 -> 10 -> 0 inside one second, with not
+        # one arrow fired, and this read it as "the state moves, so it can be synced". Only 11-13 (drawn, releasing,
+        # released) are a real draw.
+        if any(s >= 11 for s in states):
+            verdict = 'the attack state goes through a full draw, so a nocked arrow can be replicated by syncing it'
+        elif any(s in (9, 10) for s in states) and drew_bow:
+            verdict = ('a bow was fired, and the state reached "arrow attached" but never "drawn" or "released": VR sets the '
+                       'start of a draw and nothing after it, so syncing the state would show the arrow and then drop it')
+        elif any(s in (9, 10) for s in states):
+            verdict = ('INCONCLUSIVE: states 9 and 10 appeared but no arrow was fired, which is a bow being raised and '
+                       'lowered, not a draw. Shoot some arrows and look again.')
         elif drew_bow:
             verdict = ('a bow was fired and the attack state still never left the melee values, so VR archery does not set it '
                        'and the arrow has to be attached by hand on the other side')

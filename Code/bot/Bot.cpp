@@ -855,6 +855,22 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
     if (opcode == AssignCharacterResponse::Opcode)
     {
         const auto& message = static_cast<const AssignCharacterResponse&>(acMessage);
+
+        // An NPC this bot registered, rather than its own character. Recorded as an ordinary actor it owns, so
+        // the ownership-churn pair has something that is not a player to hand back and forth: a player character
+        // cannot be claimed at all (CharacterService::CanClaimOwnership refuses IsPlayer and IsMount).
+        if (m_npcCookie && message.Cookie == m_npcCookie)
+        {
+            KnownActor& npc = Actor(message.ServerId);
+            npc.IsPlayer = false;
+            npc.OwnedByUs = message.Owner;
+            npc.OwnershipEpoch = message.OwnershipEpoch;
+            npc.LastChange = Clock::now();
+            spdlog::info("NPC registered as actor {:X} (owner {}) at epoch {}", message.ServerId, message.Owner ? "yes" : "no", message.OwnershipEpoch);
+            Record(Collect::Ownership, fmt::format("npc {:X} owner {} epoch {}", message.ServerId, message.Owner ? 1 : 0, message.OwnershipEpoch));
+            return;
+        }
+
         if (message.Cookie != m_cookie)
             return;
 
@@ -997,6 +1013,32 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
     if (opcode == NotifyOwnershipTransfer::Opcode)
     {
         const auto& message = static_cast<const NotifyOwnershipTransfer&>(acMessage);
+
+        // This message is not addressed to the new owner; it is broadcast to everyone in range, and to the
+        // previous owner directly. OwnerPlayerId is what says whose it now is.
+        //
+        // Reading it as "ours" regardless was worth a whole afternoon: with two bots keeping what they were
+        // given, both of them recorded the same actor at the same epoch in the same millisecond, and the pair
+        // test passed because each side only ever checked its own count. The server was doing the right thing
+        // throughout.
+        const bool cOursNow = message.OwnerPlayerId == m_playerId;
+
+        if (m_acceptOwnership)
+        {
+            KnownActor& actor = Actor(message.ServerId);
+            actor.OwnedByUs = cOursNow;
+            actor.OwnershipEpoch = message.OwnershipEpoch;
+            actor.LastChange = Clock::now();
+            spdlog::info("Actor {:X} is now player {}'s at epoch {}{}", message.ServerId, message.OwnerPlayerId, message.OwnershipEpoch,
+                         cOursNow ? " -- that is us, keeping it" : " -- not us");
+            Record(Collect::Ownership, fmt::format("{} {:X} epoch {}", cOursNow ? "owned" : "owner-is", message.ServerId, message.OwnershipEpoch));
+            return;
+        }
+
+        // Nothing to hand back when it was never handed to us.
+        if (!cOursNow)
+            return;
+
         spdlog::info("Server handed us actor {:X}; handing it back (a bot never owns anything)", message.ServerId);
         RequestOwnershipTransfer request{};
         request.ServerId = message.ServerId;
@@ -1324,6 +1366,123 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
 
         m_sendGridShift = args[0] == "on";
         spdlog::info("[script] grid shift {}", m_sendGridShift ? "on: cell changes send both messages" : "off: cell changes send the exterior enter alone");
+        return true;
+    }
+
+    // Keep an actor the server hands over, instead of refusing it.
+    if (name == "ownership")
+    {
+        if (args.empty() || (args[0] != "accept" && args[0] != "refuse"))
+        {
+            spdlog::error("[script] ownership needs 'accept' or 'refuse'");
+            return true;
+        }
+
+        m_acceptOwnership = args[0] == "accept";
+        spdlog::info("[script] ownership {}", m_acceptOwnership ? "accept: actors handed to us are kept" : "refuse: actors handed to us go straight back");
+        return true;
+    }
+
+    // Register an NPC owned by this bot.
+    //
+    // Two headless bots have nothing between them but their own two player characters, and those can never
+    // change hands -- CanClaimOwnership refuses IsPlayer outright. So an ownership test has to bring its own
+    // actor, and the server will make one for any reference id that is not 0:14: OnAssignCharacterRequest treats
+    // everything else as an ordinary character and CreateCharacter hands it to whoever asked.
+    if (name == "npc")
+    {
+        if (args.empty())
+        {
+            spdlog::error("[script] npc needs a hex form id, e.g. 'npc A2C94'");
+            return true;
+        }
+
+        const uint32_t baseId = static_cast<uint32_t>(std::strtoul(args[0].c_str(), nullptr, 16)) & 0x00FFFFFF;
+        if (baseId == 0x14)
+        {
+            spdlog::error("[script] npc 14 is the player and can never change hands; pick another form");
+            return true;
+        }
+
+        std::random_device device;
+        m_npcCookie = device();
+
+        AssignCharacterRequest request{};
+        request.Cookie = m_npcCookie;
+        request.ReferenceId = GameId(m_skyrimModId, baseId);
+        request.FormId = GameId(m_skyrimModId, baseId);
+        request.CellId = m_cell;
+        request.WorldSpaceId = m_worldSpace;
+        request.Position = ToNet(m_position);
+        request.Rotation = ToNet(glm::vec2(0.f, m_yaw));
+        request.CurrentActorData.InitialActorValues.ActorValuesList[kHealth] = 100.f;
+        request.CurrentActorData.InitialActorValues.ActorMaxValuesList[kHealth] = 100.f;
+        request.CurrentActorData.IsDead = false;
+        SendMsg(request);
+
+        spdlog::info("[script] asked the server to register NPC {:X}:{:X}", m_skyrimModId, baseId);
+        return true;
+    }
+
+    // Hand an owned actor back, which starts the server's search for the next owner.
+    if (name == "release")
+    {
+        KnownActor* pActor = nullptr;
+        if (!args.empty() && args[0] != "any")
+        {
+            const uint32_t wanted = static_cast<uint32_t>(std::strtoul(args[0].c_str(), nullptr, 16));
+            for (auto& actor : m_actors)
+                if (actor.ServerId == wanted)
+                    pActor = &actor;
+        }
+        else
+        {
+            // Our own character is never a candidate: relinquishing it would be refused, and it is not what a
+            // churn test is about.
+            for (auto& actor : m_actors)
+                if (actor.OwnedByUs && !actor.IsPlayer && actor.ServerId != m_serverId)
+                    pActor = &actor;
+        }
+
+        if (!pActor || !pActor->OwnedByUs)
+        {
+            spdlog::warn("[script] release: nothing owned to hand back");
+            return true;
+        }
+
+        RequestOwnershipTransfer request{};
+        request.ServerId = pActor->ServerId;
+        // Echoed back exactly. OnOwnershipTransferRequest drops a release whose epoch does not match the
+        // server's, and drops it silently.
+        request.OwnershipEpoch = pActor->OwnershipEpoch;
+        request.Reason = OwnershipReleaseReason::Relinquish;
+        SendMsg(request);
+
+        pActor->OwnedByUs = false;
+        pActor->LastChange = Clock::now();
+        spdlog::info("[script] handed actor {:X} back at epoch {}", pActor->ServerId, pActor->OwnershipEpoch);
+        Record(Collect::Ownership, fmt::format("released {:X} epoch {}", pActor->ServerId, pActor->OwnershipEpoch));
+        return true;
+    }
+
+    // Zero the per-character spawn counters, so a later `spawns` check counts only what arrived after this point.
+    //
+    // Needed because a bot is sent each character several times while it joins, so any absolute threshold is
+    // already satisfied before the part of the script under test begins. The first cellwalk pair asserted
+    // `spawns other >= 2` and passed against a server with the fix deliberately removed: the seven spawns it
+    // counted had all arrived during the join, twenty seconds before the walk it was supposed to be measuring.
+    if (name == "reset")
+    {
+        if (args.empty() || args[0] != "spawns")
+        {
+            spdlog::error("[script] reset needs 'spawns'");
+            return true;
+        }
+
+        for (auto& player : m_players)
+            player.Spawns = 0;
+
+        spdlog::info("[script] spawn counters zeroed; later counts are of what arrives from here");
         return true;
     }
 
@@ -1682,6 +1841,40 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
             held += fmt::format("{}{:X}", held.empty() ? "" : " ", item);
         aOutWhy = fmt::format("{:X} holds [{}]", id, held.empty() ? std::string("nothing") : held);
         return holding;
+    }
+
+    if (what == "owned")
+    {
+        // owned <op> <n>: how many actors this bot owns that are not its own character.
+        //
+        // Exactly the number a churn test watches: it should be 1 on the side holding the actor and 0 on the
+        // other, and every hand-over should move it. Two bots reading 1 at once means the server handed the same
+        // actor to both; both reading 0 means a hand-over went nowhere and the actor is ownerless.
+        if (acArgs.size() < 3)
+            return std::nullopt;
+        float wanted = 0.f;
+        if (!ParseFloat(acArgs[2], wanted))
+            return std::nullopt;
+
+        uint32_t count = 0;
+        std::string held;
+        for (const auto& actor : m_actors)
+        {
+            if (!actor.OwnedByUs || actor.IsPlayer || actor.ServerId == m_serverId)
+                continue;
+            ++count;
+            held += fmt::format("{}{:X}@{}", held.empty() ? "" : " ", actor.ServerId, actor.OwnershipEpoch);
+        }
+
+        aOutWhy = fmt::format("{} actor(s) owned [{}]", count, held.empty() ? std::string("none") : held);
+        const std::string& op = acArgs[1];
+        const auto value = static_cast<float>(count);
+        if (op == "==") return value == wanted;
+        if (op == ">=") return value >= wanted;
+        if (op == "<=") return value <= wanted;
+        if (op == ">") return value > wanted;
+        if (op == "<") return value < wanted;
+        return std::nullopt;
     }
 
     if (what == "spawns")

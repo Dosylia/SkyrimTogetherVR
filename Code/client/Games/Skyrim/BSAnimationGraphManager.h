@@ -39,7 +39,9 @@ struct BSAnimationGraphManager
     //! @param aForceIndex A caller that already knows which graph it wants (the player always wants 0); -1 to ask.
     uint32_t ResolveGraphIndex(int aForceIndex = -1) const noexcept;
 
-    SortedMap<uint32_t, String> DumpAnimationVariables(bool aPrintVariables);
+    //! @param aForceIndex As for GetDescriptorKey, and it must match it: the dump and the hash have to describe the
+    //! same graph, or a signature is looked for in one graph and keyed to another.
+    SortedMap<uint32_t, String> DumpAnimationVariables(bool aPrintVariables, int aForceIndex = -1);
     uint64_t GetDescriptorKey(int aForceIndex = -1);
     uint32_t ReSendEvent(BSFixedString* apEventName);
 };

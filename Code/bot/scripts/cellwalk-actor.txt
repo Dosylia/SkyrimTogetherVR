@@ -37,6 +37,12 @@ walk rel 20000 0 3000
 wait 12
 expect connected
 
+# Everything counted from here is a re-send, not a leftover from joining. Without this the check below is
+# already satisfied before the walk begins -- the first version of this pair counted seven spawns from the join
+# and passed against a server with the fix taken out, which is exactly the bug it was written to catch.
+log counting only what arrives from here
+reset spawns
+
 # Now walk back the way a person walks: each cell boundary announced as an exterior cell entry, with no grid
 # shift behind it to cover for it.
 log coming back, announcing only the exterior cell change
@@ -45,12 +51,11 @@ walk rel -20000 0 3000
 wait 6
 
 # The assertion. Back in range, the server owes this bot the other player again, and the only message that can
-# carry that is a spawn arriving on the exterior-enter path. Two spawns: the one on the way in at the start, and
-# this one. If the count is still one, nothing re-sent them and this bot is standing next to somebody it cannot
-# see -- which is what the other side experiences as a player going invisible.
+# carry that is a spawn arriving on the exterior-enter path. The count is of re-sends only, so one is enough --
+# and one is what the bug withholds.
 log the other player should have been sent to me again
-waitfor spawns other >= 2 60
-expect spawns other >= 2
+waitfor spawns other >= 1 25
+expect spawns other >= 1
 expect known other
 expect actors == 2
 expect connected

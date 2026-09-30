@@ -1,0 +1,92 @@
+# Two clients taking turns owning the same NPC, which is where the ownership epoch either holds up or does not.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Pair ownerchurn
+#
+# Every message in the ownership family carries an epoch and is refused, silently, if it does not match the
+# server's. Three separate bugs in 2026-09-26 were the same mistake in different places, and each one looked like
+# "the actor just stayed where it was" rather than like an error. Nothing exercised a hand-over until now.
+#
+# A hand-over needs something that is not a player: CharacterService::CanClaimOwnership refuses IsPlayer and
+# IsMount outright, so the two bots' own characters can never change hands. This side brings an NPC of its own
+# (the server registers any reference id that is not 0:14) and the two of them pass it back and forth.
+#
+# Two things are watched, and the second is the one with teeth:
+#
+#   - `owned == 1` after a hand-over: the actor arrived.
+#   - `owned == 0` *while the other side is holding it*: it arrived only there.
+#
+# NotifyOwnershipTransfer is broadcast to everyone in range, not sent to the new owner alone, and the field that
+# says whose it now is is OwnerPlayerId. A client that ignores that field records every hand-over as its own. The
+# first version of this pair did exactly that and passed, with both bots recording the same actor at the same
+# epoch in the same millisecond, because each side only ever checked its own count. Hence the holds below: they
+# exist so that each side is asked the question while the answer is supposed to be no.
+
+log ownerchurn actor
+waitfor connected 45
+collect spawn ownership
+record ownerchurn actor
+
+waitfor players >= 1 30
+expect known me
+
+log settling where the other bot can see me
+wait 8
+waitfor known other 40
+expect known other
+
+# Off everywhere else, because a bot has no game behind it and cannot drive what it is given. Here it is the
+# point: an actor has to be able to land somewhere for a hand-over to be observable.
+log keeping anything the server hands me
+ownership accept
+
+log bringing an NPC for the two of us to pass back and forth
+npc A2C94
+waitfor owned == 1 30
+expect owned == 1
+
+log round 1: holding it, then handing it over
+wait 5
+release any
+expect owned == 0
+wait 3
+expect owned == 0
+waitfor owned == 1 60
+expect owned == 1
+
+log round 2: holding it, then handing it over
+wait 5
+release any
+expect owned == 0
+wait 3
+expect owned == 0
+waitfor owned == 1 60
+expect owned == 1
+
+log round 3: holding it, then handing it over
+wait 5
+release any
+expect owned == 0
+wait 3
+expect owned == 0
+waitfor owned == 1 60
+expect owned == 1
+
+# Keep holding it for a moment before leaving.
+#
+# Not padding: a disconnect hands this bot's actor straight to whoever is left (OnOwnershipTransferEvent ->
+# TransferToNextOwner), and stopping here put the NPC back on the other side 156 ms later -- in the middle of
+# that side's "the other one is holding it" check, which duly failed. The server was right both times; the script
+# was ending while the other half was still asking questions about it.
+wait 10
+
+# Six hand-overs in, the actor is still here and still owned by exactly one of us. A stale epoch anywhere in that
+# chain would have left it stuck on one side, or ownerless and then deleted -- see the last branch of
+# TransferToNextOwner, which removes an actor no eligible owner remains for.
+expect owned == 1
+expect known other
+expect connected
+
+record off
+report bot-ownerchurn-actor.txt
+log done
+stop

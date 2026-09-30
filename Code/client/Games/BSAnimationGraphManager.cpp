@@ -7,11 +7,11 @@
 
 #include <TiltedCore/Hash.hpp>
 
-SortedMap<uint32_t, String> BSAnimationGraphManager::DumpAnimationVariables(bool aPrintVariables)
+SortedMap<uint32_t, String> BSAnimationGraphManager::DumpAnimationVariables(bool aPrintVariables, int aForceIndex)
 {
     SortedMap<uint32_t, String> variables;
 
-    if (const uint32_t index = ResolveGraphIndex(); index < animationGraphs.size)
+    if (const uint32_t index = ResolveGraphIndex(aForceIndex); index < animationGraphs.size)
     {
         const auto pGraph = animationGraphs.Get(index);
         if (pGraph)

@@ -1,0 +1,61 @@
+# The receiving half of the ownership-churn pair. Its partner brings the NPC; this side takes it, holds it, hands
+# it back, and does that three times.
+#
+# Each `waitfor owned == 1` says a hand-over arrived. Each `expect owned == 0` after the three-second wait says it
+# arrived only on the other side -- by then the partner has taken the actor, and a client that credits every
+# broadcast to itself reads 1 there. That check is the one that catches a client misreading OwnerPlayerId, which
+# is how the first version of this pair passed while both bots believed they owned the same actor.
+
+log ownerchurn watcher
+waitfor connected 45
+collect spawn ownership
+record ownerchurn watcher
+
+waitfor known other 40
+expect known other
+
+log keeping anything the server hands me
+ownership accept
+
+# Nothing yet: the NPC does not exist until the other side registers it, and it belongs to them when it does.
+expect owned == 0
+
+log round 1: waiting to be handed the NPC
+waitfor owned == 1 90
+expect owned == 1
+wait 5
+release any
+expect owned == 0
+wait 3
+expect owned == 0
+
+log round 2: waiting to be handed the NPC
+waitfor owned == 1 90
+expect owned == 1
+wait 5
+release any
+expect owned == 0
+wait 3
+expect owned == 0
+
+log round 3: waiting to be handed the NPC
+waitfor owned == 1 90
+expect owned == 1
+wait 5
+release any
+expect owned == 0
+wait 3
+expect owned == 0
+
+expect connected
+
+# Outlive the other side, whose last check comes after this one's: it is still waiting to be handed the actor
+# back when this script reaches the end, and a bot that leaves takes its half of the hand-over with it.
+log holding on so the other side finishes its checks
+wait 30
+expect connected
+
+record off
+report bot-ownerchurn-watcher.txt
+log done
+stop

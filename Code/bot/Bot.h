@@ -75,6 +75,12 @@ struct KnownActor
     bool Dead{};
     bool IsPlayer{};
     bool OwnedByUs{};
+    //! The epoch the server last told us this actor's ownership was at.
+    //!
+    //! Kept because every message in the ownership family is refused unless it carries the current one, and each
+    //! transfer advances it. Handing an actor back with a stale epoch is silently ignored -- three separate bugs
+    //! in this family were the same mistake (2026-09-26) -- so the number has to be stored, not guessed.
+    uint32_t OwnershipEpoch{};
     std::chrono::steady_clock::time_point LastChange{};
     //! What this actor was last seen equipping, by base form id. Empty once it unequips. Last, so that
     //! KnownActor{serverId} still initialises the id.
@@ -214,6 +220,15 @@ private:
     //! on its own could not be tested: whatever the exterior-enter failed to do, the grid shift did a moment
     //! later. See the cellwalk pair.
     bool m_sendGridShift{true};
+    //! Whether this bot keeps an actor the server hands it, instead of handing it straight back.
+    //!
+    //! Off by default, because a bot has no game behind it and owning an actor means being asked to drive
+    //! something it cannot drive -- every existing test relies on that. The ownership-churn pair turns it on,
+    //! because handing an actor back and forth on purpose is the thing it measures.
+    bool m_acceptOwnership{false};
+    //! The cookie of an NPC this bot asked the server to register, kept apart from m_cookie so the response for
+    //! its own character and the response for the NPC can be told apart.
+    uint32_t m_npcCookie{};
     std::string m_serverVersion;
 
     glm::vec3 m_position{};

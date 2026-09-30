@@ -362,7 +362,24 @@ const AnimationGraphDescriptor* BehaviorVar::Patch(BSAnimationGraphManager* apMa
     spdlog::info(__FUNCTION__ ": actor with formID {:x} with hash of {} has modded (or not synced) behavior", hexFormID, hash);
 
     // Get all animation variables for this actor, then create a acReverseMap to go from strings to animation enum.
-    auto pDumpVar = apManager->DumpAnimationVariables(false);
+    //
+    // From the same graph the hash came from. For the player that is graph 0, whatever the manager's index says:
+    // on VR that index is past the end of the graph list (Emma's log, 2026-09-26), which is why the hash and the
+    // reader in TESObjectREFR both force 0. This dump did not, so it asked ResolveGraphIndex for the bad index,
+    // got it back unchanged, and returned nothing -- and an empty set of variables matches no replacer's
+    // signature. The player was fail-listed on both clients from 2026-09-26 onward (same hash, bd3c34a36bb1b9bd,
+    // on Emma's and Seen's), which is the day the reader was fixed and the player first got this far: the
+    // failure moved one step along, to the one call site that sweep missed. Every read after it gave up with
+    // "no descriptor", 275,164 of them in one session, and the other player saw a body sliding.
+    const int cGraphIndex = hexFormID == 0x14 ? 0 : -1;
+    auto pDumpVar = apManager->DumpAnimationVariables(false, cGraphIndex);
+
+    // Said once per attempt (a failure is fail-listed for ten minutes, so this is rare), and it is the line that
+    // decides whether the above was the cause: a dump of zero variables was the old empty-graph failure, a dump of
+    // a few hundred that still matches nothing means the signature genuinely is not in that graph.
+    spdlog::info(__FUNCTION__ ": formID {:x} inspected graph {} of {} (manager index {}); {} variables found",
+                 hexFormID, apManager->ResolveGraphIndex(cGraphIndex), apManager->animationGraphs.size, apManager->animationGraphIndex,
+                 pDumpVar.size());
     TiltedPhoques::Map<TiltedPhoques::String, uint32_t> reverseMap;
     // Hundreds of lines per actor, written from the game thread: debug level only.
     spdlog::debug("Known behavior variables for formID {:x}:", hexFormID);
