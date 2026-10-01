@@ -245,6 +245,30 @@ struct WaitingCopy
 
 TiltedPhoques::Vector<WaitingCopy> s_waitingCopies;
 
+//! Whether a pointer from a form lookup is still a real game object: readable, and its vtable inside the process
+//! image, where every game vtable lives. Freed memory reused for anything else fails at once -- 2026-09-30's had
+//! 0x3b33e809f967790a where the vtable belongs -- and a live form costs one VirtualQuery and a compare.
+bool IsLiveGameObject(const TESForm* apForm) noexcept
+{
+    if (!apForm)
+        return false;
+
+    static const auto s_image = []
+    {
+        const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+        const auto* pDos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+        const auto* pNt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + pDos->e_lfanew);
+        return std::pair<uintptr_t, uintptr_t>{base, base + pNt->OptionalHeader.SizeOfImage};
+    }();
+
+    MEMORY_BASIC_INFORMATION info{};
+    if (!VirtualQuery(apForm, &info, sizeof(info)) || info.State != MEM_COMMIT || (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+        return false;
+
+    const auto vtable = *reinterpret_cast<const uintptr_t*>(apForm);
+    return vtable >= s_image.first && vtable < s_image.second;
+}
+
 uint32_t OutstandingHandles(const Actor* apActor) noexcept
 {
     return static_cast<uint32_t>(apActor->handleRefObject.refCount) & 0x3FF;
@@ -2937,7 +2961,22 @@ void CharacterService::RunSpawnUpdates() const noexcept
             const bool isDragon = m_world.get<WaitingFor3D>(entity).SpawnRequest.IsDragon;
             if (GridCellCoords::IsCellInGridCell(characterCoords, playerCoords, isDragon))
             {
-                auto* pActor = Cast<Actor>(TESForm::GetById(remoteComponent.CachedRefId));
+                // The cached copy may be long gone, and the lookup may still answer with where it used to be. Emma's crash
+                // of 2026-09-30 19:47:30 was this line: the id lookup handed back an object whose "vtable" was
+                // 0x3b33e809f967790a and whose form type was 166 -- freed memory reused for something else -- and the
+                // cast faulted reading it. The same day the game's own script engine crashed the same way, on a freed
+                // temporary form an id lookup returned; both lookups go through EngineFixesVR's FormCaching. So the object
+                // is checked to be a live game object before it is cast, and a dead one is treated as no copy at all.
+                TESForm* pCached = TESForm::GetById(remoteComponent.CachedRefId);
+                if (pCached && !IsLiveGameObject(pCached))
+                {
+                    spdlog::warn("Cached copy {:X} of remote character {:X} no longer resolves to a live object; making a fresh one",
+                                 remoteComponent.CachedRefId, remoteComponent.Id);
+                    remoteComponent.CachedRefId = 0;
+                    pCached = nullptr;
+                }
+
+                auto* pActor = Cast<Actor>(pCached);
                 if (!pActor)
                 {
                     pActor = CreateCharacterForEntity(entity);

@@ -1,0 +1,36 @@
+# The watching half of the revive test, and the one that checks. Sees the NPC arrive, die and come back, then drops
+# its connection so the server builds it a fresh copy from what it stored -- the copy anyone arriving later gets.
+log revive watcher
+waitfor connected 45
+collect spawn death health
+record revive watcher
+waitfor known other 40
+
+log waiting for the other side's NPC
+waitfor known npc 30
+expect alive npc
+expect health npc == 100
+
+log it dies
+waitfor dead npc 20
+expect health npc <= 0
+
+log and comes back
+waitfor alive npc 20
+waitfor health npc >= 100 10
+expect health npc == 100
+expect alive npc
+
+log reconnecting, to be handed a copy built from what the server stored
+disconnect
+wait 3
+reconnect
+waitfor connected 45
+waitfor known npc 30
+# Alive here comes from the spawn's own death flag, not from the health: this is the server's stored state.
+expect alive npc
+expect health npc == 100
+record off
+report bot-revive-watcher.txt
+log done
+stop

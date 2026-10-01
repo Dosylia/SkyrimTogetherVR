@@ -1555,6 +1555,23 @@ void OnFrameEnd() noexcept
         // ends up standing in the air. A dead NPC is the opposite case. Its owner only sends bones for it while it
         // is being moved over there (dragged, thrown, shoved), and that movement is the whole point of this, so
         // those bones are applied.
+        // A dead body being moved by its owner, set below. Every way the pose for one can be skipped after the "posing
+        // body" line is named for it: that line used to be the only one, and it is logged *before* four checks that each
+        // skip the pose without a word. On 2026-09-30 Seen's side logged "posing body FF0010E1" for Emma's dragged troll
+        // and he saw it not move at all -- which of the four it was could not be told.
+        bool isBody = false;
+        const auto whyNotPosed = [&isBody, &now, formId](const char* acpWhy, const float aValue = 0.f)
+        {
+            if (!isBody)
+                return;
+            static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextWhy;
+            auto& next = s_nextWhy[formId];
+            if (now < next)
+                return;
+            next = now + std::chrono::seconds(5);
+            spdlog::info("VRBodySync: body {:X} not posed this time: {} ({:.0f})", formId, acpWhy, aValue);
+        };
+
         if (pActor->actorState.IsDeadOrDying() || pActor->actorState.IsBleedingOut())
         {
             const ActorExtension* pExtension = pActor->GetExtension();
@@ -1567,6 +1584,7 @@ void OnFrameEnd() noexcept
             // weirdly". The sender no longer sends for those, and this refuses them even if an old client does.
             if (!pActor->actorState.IsDead())
                 continue;
+            isBody = true;
 
             // The other half of the sender's line, so one log shows the whole chain.
             static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextSaid;
@@ -1618,13 +1636,17 @@ void OnFrameEnd() noexcept
             if (!ResolveRig(pRoot, rig, cGone))
             {
                 rig.RetryAt = now + std::chrono::seconds(1);
+                whyNotPosed("its skeleton could not be matched to the bones being sent");
                 continue;
             }
             rig.RestructureAt = now + std::chrono::milliseconds(200);
         }
 
         if (!IsInView(ToGlm(rig.Bones[VRPose::kSpine2].World().translate)))
+        {
+            whyNotPosed("out of view");
             continue;
+        }
 
         // A body whose bones are no longer usable is not drawn, and writing more of our own transforms into it
         // keeps it that way. Let go: the game's animation rewrites those bones within a frame and the body comes
@@ -1640,6 +1662,7 @@ void OnFrameEnd() noexcept
                 spdlog::warn("VRBodySync: actor {:X} has a bone the renderer cannot use (spine scale {:.3f}, rotation row {:.4f}); not posing it until the game puts it right",
                              formId, spine.scale, glm::length(ToGlm(spine.rotate)[0]));
             }
+            whyNotPosed("a bone the renderer cannot use");
             continue;
         }
 
@@ -1660,7 +1683,13 @@ void OnFrameEnd() noexcept
                 // A body half a cell away is a desync, not a drag, and hauling the skeleton that far would look
                 // worse than leaving it where it is.
                 if (glm::dot(worldOffset, worldOffset) > 2048.f * 2048.f)
+                {
+                    // Bent but not moved: the prime suspect for a dragged body that "did not move at all", since each
+                    // side's ragdoll drops a corpse on its own and the two can land well apart.
+                    whyNotPosed("more than 2048 units from where its owner has it, so bent in place and not moved; units apart",
+                                glm::length(worldOffset));
                     worldOffset = glm::vec3{};
+                }
                 else
                     rootWorld.translate = wanted; // NiPoint3 derives from glm::vec3
             }
@@ -1881,12 +1910,19 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
 
     // The bones are looked up once per 3D and kept: the search walks the whole skeleton, armour and physics nodes
     // included, and ran at every send (30 times a second) before. The cache is dropped when the root changes, when
-    // a cached node's vtable changes (the game reuses freed node memory), or after 5 s as a safety net.
+    // a cached node's vtable or name changes (the game reuses freed node memory), or after 60 s as a safety net.
+    //
+    // The safety net was 5 s, and the search it repeats -- up to 8192 nodes per bone, a string compare at each, for 19
+    // bones -- costs about 50 ms on a FUS body. Emma's session of 2026-09-30 has that as a "Mod update took ~50 ms,
+    // slowest section RunLocalUpdates" warning 300 times, on an exact 5.0 s period: the dropped frames that showed up
+    // in every 30 s window as "6 frames over 50 ms". The 5 s net was only there for a freed node reused by another
+    // node of the same type, which the vtable check cannot see; the name check does, for one read per bone per frame.
     static struct
     {
         void* pRoot = nullptr;
         BoneNodes Nodes{};
         std::array<void*, VRPose::kBoneCount> VTables{};
+        std::array<const char*, VRPose::kBoneCount> Names{};
         bool LegsFound = false;
         std::array<FingerEntries, 2> Fingers{};
         std::array<bool, 2> FingersFound{};
@@ -1896,10 +1932,11 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
     const auto now = std::chrono::steady_clock::now();
     bool cached = s_local.pRoot == pRoot && now < s_local.RefreshAt;
     for (uint32_t i = 0; cached && i < VRPose::kBoneCount; ++i)
-        if (s_local.Nodes[i] && *static_cast<void**>(s_local.Nodes[i]) != s_local.VTables[i])
+        if (s_local.Nodes[i] && (*static_cast<void**>(s_local.Nodes[i]) != s_local.VTables[i] || GetName(s_local.Nodes[i]) != s_local.Names[i]))
             cached = false;
     if (!cached)
     {
+        const auto cSearchStarted = std::chrono::steady_clock::now();
         BoneNodes nodes;
         bool legsFound = false;
         if (!FindBones(pRoot, nodes, &legsFound))
@@ -1924,8 +1961,20 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
                          s_local.FingersFound[0], s_local.FingersFound[1], arrayInfo.Count);
         }
         for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
+        {
             s_local.VTables[i] = nodes[i] ? *static_cast<void**>(nodes[i]) : nullptr;
-        s_local.RefreshAt = now + std::chrono::seconds(5);
+            s_local.Names[i] = nodes[i] ? GetName(nodes[i]) : nullptr;
+        }
+        s_local.RefreshAt = now + std::chrono::seconds(60);
+
+        // Measured, so the next session says whether this was the 50 ms hitch.
+        const auto cTookMs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - cSearchStarted).count() / 1000.0;
+        static std::chrono::steady_clock::time_point s_nextSearchLog{};
+        if (now >= s_nextSearchLog)
+        {
+            s_nextSearchLog = now + std::chrono::seconds(60);
+            spdlog::info("VRBodySync: local skeleton searched in {:.1f} ms (cached for 60 s, or until a bone node changes)", cTookMs);
+        }
     }
     const BoneNodes& nodes = s_local.Nodes;
     const bool legsFound = s_local.LegsFound;

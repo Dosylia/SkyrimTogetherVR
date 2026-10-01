@@ -1,0 +1,42 @@
+# The owner in the revive test: brings an NPC, lets it die, and brings it back to life.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-all-pairs.ps1 -Pairs revive
+#
+# VR_TODO, "OnRequestRespawn does not restore stored health either": the worry was that an NPC brought back to life by
+# its owner reaches everyone else as a corpse, or at the health it died on. Reading the client settled half of it --
+# an NPC's revive never takes the respawn path; its owner's game sends "alive" and then the health it got back, on
+# the same ticks as any other change. This pair sends exactly that and lets the other side check what it is given,
+# live and rebuilt from what the server stored.
+log revive owner
+waitfor connected 45
+collect spawn ownership death health
+record revive owner
+waitfor players >= 1 30
+expect known me
+waitfor known other 40
+
+log bringing an NPC
+npc A2C94
+waitfor owned == 1 20
+expect owned == 1
+
+log letting the other side get its copy
+wait 6
+
+log it dies
+npclife dead 0
+wait 6
+
+log and is brought back to life
+npclife alive 100
+
+# The other side checks the live copy, then reconnects for one built from storage. Staying for both, and saying
+# nothing more: anything sent now would repair what the rebuild is meant to show.
+log holding on while the other side checks
+wait 35
+expect owned == 1
+expect connected
+record off
+report bot-revive-actor.txt
+log done
+stop

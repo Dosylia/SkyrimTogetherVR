@@ -1,0 +1,58 @@
+# Carries an item it dropped, the way a hand does, while the other bot watches; then moves it once more while the
+# other bot is outside, which the other bot must be told about on coming back.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-all-pairs.ps1 -Pairs dropmove
+#
+# Emma and Seen, 2026-09-30: the butterfly wing Seen dropped reached Emma and she picked it up, but where an item lay
+# after anybody moved it was never sent -- "if Dosylia picks up the item with her hands I should see it in her
+# hands". Moves of a dropped item are now relayed to everyone in range while it travels, and the place it is put down
+# is kept by the server for whoever arrives later. Its own interior (not the drops pair's), so the two can share a run.
+
+log dropmove actor
+waitfor connected 45
+collect spawn
+record dropmove actor
+
+waitfor players >= 1 30
+expect known me
+waitfor known other 40
+
+# In first, and the drop happens before the other bot follows: it must be given the item on entry, then see it carried.
+log going inside
+wait 2
+cell 133C6
+
+log dropping an iron dagger
+dropitem 12EB7
+waitfor drops == 1 15
+
+log waiting for the other bot to come in
+waitfor samecell other 40
+wait 3
+
+log carrying it: two steps in hand, then put down 300 units away
+moveitem 0 100 0 held
+wait 1
+moveitem 0 100 0 held
+wait 1
+moveitem 0 100 0 rest
+
+log waiting for the other bot to step outside
+waitfor not samecell other 40
+wait 3
+
+log moving it again while the other bot is away
+moveitem 300 0 0 rest
+
+log waiting for the other bot to come back and pick it up
+waitfor dropremovals >= 1 90
+expect dropremovals == 1
+expect drops == 0
+# Its own moves are not sent back to it.
+expect dropmoves == 0
+expect connected
+
+record off
+report bot-dropmove-actor.txt
+log done
+stop

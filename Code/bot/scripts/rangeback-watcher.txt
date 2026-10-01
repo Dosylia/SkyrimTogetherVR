@@ -1,0 +1,26 @@
+# The one who stays in the come-back test. Loses health while the other player is away, where the change cannot be
+# sent to it, then waits for it to come back.
+log rangeback stayer
+waitfor connected 45
+collect spawn health
+record rangeback stayer
+waitfor players >= 1 30
+expect known me
+health 100
+waitfor known other 40
+
+log waiting for the other player to walk out of range
+# Its character leaving this bot's range is the half that works: the server removes it here.
+waitfor not known other 60
+
+log losing health while it is away
+health 55
+
+log waiting for it to come back
+waitfor known other 60
+wait 15
+expect connected
+record off
+report bot-rangeback-watcher.txt
+log done
+stop

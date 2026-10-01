@@ -22,7 +22,7 @@ struct NotifyDroppedItem final : ServerMessage
 
     bool operator==(const NotifyDroppedItem& acRhs) const noexcept
     {
-        return GetOpcode() == acRhs.GetOpcode() && Id == acRhs.Id && Item == acRhs.Item && CellId == acRhs.CellId && WorldSpaceId == acRhs.WorldSpaceId && Position == acRhs.Position;
+        return GetOpcode() == acRhs.GetOpcode() && Id == acRhs.Id && Item == acRhs.Item && CellId == acRhs.CellId && WorldSpaceId == acRhs.WorldSpaceId && Position == acRhs.Position && Rotation == acRhs.Rotation;
     }
 
     uint32_t Id{};
@@ -30,4 +30,7 @@ struct NotifyDroppedItem final : ServerMessage
     GameId CellId{};
     GameId WorldSpaceId{};
     Vector3_NetQuantize Position{};
+    //! Euler angles, radians, as the reference holds them. Plain floats: the packed position type is ~1 unit
+    //! precise, which is fine for a place and useless for an angle.
+    glm::vec3 Rotation{};
 };

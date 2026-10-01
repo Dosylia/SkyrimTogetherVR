@@ -11,6 +11,7 @@ struct Player;
 struct CellIdComponent;
 struct RequestDroppedItemAdd;
 struct RequestDroppedItemRemove;
+struct RequestDroppedItemMove;
 struct EnterInteriorCellRequest;
 struct EnterExteriorCellRequest;
 struct ShiftGridCellRequest;
@@ -40,6 +41,7 @@ public:
         GameId CellId{};
         GameId WorldSpaceId{};
         Vector3_NetQuantize Position{};
+        glm::vec3 Rotation{};
     };
 
     //! The saved list, for tests and diagnostics.
@@ -48,6 +50,7 @@ public:
 private:
     void OnAdd(const PacketEvent<RequestDroppedItemAdd>& acMessage) noexcept;
     void OnRemove(const PacketEvent<RequestDroppedItemRemove>& acMessage) noexcept;
+    void OnMove(const PacketEvent<RequestDroppedItemMove>& acMessage) noexcept;
     void OnEnterInteriorCell(const PacketEvent<EnterInteriorCellRequest>& acMessage) const noexcept;
     void OnEnterExteriorCell(const PacketEvent<EnterExteriorCellRequest>& acMessage) const noexcept;
     void OnShiftGridCell(const PacketEvent<ShiftGridCellRequest>& acMessage) const noexcept;
@@ -68,6 +71,7 @@ private:
 
     entt::scoped_connection m_addConnection;
     entt::scoped_connection m_removeConnection;
+    entt::scoped_connection m_moveConnection;
     entt::scoped_connection m_interiorConnection;
     entt::scoped_connection m_exteriorConnection;
     entt::scoped_connection m_gridConnection;

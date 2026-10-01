@@ -189,6 +189,11 @@ struct TESObjectREFR : TESForm
     Vector<uint32_t> RemoveNonQuestItems(Inventory& aCurrentInventory) noexcept;
     void Delete() const noexcept;
     void Disable() const noexcept;
+    //! The game's own ObjectReference.SetMotionType. For a loose object: kMotionKeyframed holds it where it is put,
+    //! kMotionDynamic hands it back to physics.
+    static constexpr int32_t kMotionDynamic = 1;
+    static constexpr int32_t kMotionKeyframed = 4;
+    void SetMotionType(int32_t aMotionType) const noexcept;
     void Enable() const noexcept;
     void MoveTo(TESObjectCELL* apCell, const NiPoint3& acPosition) const noexcept;
     void PayGold(int32_t aAmount) noexcept;

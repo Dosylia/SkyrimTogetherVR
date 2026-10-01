@@ -46,6 +46,7 @@ Details live in `VR_TODO.md`. This is the short version.
 - Player sliding: graph lookup fixed
 - Crash tools, bot test pairs
 - Dropped items remembered by the server
+- Dropped items moved by hand, seen moving
 - Lurker and Netch animations synced
 
 ## Steps to go
@@ -56,7 +57,7 @@ Details live in `VR_TODO.md`. This is the short version.
 4. **Performance:** measure first, then spawn bursts and the 300 ms remote delay
 5. **Followers:** end the tug of war over a shared follower
 6. **World sync:** quest NPCs, message boxes, weather and time, mounts
-7. **VR interactions seen by both:** objects moved by hand, nocked arrow
+7. **VR interactions seen by both:** objects placed by plugins moved by hand, nocked arrow
 8. **Bodies:** handling the other player's body
 9. **NPCs below the floor**
 10. **VR weapon hits land where the blade is**

@@ -1,0 +1,56 @@
+# Watches an item being carried, steps outside while it is moved again, and must find it where it was left on
+# coming back -- the place the server kept, not the place this bot last saw.
+
+log dropmove watcher
+waitfor connected 45
+collect spawn
+record dropmove watcher
+
+waitfor known other 40
+
+log staying outside while the other bot goes in and drops something
+wait 10
+expect drops == 0
+
+log going in after it
+cell 133C6
+waitfor drops == 1 20
+expect dropmoves == 0
+
+log watching it being carried
+waitfor dropmoves >= 3 20
+expect dropmoves == 3
+# Two steps of 100 in hand and one more to where it was put down.
+expect dropmoved >= 290
+expect dropmoved <= 310
+
+log stepping outside while it is moved again
+wait 2
+cell out
+wait 15
+# Out of range: the move made meanwhile must not have been relayed here.
+expect dropmoves == 3
+
+log coming back in
+cell 133C6
+# Given again on entry, lying where it was left: 300 along one way and 300 along the other, 424 from where it fell.
+waitfor dropmoved >= 400 20
+expect dropmoved >= 414
+expect dropmoved <= 434
+expect dropmoves == 3
+
+log picking it up
+pickup
+wait 3
+expect drops == 0
+expect connected
+
+# Outlive the other side, whose last check is that the pick-up reached it.
+log holding on so the other side sees the pick-up
+wait 20
+expect connected
+
+record off
+report bot-dropmove-watcher.txt
+log done
+stop

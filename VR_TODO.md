@@ -57,6 +57,52 @@ Only this week's work is still ticked. 44 items shipped between 2026-09-14 and 2
 unplayed item gets, and the git history keeps every word of them. What is left ticked is from 2026-09-25 and
 -26 and is genuinely unplayed -- that is the list to confirm on the next session.
 
+## Session of 2026-09-30, 19:25-19:47 (both logs): what worked, and what it showed
+
+- **Dropped items worked in play.** Seen dropped a butterfly wing (`727DE`); Emma's client placed it as `FF00108D` at
+  19:26:07 and she picked it up at 19:26:41, which removed it for everyone. Earlier drops were **not** announced, and
+  the code said nothing either way -- fixed to report what it finds on the player once per connection.
+- [x] **[untested] Emma's crash at 19:47:30 was ours, guarded.** `RunSpawnUpdates` cast `TESForm::GetById(CachedRefId)`
+  for a remote character waiting to reappear, and the lookup returned freed memory: vtable `0x3b33e809f967790a`, form type
+  166, read from her dump. Our copy deletion is cleared (the pointer is none of the 19 recorded). A cached copy is now
+  checked to be a live game object -- readable, vtable inside the process image -- before it is cast, and a dead one
+  is treated as no copy. **Second crash the same day on a freed temporary form handed back by an id lookup**, the first
+  being the game's own script engine; see `KNOWN_ISSUES.md`, where EngineFixesVR `FormCaching` is now the prime suspect.
+- [x] **[untested] The hitch every 5 seconds was ours.** "Mod update took ~50 ms, slowest section RunLocalUpdates",
+  300 times, on an exact 5.0 s period -- the "6 frames over 50 ms" in every 30 s window. `CaptureLocalPose` rebuilt its
+  bone cache every 5 s as a safety net, and the search (`FindShallowest`: up to 8192 nodes, a string compare each, for
+  19 bones) costs about that on a FUS body. The cache now checks each bone node's name as well as its vtable every
+  frame -- the case the net was for -- and refreshes every 60 s. The search now logs its own duration once a minute, so
+  the next session confirms it: `VRBodySync: local skeleton searched in N ms`.
+- **The 19:40 stutter** (43 frames over 50 ms in one 30 s window, around killing the bear and the sabre cat) was not in
+  our update: its average held at 0.54 ms. Game-side; not pursued.
+- **Seen's stuck menu (19:46).** The Journal Menu opened at 19:43:54 with the game window unfocused -- the game opens it
+  on focus loss unless `bAlwaysActive=1` -- and stayed on the stack through a save load and a death. No
+  `bAlwaysActive` line exists in any of the profile inis. Setting it on both machines removes the trigger; why the menu
+  could not then be closed is not established. His 19:45:33 disconnect was his own client closing (reason 4) around
+  that load.
+- [ ] **Corpse dragging: the bones arrive, and something on the receiving side skips or misplaces them.** Emma's troll:
+  "body FF0010C1 is being moved here, sending its bones" at 19:31:47.144; Seen's side "posing body FF0010E1 from its
+  owner's bones" 0.7 s later -- yet it did not visibly move for him, and a dragged bandit looked scrambled ("a pixel
+  mix", and "not exactly on the same spot for him"). **First read as the copy's ragdoll overriding the pose, and that
+  was wrong:** the pose is already written at the renderer's frame end, after the ragdoll has run, and the pelvis and
+  legs already move with it (the 09-26 stretching fix). What the code does show is that "posing body" is logged
+  *before* four checks that skip the pose silently -- skeleton not matched, out of view, an unusable bone, and a body
+  more than 2048 units from the owner's, which is bent in place and never moved. The last fits a corpse the two
+  ragdolls dropped in different places. **[untested] Each skip is now named per body** ("VRBodySync: body X not posed
+  this time: ... (distance)"); the next session says which, and if it is the distance guard, a dragged body should be put
+  where its owner has it rather than refused. Boneless creatures work both ways (Emma's bear sent; Seen's sabre cat
+  moved "194.6 units to where its owner has it").
+- **The Mist Watch bandit's death did sync -- its body did not.** Emma owned it (claimed 19:40:20) and sent its death at
+  19:41:36.412; the server forwarded it (it reports every death it drops, none here); and Seen's side posed it as a dead
+  body at 19:41:39, which that path does only for an actor already dead there. Seen had hit it for 81 moments before, so
+  most likely his copy died from his own hit and ragdolled on his side -- to a different spot, which is what "not synced
+  after it died" was. [untested] The death receiver's three silent exits now say which they took, including "already
+  dead here when its owner's word arrived".
+- Held and moved objects (Seen: "if Dosylia picks up the item with her hands I should see it in her hands"):
+  **[untested in game] done for dropped items** -- see "Dropped items are moved for everyone" below. Objects placed by
+  a plugin (a cup on a table) are still the open entry "Objects moved by hand are not seen moving".
+
 ## Work done without a session, 2026-09-28: tests, tooling, and one thing the log was getting wrong
 
 Five items agreed as safe to do alone, because each is either a test, a tool, or a log line -- nothing here
@@ -491,6 +537,10 @@ looks frozen -- which is two of the four reports from 21:19-21:25 on 2026-09-25.
       does. The client-side refresh above makes the stale copy correct itself on return, which is the safe half of
       the fix; sending removals is the other half and is **not** done yet, because removals are entity churn and
       churn is where the crashes have been.
+      **Tested 2026-09-30, server side:** the `rangeback` bot pair walks one bot five cells away; the one who stayed
+      loses health meanwhile. The walker still held the stale copy at 100 while away -- the asymmetry, confirmed --
+      and was given it at 55 on the way back. Whether the game's copy then shows 55 is the client refresh, which
+      needs a headset.
 
 ### Goal 2 / the flying bandit: two points that are not a journey (2026-09-26)
 
@@ -903,7 +953,34 @@ because that was built by hand in September. Everything else a hand does is invi
         side by hand, which is a much larger job -- and the state would then be wrong for bashing and blocking
         too, which is worth knowing either way.
 
-- [ ] **Objects moved by hand are not seen moving.** `ObjectService` syncs activation, locks and script
+- [x] **[untested in game] Dropped items are moved for everyone (2026-09-30).** A dropped item someone picks up in
+      a hand, carries, throws or kicks is followed on the other side while it moves, and the place it comes to rest is
+      kept by the server for whoever arrives later.
+      - **Client:** ten times a second each dropped item the server knows is compared with where it last was (the 3D
+        node's world position, which follows physics; 2 units or ~3 degrees). A move is sent while it lasts, and a final
+        "at rest" once it has been still for 0.6 s. The first 2 s after a drop or placement are ignored, so each side
+        lets its own item fall. The receiving side makes the item **keyframed** while it is carried (so its own physics
+        does not pull it down between updates), moves it to each position, and gives it back to physics 2 s after the
+        last word -- not at once on "at rest", because a hand kept still sends that too. An item moved while this
+        player was away is put where it was left when the server sends it again on entering the cell. A cell loading
+        is treated like a fresh drop (its items settle on both sides at once, which is not a move), and an id whose
+        reference now has a different base form is left alone (the game reuses a deleted item's `FF` id).
+      - **Server:** `RequestDroppedItemMove` updates the item's place and relays it to players in range; the list is
+        written to disk only at rest. Drops now carry a rotation too (`dropped_items.bin` version 2; version 1 still
+        loads).
+      - **Tested:** the `dropmove` bot pair (carried in three steps while the other bot watches -- all three relayed;
+        moved again while the other bot is outside -- not relayed; the other bot comes back -- given the item where it
+        was left, 424 units from where it fell), red with the server not keeping the place, green with it. Unit test
+        for the move message.
+      - **Owed a session, and what to watch for:** the log says `DroppedItem: N (...) is being moved here` on the side
+        that picks it up, `is being moved over there; holding it here and following` on the other. Three things I
+        could not check without the headset: whether it follows smoothly or in visible steps (ten updates a second,
+        each a `MoveTo`; if it steps, the engine's own `TranslateTo` is the next thing to try -- and if a move rebuilds
+        the item's 3D the log says `moving N rebuilt its 3D` once, and it is re-held after each move); whether its turn
+        follows while held (the turn is read from the reference, which may only catch up when it settles); and
+        whether the grab itself counts as a move on the side holding it (it should: the node moves).
+- [ ] **Objects moved by hand are not seen moving** (plugin-placed objects; dropped items are done, above).
+      `ObjectService` syncs activation, locks and script
       animations, and **no positions at all**. Pick a cup up with HIGGS, throw it, and on the other screen it never
       left the table. The identity and ownership machinery is already there -- objects have server ids and an
       `ObjectComponent` -- so this is a missing message rather than a missing subsystem.
@@ -921,6 +998,13 @@ because that was built by hand in September. Everything else a hand does is invi
 
 ### Same shape, not touched, needs evidence first
 
+- [x] **Answered 2026-09-30: an NPC brought back to life never reaches this path.** The client sends
+      `RequestRespawn` as an owner only for the player's beast form (`OnBeastFormChange`); an NPC's revive goes out as
+      a death state "alive" (quarter-second tick) and then its restored health (one-second value tick), and the server
+      stores both. The `revive` bot pair sends exactly that: the other bot sees the NPC arrive at 100, die at 0 and come
+      back alive at 100, and a copy rebuilt from storage after a reconnect is alive at 100. Control: reviving at 40
+      makes the rebuilt copy read 40, so it is the stored value being read. The entry below stays as written for the
+      record; nothing in it needs changing unless a caller other than beast form appears.
 - [ ] **`CharacterService::OnRequestRespawn` does not restore stored health either.** When somebody who is *not*
       the owner asks, that handler serialises the character out of stored state and sends it as a fresh spawn --
       the same copy-from-storage path the player respawn bug travelled on. For players it is now safe, because
@@ -1052,7 +1136,16 @@ the task is to find the cause rather than guess at one.
 - [ ] **What the bot still cannot cover, and what to do about it.** It has no game behind it, so nothing visual is
       testable: invisible bodies, dragged corpses, hand positions, the health bar. Those need a headset. What
       could be added without one: ~~an NPC-ownership churn test~~ (done 2026-09-30, below), a test that a looping
-      animation does not starve the stream, and a test that a spell hit reaches the target's health.
+      animation does not starve the stream, and ~~a test that a spell hit reaches the target's health~~ (done
+      2026-09-30: the `spell` pair sends a concentration spell the way the client does -- changes under a point,
+      added up and sent every 250 ms -- twelve changes of -2; the victim reads 76 and so does a copy rebuilt from the
+      server. Whether the game raises those changes for a spell landing on a remote copy at all still needs a headset).
+
+      Also found on 2026-09-30: **the first bot on a fresh server never sent a movement.** Its character is entity 0,
+      and `SendMovement` / `SendEquip` tested the id instead of whether there was a character, so the server never
+      learnt which cell that bot's character stood in. Every pair whose watcher connected first ran with a watcher
+      frozen at its join cell; the `dropmove` pair walked into a room with it and was never given it. Fixed in the bot.
+      NPC copies are now recorded too (`known npc`, `health npc`, `dead npc`), which the bot used to ignore.
       Note on the animation one: the bot has no animation-variable support at all, and the sliding it would be
       for is not a stream problem -- see "Sliding: the descriptor lookup" in the 2026-09-29 notes.
 
@@ -1377,7 +1470,8 @@ server code; it only links `SkyrimEncoding` and `TiltedConnect`. Built 2026-09-2
 list, the host position from the host's log and the scouting were checked against the local server. The spawn,
 movement, death and respawn paths are **[untested]** until a headset is in the game.
 
-**Run it** (server, then the game joined to it, then the bot, from `build\windowsdelease`):
+**Run it** (server, then the game joined to it, then the bot, from `build\windowsd
+elease`):
 `STBot.exe ..\..\..\..\Codeot\scripts\copy-respawn.txt` (defaults: `--server 127.0.0.1:10578`, the
 password from `config\STServer.ini` via `--password`, `--hostlog` the host's `tp_client.log`, `--spacing 200`).
 Its log is `logsot.log` next to the exe. The clone carries the host's face, outfit and in-game name.

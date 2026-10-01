@@ -14,6 +14,8 @@
 #include <Messages/NotifyOwnershipTransfer.h>
 #include <Messages/NotifyDroppedItem.h>
 #include <Messages/NotifyDroppedItemRemoved.h>
+#include <Messages/NotifyDroppedItemMove.h>
+#include <Messages/RequestDroppedItemMove.h>
 #include <Messages/RequestDroppedItemAdd.h>
 #include <Messages/RequestDroppedItemRemove.h>
 #include <Messages/NotifyPartyInfo.h>
@@ -266,6 +268,8 @@ void Bot::OnDisconnected(EDisconnectReason aReason)
     m_actors.clear();
     m_players.clear();
     m_names.clear();
+    m_drops.clear();
+    m_dropPlaces.clear();
     m_leftParty = false;
 
     if (m_phase == Phase::Stopped || m_phase == Phase::Detached)
@@ -600,7 +604,10 @@ void Bot::FollowHostIntoCell(const GameId& acCell, const GameId& acWorldSpace) n
 
 void Bot::SendMovement() noexcept
 {
-    if (!m_serverId)
+    // Whether there is a character, not whether its id is non-zero: entity 0 is a real id, the first character a fresh
+    // server makes. Testing the id kept that bot from ever sending a movement, so the server never learnt which cell
+    // its character stood in -- the dropmove pair of 2026-09-30 walked into a room with it and was never given it.
+    if (!m_hasCharacter)
         return;
 
     ClientReferencesMoveRequest message{};
@@ -677,7 +684,7 @@ void Bot::SendHit(const uint32_t aTargetId, const float aDelta) noexcept
 
 void Bot::SendEquip(const uint32_t aBaseId, const uint32_t aSlot, const bool aUnequip, const bool aSpell) noexcept
 {
-    if (!m_serverId)
+    if (!m_hasCharacter) // entity 0 is a real id; see SendMovement
         return;
 
     if (!aSpell)
@@ -792,8 +799,25 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
     if (opcode == CharacterSpawnRequest::Opcode)
     {
         const auto& message = static_cast<const CharacterSpawnRequest&>(acMessage);
-        if (!message.IsPlayer || message.PlayerId == m_playerId)
-            return; // NPCs are the host's business; our own character never comes back to us
+        if (message.IsPlayer && message.PlayerId == m_playerId)
+            return; // our own character never comes back to us
+
+        // An NPC: kept as a copy with the health and death state the server built it from, which is all a test of an
+        // NPC needs -- the revive pair asks whether one brought back to life arrives alive and at its health. Nothing
+        // else about it is followed; NPCs are otherwise the host's business.
+        if (!message.IsPlayer)
+        {
+            const auto health = message.InitialActorValues.ActorValuesList.find(kHealth);
+            KnownActor& actor = Actor(message.ServerId);
+            actor.IsPlayer = false;
+            actor.Health = health != message.InitialActorValues.ActorValuesList.end() ? health->second : 0.f;
+            actor.HealthKnown = health != message.InitialActorValues.ActorValuesList.end();
+            actor.Dead = message.IsDead;
+            actor.LastChange = Clock::now();
+            spdlog::info("NPC copy {:X} ({:X}), health {:.0f}{}", message.ServerId, message.FormId.BaseId, actor.Health, message.IsDead ? ", dead" : "");
+            Record(Collect::Spawn, fmt::format("npc spawn {:X} health {:.1f}{}", message.ServerId, actor.Health, message.IsDead ? " dead" : ""));
+            return;
+        }
 
         KnownPlayer* pPlayer = FindPlayerCharacter(message.ServerId);
         if (!pPlayer)
@@ -1018,12 +1042,29 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
     {
         const auto& message = static_cast<const NotifyDroppedItem&>(acMessage);
         const bool cNew = m_drops.emplace(message.Id, message.Item.BaseId).second;
+        const glm::vec3 cPlace(message.Position);
+        m_dropFirstPlaces.emplace(message.Id, cPlace);
+        if (!cNew && glm::distance(m_dropPlaces[message.Id], cPlace) > 20.f)
+            spdlog::info("Dropped item {} was sent again, lying {:.0f} units from where this bot last knew it", message.Id,
+                         glm::distance(m_dropPlaces[message.Id], cPlace));
+        m_dropPlaces[message.Id] = cPlace;
         if (cNew)
         {
             spdlog::info("Dropped item {} is {:X}:{:X} x{} in cell {:X} at ({:.0f}, {:.0f}, {:.0f})", message.Id, message.Item.BaseId.ModId, message.Item.BaseId.BaseId,
                          message.Item.Count, message.CellId.BaseId, message.Position.x, message.Position.y, message.Position.z);
             Record(Collect::Spawn, fmt::format("drop {} {:X}", message.Id, message.Item.BaseId.BaseId));
         }
+        return;
+    }
+
+    if (opcode == NotifyDroppedItemMove::Opcode)
+    {
+        const auto& message = static_cast<const NotifyDroppedItemMove&>(acMessage);
+        ++m_dropMoves;
+        const glm::vec3 cPlace(message.Position);
+        m_dropPlaces[message.Id] = cPlace;
+        spdlog::info("Dropped item {} moved to ({:.0f}, {:.0f}, {:.0f}){}", message.Id, cPlace.x, cPlace.y, cPlace.z, message.AtRest ? ", at rest" : "");
+        Record(Collect::Spawn, fmt::format("drop {} moved{}", message.Id, message.AtRest ? " rest" : ""));
         return;
     }
 
@@ -1275,6 +1316,53 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return true;
     }
 
+    // "burn <who> <dps> <seconds>" hurts somebody else the way a concentration spell does. A sword hit is one change
+    // of many points; flames take a fraction of a point a frame, which ActorValueService::OnHealthChange does not send
+    // one by one -- anything under a point is added up per actor and sent every 250 ms by RunSmallHealthUpdates. So
+    // this sends dps/4 every quarter second, and a spell's damage arriving is a stream of small changes adding up.
+    if (name == "burn")
+    {
+        const float dps = arg(1, 8.f);
+        const float seconds = arg(2, 3.f);
+        const int batches = std::max(1, static_cast<int>(seconds * 4.f + 0.5f));
+        if (aFirstTick)
+        {
+            m_burnTarget = kNoId;
+            m_burnSent = 0;
+            if (!args.empty() && args[0] == "other")
+            {
+                for (const auto& player : m_players)
+                    if (player.ServerId != m_serverId)
+                    {
+                        m_burnTarget = player.ServerId;
+                        break;
+                    }
+            }
+            else if (!args.empty())
+                m_burnTarget = static_cast<uint32_t>(std::strtoul(args[0].c_str(), nullptr, 16));
+
+            if (m_burnTarget == kNoId)
+            {
+                spdlog::warn("Line {}: nobody to burn", acCommand.Line);
+                return true;
+            }
+            spdlog::info("Burning {:X} at {:.1f} a second for {:.1f} s: {} changes of {:.2f}", m_burnTarget, dps, seconds, batches, -dps / 4.f);
+        }
+        if (m_burnTarget == kNoId)
+            return true;
+
+        // Due batches only: a slow tick sends the ones it owes, as the game's timer would have.
+        const int due = std::min(batches, static_cast<int>(Seconds(now - m_commandStart) * 4.f) + 1);
+        for (; m_burnSent < due; ++m_burnSent)
+        {
+            RequestHealthChangeBroadcast request{};
+            request.Id = m_burnTarget;
+            request.DeltaHealth = -dps / 4.f;
+            SendMsg(request);
+        }
+        return m_burnSent >= batches;
+    }
+
     // "hit <who> <delta>" hurts somebody else. A negative delta is damage, which is the direction the game
     // actually sends and the direction the server got wrong until 2026-09-24.
     if (name == "hit")
@@ -1433,7 +1521,37 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         request.Id = m_drops.begin()->first;
         SendMsg(request);
         spdlog::info("[script] picked up dropped item {}", request.Id);
+        m_dropPlaces.erase(request.Id);
         m_drops.erase(m_drops.begin());
+        return true;
+    }
+
+    // Move an item the server has told this bot about, the way a hand carrying it does: 'held' while it travels,
+    // 'rest' once it is put down. The offset is from where the bot last knew the item to be.
+    if (name == "moveitem")
+    {
+        float dx = 0.f, dy = 0.f, dz = 0.f;
+        if (args.size() < 4 || !ParseFloat(args[0], dx) || !ParseFloat(args[1], dy) || !ParseFloat(args[2], dz) || (args[3] != "held" && args[3] != "rest"))
+        {
+            spdlog::error("[script] moveitem needs an offset and held|rest, e.g. 'moveitem 0 150 0 held'");
+            return true;
+        }
+        if (m_drops.empty())
+        {
+            spdlog::warn("[script] moveitem: nothing lying here that the server has mentioned");
+            return true;
+        }
+
+        const uint32_t id = m_drops.begin()->first;
+        glm::vec3& place = m_dropPlaces[id];
+        place += glm::vec3(dx, dy, dz);
+
+        RequestDroppedItemMove request{};
+        request.Id = id;
+        request.Position = place;
+        request.AtRest = args[3] == "rest";
+        SendMsg(request);
+        spdlog::info("[script] moved dropped item {} to ({:.0f}, {:.0f}, {:.0f}){}", id, place.x, place.y, place.z, request.AtRest ? ", put down" : ", still held");
         return true;
     }
 
@@ -1489,6 +1607,60 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         SendMsg(request);
 
         spdlog::info("[script] asked the server to register NPC {:X}:{:X}", m_skyrimModId, baseId);
+        return true;
+    }
+
+    // "npclife dead|alive [health]": an NPC this bot owns dies, or comes back to life, as its owner's game reports it.
+    // The client sends the death state on its quarter-second tick and the health on its one-second value tick
+    // (ActorValueService::RunDeathStateUpdates / BroadcastActorValues), so a revive goes out as "alive" and then the
+    // health it got back -- there is no respawn message for an NPC; that path is only the player's beast form.
+    if (name == "npclife")
+    {
+        if (args.empty() || (args[0] != "dead" && args[0] != "alive"))
+        {
+            spdlog::error("[script] npclife needs dead or alive, e.g. 'npclife alive 100'");
+            return true;
+        }
+        KnownActor* pNpc = nullptr;
+        for (auto& actor : m_actors)
+            if (actor.OwnedByUs && !actor.IsPlayer && actor.ServerId != m_serverId)
+                pNpc = &actor;
+        if (!pNpc)
+        {
+            spdlog::warn("[script] npclife: this bot owns no NPC");
+            return true;
+        }
+
+        const bool dead = args[0] == "dead";
+        const float health = arg(1, dead ? 0.f : 100.f);
+
+        RequestDeathStateChange death{};
+        death.Id = pNpc->ServerId;
+        death.OwnershipEpoch = pNpc->OwnershipEpoch;
+        death.IsDead = dead;
+
+        RequestActorValueChanges values{};
+        values.Id = pNpc->ServerId;
+        values.OwnershipEpoch = pNpc->OwnershipEpoch;
+        values.Values[kHealth] = health;
+
+        // Dying, the health reaches zero first; coming back, the death state goes first.
+        if (dead)
+        {
+            SendMsg(values);
+            SendMsg(death);
+        }
+        else
+        {
+            SendMsg(death);
+            SendMsg(values);
+        }
+
+        pNpc->Dead = dead;
+        pNpc->Health = health;
+        pNpc->HealthKnown = true;
+        pNpc->LastChange = Clock::now();
+        spdlog::info("[script] NPC {:X} is now {} at health {:.0f} (epoch {})", pNpc->ServerId, dead ? "dead" : "alive", health, pNpc->OwnershipEpoch);
         return true;
     }
 
@@ -1756,6 +1928,19 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
             return true;
         }
 
+        // "npc" is the first NPC this bot holds a copy of or owns. Like "other", a script cannot know its id.
+        if (acArgs[aIndex] == "npc")
+        {
+            aOut = kNoId;
+            for (const auto& actor : m_actors)
+                if (!actor.IsPlayer && actor.ServerId != m_serverId)
+                {
+                    aOut = actor.ServerId;
+                    break;
+                }
+            return true;
+        }
+
         // "other" is the first other player this bot can see. A script cannot know the other side's server id in
         // advance, and without this no test can assert that anything actually crossed between two clients --
         // which is where the interesting bugs live.
@@ -1909,6 +2094,51 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
             held += fmt::format("{}{:X}", held.empty() ? "" : " ", item);
         aOutWhy = fmt::format("{:X} holds [{}]", id, held.empty() ? std::string("nothing") : held);
         return holding;
+    }
+
+    if (what == "samecell")
+    {
+        // samecell <who>: that player has announced the interior this bot stands in. "known" cannot say it: going
+        // indoors does not take the outdoor copies away from a bot the way unloading the cell does in the game, so a
+        // copy known outside still reads as known inside (dropmove pair, 2026-09-30).
+        uint32_t id = 0;
+        if (!parseId(1, id))
+            return std::nullopt;
+        const auto player = std::find_if(m_players.begin(), m_players.end(), [id](const KnownPlayer& acPlayer) { return acPlayer.ServerId == id; });
+        const bool same = id != kNoId && player != m_players.end() && m_cell != GameId{} && player->CellId == m_cell;
+        aOutWhy = player == m_players.end() ? std::string("nobody else is here yet")
+                                            : fmt::format("{:X} announced cell {:X}, this bot is in {:X}", id, player->CellId.BaseId, m_cell.BaseId);
+        return same;
+    }
+
+    if (what == "dropmoves" || what == "dropmoved")
+    {
+        // dropmoves <op> <n>: moves the server relayed to this bot.
+        // dropmoved <op> <n>: how far the first known item now lies from where this bot first heard of it.
+        if (acArgs.size() < 3)
+            return std::nullopt;
+        float wanted = 0.f;
+        if (!ParseFloat(acArgs[2], wanted))
+            return std::nullopt;
+        float moved = -1.f;
+        if (!m_drops.empty())
+        {
+            const uint32_t id = m_drops.begin()->first;
+            if (m_dropPlaces.count(id) && m_dropFirstPlaces.count(id))
+                moved = glm::distance(m_dropPlaces.at(id), m_dropFirstPlaces.at(id));
+        }
+        const float value = what == "dropmoves" ? static_cast<float>(m_dropMoves) : moved;
+        aOutWhy = fmt::format("{} move(s) relayed; first item lies {} from where it was first heard of", m_dropMoves,
+                              moved < 0.f ? std::string("(no item)") : fmt::format("{:.0f} units", moved));
+        if (what == "dropmoved" && moved < 0.f)
+            return false;
+        const std::string& op = acArgs[1];
+        if (op == "==") return value == wanted;
+        if (op == ">=") return value >= wanted;
+        if (op == "<=") return value <= wanted;
+        if (op == ">") return value > wanted;
+        if (op == "<") return value < wanted;
+        return std::nullopt;
     }
 
     if (what == "drops" || what == "dropremovals")

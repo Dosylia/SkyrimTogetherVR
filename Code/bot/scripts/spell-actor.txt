@@ -1,0 +1,36 @@
+# The victim in the spell damage test. Sits still while the other bot burns it, and checks that every bit of it
+# arrived.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-all-pairs.ps1 -Pairs spell
+#
+# The pvp pair sends one sword-sized hit. A concentration spell is different on the wire: flames take a fraction of a
+# point a frame, and the client adds those up and sends them every quarter second (ActorValueService::
+# RunSmallHealthUpdates). "I damage him, he takes nothing" was the report; this is the half of it a bot can check --
+# that a stream of small changes reaches the target whole. Whether the game raises them for a spell on a remote copy
+# at all needs a headset.
+log spell victim
+waitfor connected 45
+collect health death spawn
+record spell victim
+waitfor players >= 1 30
+expect known me
+health 100
+wait 4
+expect health me == 100
+
+log standing still while the other player burns me: 8 a second for 3 seconds
+waitfor health me <= 76.5 40
+wait 2
+expect health me >= 75.5
+expect health me <= 76.5
+expect alive me
+
+# Saying nothing afterwards: sending its own health would overwrite what the server stored, which the other side
+# is about to read.
+log holding still while the other side checks what the server kept
+wait 25
+expect connected
+record off
+report bot-spell-actor.txt
+log done
+stop

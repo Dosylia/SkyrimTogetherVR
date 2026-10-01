@@ -1,0 +1,31 @@
+# The caster in the spell damage test: burns the other bot as a concentration spell does, then reconnects to be
+# given a fresh copy of it built from what the server stored.
+log spell caster
+waitfor connected 45
+collect health death spawn
+record spell caster
+waitfor known other 40
+waitfor health other >= 100 30
+expect health other >= 100
+# The victim sets its own health once on arrival; burning before that lands would be overwritten (see pvp).
+log letting the other player settle
+wait 10
+
+log burning the other player: twelve changes of -2 over three seconds
+burn other 8 3
+wait 6
+
+log reconnecting, to be handed a fresh copy built from what the server stored
+disconnect
+wait 3
+reconnect
+waitfor connected 45
+waitfor known other 40
+log all twelve must be in the stored health
+expect health other >= 75.5
+expect health other <= 76.5
+expect alive other
+record off
+report bot-spell-watcher.txt
+log done
+stop

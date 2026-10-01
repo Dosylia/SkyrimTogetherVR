@@ -595,6 +595,16 @@ void TESObjectREFR::Disable() const noexcept
     s_pDisable(this, true);
 }
 
+void TESObjectREFR::SetMotionType(const int32_t aMotionType) const noexcept
+{
+    using ObjectReference = TESObjectREFR;
+
+    PAPYRUS_FUNCTION(void, ObjectReference, SetMotionType, int, bool);
+
+    // Activation stays allowed: a held item still has to be takeable.
+    s_pSetMotionType(this, aMotionType, true);
+}
+
 void TESObjectREFR::Enable() const noexcept
 {
     using ObjectReference = TESObjectREFR;

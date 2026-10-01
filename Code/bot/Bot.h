@@ -249,6 +249,12 @@ private:
     //! `pickup any` takes. The server sends one when an item is dropped in range and again on entering its cell.
     std::map<uint32_t, GameId> m_drops;
     uint32_t m_dropRemovals{};
+    //! Where each of them lies now as far as this bot knows, and where it first heard of it -- what `dropmoved`
+    //! measures. The first place outlives a pick-up, so a late re-send can still be measured against it.
+    std::map<uint32_t, glm::vec3> m_dropPlaces;
+    std::map<uint32_t, glm::vec3> m_dropFirstPlaces;
+    //! Moves relayed to this bot by the server, which only sends them to players in range.
+    uint32_t m_dropMoves{};
     std::vector<std::pair<uint32_t, std::string>> m_names; // player id -> username
 
     size_t m_pc = 0;
@@ -256,6 +262,9 @@ private:
     bool m_commandFresh = true;
     glm::vec3 m_walkTarget{};
     float m_walkSpeed{};
+    //! `burn`: who is being hurt and how many quarter-second batches have gone out.
+    uint32_t m_burnTarget{};
+    int m_burnSent{};
     Clock::time_point m_healthRestoreAt{};
     bool m_healthRestorePending = false;
     uint32_t m_reconnects{};

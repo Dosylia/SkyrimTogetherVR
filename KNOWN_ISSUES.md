@@ -153,6 +153,10 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 - **Respawn** finishes once started. On VR the player left bleedout early, which left the screen black.
 - **Stutter report:** `Perf spike: ...` in the log when a frame is over 25 ms, naming the slowest mod
   section.
+- **Dropped items** are kept by the server (`DroppedItemService`, `dropped_items.bin`) with where they lie, and moves
+  of them are relayed while they happen. Two known gaps: an item this save already has, which somebody else moved more
+  than 200 units while this player was offline, is not recognised on reconnecting and is placed a second time; and
+  an item's turn is read from its reference, which may lag behind its 3D while it is carried.
 
 ## 6. Open bugs
 
@@ -188,6 +192,13 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
     address (form `FF00109C` -- the temporary base of a levelled Fox the game had removed two minutes earlier; our
     levelled-NPC code had found it already matching and swapped nothing). `RecentDeletes` cleared our copy deletion
     in both. Emma's dump: `overwrite\Root\crash_UTC_2026-09-30_16-30-47.dmp`.
+  - **Same day, 19:47:30, the same failure in our code:** `CharacterService::RunSpawnUpdates` cast what
+    `TESForm::GetById` returned for a cached copy, and it was freed memory (vtable `0x3b33e809f967790a`, form type 166).
+    Two unrelated callers -- the game's script engine and our spawn update -- both handed a freed temporary form by an
+    id lookup, hours apart. What they share is the lookup, and EngineFixesVR's `FormCaching = true` sits on it ("caching
+    recently used forms", `mods\Engine Fixes VR\skse\plugins\EngineFixesVR.ini`, with `TreeLODReferenceCaching`
+    depending on it). The test: both players set both to false and play as usual; these crashes should stop. Our
+    side is guarded regardless (`IsLiveGameObject`).
   - Suspects, unproven: EngineFixesVR form caching (a stale id-to-form cache entry would hand out exactly this
     pointer), PapyrusTweaks (loaded on both machines). Whether co-op makes it more frequent is open: Emma's came 0.44 s
     after spawning a batch of the other player's actors.

@@ -8,6 +8,8 @@
 #include <Messages/RequestDroppedItemRemove.h>
 #include <Messages/NotifyDroppedItem.h>
 #include <Messages/NotifyDroppedItemRemoved.h>
+#include <Messages/RequestDroppedItemMove.h>
+#include <Messages/NotifyDroppedItemMove.h>
 #include <Messages/EnterInteriorCellRequest.h>
 #include <Messages/EnterExteriorCellRequest.h>
 #include <Messages/ShiftGridCellRequest.h>
@@ -22,7 +24,9 @@ namespace
 // Next to the server, where it is started from. Deleting it forgets every dropped item and nothing else.
 constexpr const char* kFile = "dropped_items.bin";
 constexpr uint32_t kMagic = 0x504F5244; // "DROP"
-constexpr uint64_t kVersion = 1;
+// 2 added each item's rotation (2026-09-30, with moving items). A version 1 file is still read, rotation zero, so
+// the items remembered before the change are not lost with it.
+constexpr uint64_t kVersion = 2;
 
 //! How close an announced item has to lie to one already known to be taken for the same item. An announced item is
 //! read from where it lies now, and a known one is where it was first reported -- the same object after a physics
@@ -39,6 +43,7 @@ DroppedItemService::DroppedItemService(World& aWorld, entt::dispatcher& aDispatc
     : m_world(aWorld)
     , m_addConnection(aDispatcher.sink<PacketEvent<RequestDroppedItemAdd>>().connect<&DroppedItemService::OnAdd>(this))
     , m_removeConnection(aDispatcher.sink<PacketEvent<RequestDroppedItemRemove>>().connect<&DroppedItemService::OnRemove>(this))
+    , m_moveConnection(aDispatcher.sink<PacketEvent<RequestDroppedItemMove>>().connect<&DroppedItemService::OnMove>(this))
     , m_interiorConnection(aDispatcher.sink<PacketEvent<EnterInteriorCellRequest>>().connect<&DroppedItemService::OnEnterInteriorCell>(this))
     , m_exteriorConnection(aDispatcher.sink<PacketEvent<EnterExteriorCellRequest>>().connect<&DroppedItemService::OnEnterExteriorCell>(this))
     , m_gridConnection(aDispatcher.sink<PacketEvent<ShiftGridCellRequest>>().connect<&DroppedItemService::OnShiftGridCell>(this))
@@ -90,6 +95,7 @@ void DroppedItemService::OnAdd(const PacketEvent<RequestDroppedItemAdd>& acMessa
     item.CellId = message.CellId;
     item.WorldSpaceId = message.WorldSpaceId;
     item.Position = message.Position;
+    item.Rotation = message.Rotation;
 
     const auto [it, inserted] = m_items.emplace(item.Id, item);
     Save();
@@ -125,6 +131,35 @@ void DroppedItemService::OnRemove(const PacketEvent<RequestDroppedItemRemove>& a
     notify.Id = acMessage.Packet.Id;
     for (Player* pPlayer : m_world.GetPlayerManager())
         pPlayer->Send(notify);
+}
+
+void DroppedItemService::OnMove(const PacketEvent<RequestDroppedItemMove>& acMessage) noexcept
+{
+    const auto& message = acMessage.Packet;
+    const auto it = m_items.find(message.Id);
+    if (it == m_items.end())
+        return; // picked up meanwhile
+
+    it->second.Position = message.Position;
+    it->second.Rotation = message.Rotation;
+
+    // Written to disk only once it stops: a held item sends ten of these a second, and only where it ends up needs to
+    // outlive a restart.
+    if (message.AtRest)
+        Save();
+
+    NotifyDroppedItemMove notify{};
+    notify.Id = message.Id;
+    notify.Position = message.Position;
+    notify.Rotation = message.Rotation;
+    notify.AtRest = message.AtRest;
+
+    const CellIdComponent cell = CellOf(it->second);
+    for (Player* pPlayer : m_world.GetPlayerManager())
+    {
+        if (pPlayer != acMessage.pPlayer && pPlayer->GetCellComponent().IsInRange(cell, false))
+            pPlayer->Send(notify);
+    }
 }
 
 // The packet, not the player's cell component: another service updates that component from the same packet, and the
@@ -164,6 +199,7 @@ void DroppedItemService::Send(Player* apPlayer, const Item& acItem) const noexce
     notify.CellId = acItem.CellId;
     notify.WorldSpaceId = acItem.WorldSpaceId;
     notify.Position = acItem.Position;
+    notify.Rotation = acItem.Rotation;
     apPlayer->Send(notify);
 }
 
@@ -183,6 +219,9 @@ void DroppedItemService::Save() const noexcept
         item.CellId.Serialize(writer);
         item.WorldSpaceId.Serialize(writer);
         item.Position.Serialize(writer);
+        TiltedPhoques::Serialization::WriteFloat(writer, item.Rotation.x);
+        TiltedPhoques::Serialization::WriteFloat(writer, item.Rotation.y);
+        TiltedPhoques::Serialization::WriteFloat(writer, item.Rotation.z);
     }
 
     // Written aside and swapped in, so a crash mid-write leaves the previous list rather than half of one.
@@ -218,10 +257,10 @@ void DroppedItemService::Load() noexcept
     uint64_t magic = 0;
     reader.ReadBits(magic, 32);
     const uint64_t version = TiltedPhoques::Serialization::ReadVarInt(reader);
-    if (magic != kMagic || version != kVersion)
+    if (magic != kMagic || version < 1 || version > kVersion)
     {
         // A file from a different layout is not read at all: guessing at it could place nonsense in both worlds.
-        spdlog::warn("{} is not a version {} list of dropped items; starting without it", kFile, kVersion);
+        spdlog::warn("{} is not a list of dropped items this server can read (version {}, up to {} known); starting without it", kFile, version, kVersion);
         return;
     }
 
@@ -235,6 +274,12 @@ void DroppedItemService::Load() noexcept
         item.CellId.Deserialize(reader);
         item.WorldSpaceId.Deserialize(reader);
         item.Position.Deserialize(reader);
+        if (version >= 2)
+        {
+            item.Rotation.x = TiltedPhoques::Serialization::ReadFloat(reader);
+            item.Rotation.y = TiltedPhoques::Serialization::ReadFloat(reader);
+            item.Rotation.z = TiltedPhoques::Serialization::ReadFloat(reader);
+        }
         m_items.emplace(item.Id, item);
         m_nextId = std::max(m_nextId, item.Id + 1);
     }

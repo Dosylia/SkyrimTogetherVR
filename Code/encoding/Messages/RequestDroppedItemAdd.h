@@ -22,13 +22,16 @@ struct RequestDroppedItemAdd final : ClientMessage
 
     bool operator==(const RequestDroppedItemAdd& acRhs) const noexcept
     {
-        return GetOpcode() == acRhs.GetOpcode() && Announcement == acRhs.Announcement && Item == acRhs.Item && CellId == acRhs.CellId && WorldSpaceId == acRhs.WorldSpaceId && Position == acRhs.Position;
+        return GetOpcode() == acRhs.GetOpcode() && Announcement == acRhs.Announcement && Item == acRhs.Item && CellId == acRhs.CellId && WorldSpaceId == acRhs.WorldSpaceId && Position == acRhs.Position && Rotation == acRhs.Rotation;
     }
 
     Inventory::Entry Item{};
     GameId CellId{};
     GameId WorldSpaceId{};
     Vector3_NetQuantize Position{};
+    //! Euler angles, radians, as the reference holds them. Plain floats: the packed position type is ~1 unit
+    //! precise, which is fine for a place and useless for an angle.
+    glm::vec3 Rotation{};
 
     //! False for a drop that just happened: always a new item, even beside an identical one, or dropping two
     //! iron daggers in one spot would sync only the first. True for an item the player dropped earlier and is

@@ -1,0 +1,42 @@
+# The walker in the come-back test: walks several cells away and back, and checks that its copy of the player who
+# stayed was put right on the way in.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-all-pairs.ps1 -Pairs rangeback
+#
+# The mirror of the range pair. There the walker changes while away and the one who stayed must see it; here the one
+# who stayed changes, and the walker must see it on coming back. That is the other half of VR_TODO's "two range paths
+# are asymmetric": a character that moves out of range is removed for its viewers, but a viewer that walks away is
+# never told to drop what it left behind, so its copies go stale. Coming back has to repair them.
+log rangeback walker
+waitfor connected 45
+collect spawn health
+record rangeback walker
+waitfor players >= 1 30
+expect known me
+waitfor known other 40
+waitfor health other >= 100 30
+wait 4
+
+log walking five cells east
+walk rel 20000 0 3000
+log giving the other player time to lose health where it cannot be sent to me
+wait 10
+# Out of range: the change must not have arrived. The copy is either still held at its old health or gone; neither
+# may read 55 yet, or the check on the way back proves nothing.
+expect not health other <= 60
+
+log and back again
+walk rel -20000 0 3000
+log the copy must be put right on the way back in
+waitfor health other <= 55 30
+expect health other == 55
+expect alive other
+expect actors == 2
+expect connected
+
+log holding on so the other side finishes
+wait 5
+record off
+report bot-rangeback-actor.txt
+log done
+stop

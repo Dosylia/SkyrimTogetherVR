@@ -592,14 +592,35 @@ void ActorValueService::OnDeathStateChange(const NotifyDeathStateChange& acMessa
         }
     }
 
+    // Every way out of here is named. Seen's session of 2026-09-30: Emma's client sent the death of a Mist Watch bandit
+    // (server id 50000D) at 19:41:36, the server forwarded it (it reports every death it drops, and reported none),
+    // and Seen's side logged nothing at all -- no death applied, no epoch miss. Three exits below were silent, and
+    // "we never had that character", "it had no actor" and "it was already dead here" are three different bugs.
+    // Rate limited: a death arrives once per actor, so this is a handful of lines per session.
+    const auto say = [&acMessage](const char* acpWhy)
+    {
+        static std::chrono::steady_clock::time_point s_next{};
+        const auto now = std::chrono::steady_clock::now();
+        if (now < s_next)
+            return;
+        s_next = now + std::chrono::seconds(1);
+        spdlog::info("Death sync: {} for server id {:X} arrived and was not applied: {}", acMessage.IsDead ? "a death" : "a revival", acMessage.Id, acpWhy);
+    };
+
     if (it == std::end(view))
+    {
+        say("no copy of that character here");
         return;
+    }
 
     auto& formIdComponent = view.get<FormIdComponent>(*it);
     Actor* pActor = Cast<Actor>(TESForm::GetById(formIdComponent.Id));
 
     if (!pActor)
+    {
+        say("its copy has no actor in the game");
         return;
+    }
 
     ActorExtension* pExtension = pActor->GetExtension();
     // Players should never be killed
@@ -610,5 +631,12 @@ void ActorValueService::OnDeathStateChange(const NotifyDeathStateChange& acMessa
     {
         acMessage.IsDead ? pActor->Kill() : pActor->Respawn();
         spdlog::info("Death sync: remote actor {:X} set {} by its owner (now dead: {})", pActor->formID, acMessage.IsDead ? "dead" : "alive", pActor->IsDead());
+    }
+    else
+    {
+        // Not a failure -- the copy got there on its own, from a hit landed on this side -- but it means the body fell
+        // here, under this side's ragdoll, and will lie somewhere other than the owner's. Worth knowing when a body is
+        // reported "not synced after it died".
+        spdlog::info("Death sync: remote actor {:X} was already {} here when its owner's word arrived", pActor->formID, acMessage.IsDead ? "dead" : "alive");
     }
 }
