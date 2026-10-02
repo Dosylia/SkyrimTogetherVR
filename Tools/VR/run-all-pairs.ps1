@@ -34,23 +34,26 @@ $ErrorActionPreference = 'Stop'
 # so without it the "latest" line was the previous run's -- and the check reported a mismatch that did not exist,
 # in red, on two runs whose bots then connected and passed (2026-09-28 and 2026-09-30).
 function Assert-VersionsMatch($botExe, $release, [int]$SkipLines = 0) {
-    $botLine = & $botExe --version 2>&1 | Select-String -Pattern 'STBot (v\S+)' | Select-Object -First 1
+    # The protocol, which is what the server compares since 2026-10-02 (a digest of Code/encoding). The versions may
+    # differ and usually do after a bot-only change; that is no longer a reason for a refusal.
+    $botLine = & $botExe --version 2>&1 | Select-String -Pattern 'protocol (\S+)' | Select-Object -First 1
     if (-not $botLine) { return }
-    $botVer = $botLine.Matches[0].Groups[1].Value
+    $botProtocol = $botLine.Matches[0].Groups[1].Value
 
     $log = Join-Path $release 'logs\STServerOut.log'
     if (-not (Test-Path $log)) { return }
     $all = @(Get-Content $log)
     # The log may have rotated at start-up, in which case it is shorter than the line count taken before.
     if ($SkipLines -gt $all.Count) { $SkipLines = 0 }
-    $srvLine = $all | Select-Object -Skip $SkipLines | Select-String -Pattern 'server v(\S+)|version .v(\S+)\.' | Select-Object -Last 1
+    $srvLine = $all | Select-Object -Skip $SkipLines | Select-String -Pattern 'Protocol (\S+):' | Select-Object -Last 1
     if (-not $srvLine) { return }
+    $srvProtocol = $srvLine.Matches[0].Groups[1].Value
 
-    if ($srvLine.Line -notmatch [regex]::Escape($botVer)) {
-        Write-Host "The bot and the server were built at different times." -ForegroundColor Red
-        Write-Host "  bot:    $botVer" -ForegroundColor Yellow
-        Write-Host "  server: $($srvLine.Line.Trim())" -ForegroundColor Yellow
-        Write-Host "  Rebuild SkyrimTogetherClientVR, SkyrimImmersiveLauncherVR, SkyrimTogetherServer, SkyrimServerRunner and STBot in one go." -ForegroundColor Yellow
+    if ($srvProtocol -ne $botProtocol) {
+        Write-Host "The bot and the server speak different protocols; the server will refuse the bot." -ForegroundColor Red
+        Write-Host "  bot:    $botProtocol" -ForegroundColor Yellow
+        Write-Host "  server: $srvProtocol" -ForegroundColor Yellow
+        Write-Host "  Something in Code\encoding changed between the two builds. Run xmake build (everything) once." -ForegroundColor Yellow
     }
 }
 

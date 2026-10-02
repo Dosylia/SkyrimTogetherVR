@@ -15,8 +15,10 @@ waitfor players >= 1 30
 expect known me
 waitfor known other 40
 
+# A temporary one, with an id of its own: the ownerchurn pair registers Lydia's reference (A2C94), and two pairs
+# registering the same reference on one server collide whenever they share a batch (2026-10-01).
 log bringing an NPC
-npc A2C94
+npc temp 23A8A
 waitfor owned == 1 20
 expect owned == 1
 

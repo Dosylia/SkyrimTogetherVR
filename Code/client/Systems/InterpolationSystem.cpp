@@ -335,10 +335,27 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
         if (glm::distance(static_cast<glm::vec3>(apActor->position), position) > 2.f)
         {
             ++s_moved;
+            // Unchanged *and* saying nothing: no float in the set is non-zero. Unchanged alone is not sliding. A body
+            // running at a steady speed carries the same speed and direction in every snapshot and its legs move all
+            // the same -- a real player's stream, recorded and played back by the bot on 2026-10-02, was counted as
+            // 122 of 122 moves "sliding" while the screenshot showed it mid-stride. What the bug of 2026-09-26
+            // actually looked like was a set of zeros that never changed, because nothing had been read into it.
             if (first.Variables == second.Variables)
             {
-                ++s_movedFrozen;
-                s_worstActor = apActor->formID;
+                bool saysSomething = false;
+                for (const float value : second.Variables.Floats)
+                {
+                    if (value != 0.f)
+                    {
+                        saysSomething = true;
+                        break;
+                    }
+                }
+                if (!saysSomething)
+                {
+                    ++s_movedFrozen;
+                    s_worstActor = apActor->formID;
+                }
             }
         }
 
@@ -347,7 +364,7 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
         {
             s_nextLog = slideNow + 10s;
             if (s_moved)
-                spdlog::info("SlideDiag: {} of {} moves of a remote body came with animation variables that had not changed; last was {:X}. All of them would be a body sliding rather than walking.",
+                spdlog::info("SlideDiag: {} of {} moves of a remote body came with animation variables that had not changed and said nothing (no speed, no direction); last was {:X}. Those are a body sliding rather than walking.",
                              s_movedFrozen, s_moved, s_worstActor);
             s_moved = 0;
             s_movedFrozen = 0;

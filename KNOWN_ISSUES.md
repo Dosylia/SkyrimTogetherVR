@@ -50,8 +50,10 @@ stronger evidence; the AE path was left untouched.
 
 - **Ids in this code are AE (1.6.x) ids; VR uses SE numbering.** The same number is a different function.
   `POINTER_SKYRIMSE(type, name, aeId, vrId)` takes a separate VR id, which should be the SE id.
-- **Lookup order:** the official VR Address Library CSV, then `Code/client/VRAddressOverrides.h`
-  (only for ids the CSV lacks).
+- **Lookup order:** the official VR Address Library CSV, with `Code/client/VRAddressOverrides.h` laid over it.
+  Our table wins where the two disagree, and the log says so at start-up (`Address id N differs`). It was the other
+  way round until 2026-10-01: library 0.275.0 defines id 35269, which this client uses as an (AE) number for the
+  dialogue-option function, so a newer library would have put that hook on an unrelated function.
 - **Three failure modes, and only one of them crashes where it happens:**
   1. No address: `Get()` is null. Hooks are skipped, and direct calls must be null-guarded.
   2. Wrong address from the old SE/VR binary-diff "crosswalk": it was wrong for **0 of 69** checked
@@ -204,6 +206,61 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
     after spawning a batch of the other player's actors.
 
 ## 7. Debugging
+- **Who may connect to whom is decided by the protocol id, not the version (2026-10-02).** `BUILD_PROTOCOL` is a
+  digest of the contents of `Code/encoding` (every message, struct and opcode), computed by `modules/version.lua`
+  from git's own hash of each file, so line endings and commit state do not matter; Linux and Windows give the same
+  id. The client and the bot send it in `AuthenticationRequest.Protocol`, and the server refuses a different one as
+  "wrong version", naming both ids. The version string is still sent and logged (`is on another build ... with the
+  same protocol; let in`). `STBot.exe --version` prints both; the server prints `Protocol <id>:` at start.
+  A build still has to be whole (`xmake build`, never one target): the server's DLL and its runner check each other.
+- **`Tools/VR/check-linux-build.ps1`** builds the server on Debian 12 with GCC through the repo's Dockerfile, runs the
+  unit tests there, and compares the protocol id with the Windows build. It starts Docker Desktop if needed and stops
+  it again. MSVC lets through things GCC refuses: a local `constexpr` used in a lambda without capturing it, a header
+  that uses `std::optional` without including it. Run it before telling anyone to build on Linux.
+- **The real game can be run and tested with nobody in the headset (first done 2026-10-01).** Three parts:
+  SteamVR's `null` driver with two virtual controllers (the SkyrimVR Devkit's source, built by Emma with
+  `build.bat`; Valve's stock null driver has no controllers and `skyrimvrtools.dll` crashes six seconds after a
+  load without them), switched on by a `driver_null` block in `steamvr.vrsettings` and removed again afterwards;
+  DevBench (`http://127.0.0.1:8921`) to load a save, run console commands, read positions and quit (`qqq`); and a bot
+  as the other player. Launch: start SteamVR, then `ModOrganizer.exe "moshortcut://:PLAY Skyrim Together VR"`; the
+  client connects by itself five seconds after the load. Valve's original driver is kept beside the built one as
+  `driver_null.dll.valve`.
+  All of that is `Tools/VR/headless.ps1 up` and `down` now (`down` closes SteamVR by force and removes the setting).
+  `Tools/VR/live-check.py <script>` then runs a bot from `Code/bot/scripts/live-*.txt` and, at each `log CHECK ...`
+  line, asks the game through DevBench (copy / npc `exists`, `3d`, `alive`, `dead`, `health N`; `player dropped N`;
+  `game alive`); a `log DO console <command>` line runs a console command at that point. Two traps: checks are asked
+  while the script carries on, so put a `wait` after each group; and never rebuild while a session is up -- the bot
+  and the running server must be the same build.
+  Since 2026-10-02: `Tools/VR/run-live.ps1` does all of it in one command (up, every `live-*.txt`, one table, down);
+  `log SHOT <name> of copy|npc|drop|player` takes a screenshot from a free camera placed in front of that thing
+  (`build/.../logs/shots`); `drop exists|mark|moved dx dy dz|gone`, `player alive` and `game inworld` are checks;
+  `log DO load last` loads the last save and `log DO god on|off` sets god mode; `headless.ps1 up -NoConnect` runs the
+  game with no server. The run switches combat AI off first. Lydia stands under water in Emma's save, so a script
+  that teleports to her needs `DO god on` or the player drowns. A bot's copy wears only base-game items: the bot
+  cannot carry a mod's armour.
+  The bot can play back real movement: `capture other|npc|base <hex> <seconds>` records the stream the server relays
+  for one character (positions, animation variables, actions, VR pose) and says what it held, action names included;
+  `replay [me|npc] [times]` sends it back as the bot's own character or an NPC it owns; `npc captured` registers a
+  creature of the kind just captured (the only way the bot can name a form outside Skyrim.esm). On the game's side,
+  `log DO key w 6000` walks the player, `log DO combat on` lets a spawned creature come for them, and
+  `CHECK copy|npc gait walking|sliding <s>` reads the copy's own animation speed while it travels.
+  Also since 2026-10-02: `log DO server restart` stops and starts the server and waits for the game to go back in by
+  itself (about 17 s), and `log DO sleep <s>` makes the driver wait (the bot loses the server too, so its own `wait`
+  lines run out meanwhile); the bot command `stay` stops the bot following the player through load doors, so that
+  somebody is left behind to be given the player's actors (`ownership accept` keeps them); `CHECK ids reused <name>`
+  says whether the game gave an actor of that name a form id of a copy deleted earlier. The driver now tells the bot
+  where the player stands (the bot's own search of the client log finds nothing after a busy script and it then
+  waits at the world origin), and a script that reaches no check is reported as not run, not as passed.
+  `Tools/VR/leaver-check.py` needs no game: a fresh server and three bots, for what a player who leaves without a
+  character does to the others.
+- **Emma's VR Address Library is a combined file (2026-10-01), not a released one.** DevBench needs ids only the
+  current library has (0.275.0); the modlist was built on 0.158.0. The released 0.275.0 corrects two addresses
+  (100997, 74491) and drops three (63607-63609), and the installed Community Shaders is built for the old value of
+  100997 (`LightLimitFix.h:164`): with the corrected address its patch landed inside a live rendering function and
+  the game crashed at the main menu (`SkyrimVR.exe+0x1354e5a`). So the file in
+  `E:\FUS\mods\VR Address Library for SKSEVR` is 0.275.0 with every id from 0.158.0 kept at its old address
+  (script: scratchpad `merge_addrlib.py`; the untouched 0.158.0 is beside it as `version-1-4-15-0.csv.0.158.0.bak`).
+  Do not replace it with a plain newer release without updating Community Shaders to match.
 
 - **Read `logs/tp_client.log` first.** On a crash it contains the faulting access, the registers and a
   raw stack scan. A real stack walk is impossible, because the custom-loaded game image has no

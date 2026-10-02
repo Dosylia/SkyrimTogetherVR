@@ -7,6 +7,7 @@ void AuthenticationRequest::SerializeRaw(TiltedPhoques::Buffer::Writer& aWriter)
     Serialization::WriteBool(aWriter, MO2Active);
     Serialization::WriteString(aWriter, Token);
     Serialization::WriteString(aWriter, Version);
+    Serialization::WriteString(aWriter, Protocol);
     UserMods.Serialize(aWriter);
     Serialization::WriteString(aWriter, Username);
     WorldSpaceId.Serialize(aWriter);
@@ -24,6 +25,7 @@ void AuthenticationRequest::DeserializeRaw(TiltedPhoques::Buffer::Reader& aReade
     MO2Active = Serialization::ReadBool(aReader);
     Token = Serialization::ReadString(aReader);
     Version = Serialization::ReadString(aReader);
+    Protocol = Serialization::ReadString(aReader);
     UserMods.Deserialize(aReader);
     Username = Serialization::ReadString(aReader);
     WorldSpaceId.Deserialize(aReader);

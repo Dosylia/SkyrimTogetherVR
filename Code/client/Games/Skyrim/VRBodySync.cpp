@@ -1917,7 +1917,18 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
     // slowest section RunLocalUpdates" warning 300 times, on an exact 5.0 s period: the dropped frames that showed up
     // in every 30 s window as "6 frames over 50 ms". The 5 s net was only there for a freed node reused by another
     // node of the same type, which the vtable check cannot see; the name check does, for one read per bone per frame.
-    static struct
+    //
+    // Sixty seconds was still a stall once a minute whenever the search happened to be slow: one whole session on
+    // 2026-10-02 had it at 52 to 77 ms nine times running (others were 4 to 20 ms; what makes the difference is not
+    // known). The net is ten minutes now. Nothing has ever been seen to need it: the root, vtable and name checks
+    // are what catch a rebuilt or freed skeleton.
+    //
+    // Those checks do trip more often than once a minute, though. With nobody in the headset, every menu opened
+    // through DevBench was followed by a search: 68 in one minute of opening and closing menus, up to 22.7 ms each,
+    // and the log line (which now says why) named the reason every time: the body's root node changed. The player
+    // has two bodies in VR and the game shows the other one while a menu is up. So two roots are remembered, not
+    // one, and going back to a root already searched costs the per-frame checks and nothing else.
+    struct LocalCache
     {
         void* pRoot = nullptr;
         BoneNodes Nodes{};
@@ -1928,12 +1939,42 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
         std::array<bool, 2> FingersFound{};
         void* pSkeletonRoot = nullptr;
         std::chrono::steady_clock::time_point RefreshAt{};
-    } s_local;
+        std::chrono::steady_clock::time_point UsedAt{};
+    };
+    static std::array<LocalCache, 2> s_caches;
     const auto now = std::chrono::steady_clock::now();
-    bool cached = s_local.pRoot == pRoot && now < s_local.RefreshAt;
+    LocalCache* pCache = nullptr;
+    for (LocalCache& cache : s_caches)
+        if (cache.pRoot == pRoot)
+            pCache = &cache;
+    const bool cKnownRoot = pCache != nullptr;
+    if (!pCache)
+    {
+        // An empty slot first, then the one used longest ago. A root whose search fails leaves its slot empty, and
+        // it fails again on every frame it is the current one; taking "longest ago" alone would hand it the good
+        // slot on its second frame.
+        if (!s_caches[0].pRoot)
+            pCache = &s_caches[0];
+        else if (!s_caches[1].pRoot)
+            pCache = &s_caches[1];
+        else
+            pCache = s_caches[0].UsedAt <= s_caches[1].UsedAt ? &s_caches[0] : &s_caches[1];
+    }
+    LocalCache& s_local = *pCache;
+    s_local.UsedAt = now;
+
+    const char* pWhy = nullptr;
+    if (!cKnownRoot)
+        pWhy = "this root node was not one of the two remembered";
+    else if (now >= s_local.RefreshAt)
+        pWhy = "ten minutes passed";
+    bool cached = pWhy == nullptr;
     for (uint32_t i = 0; cached && i < VRPose::kBoneCount; ++i)
         if (s_local.Nodes[i] && (*static_cast<void**>(s_local.Nodes[i]) != s_local.VTables[i] || GetName(s_local.Nodes[i]) != s_local.Names[i]))
+        {
             cached = false;
+            pWhy = *static_cast<void**>(s_local.Nodes[i]) != s_local.VTables[i] ? "a bone node became another kind of object" : "a bone node changed its name";
+        }
     if (!cached)
     {
         const auto cSearchStarted = std::chrono::steady_clock::now();
@@ -1965,15 +2006,22 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
             s_local.VTables[i] = nodes[i] ? *static_cast<void**>(nodes[i]) : nullptr;
             s_local.Names[i] = nodes[i] ? GetName(nodes[i]) : nullptr;
         }
-        s_local.RefreshAt = now + std::chrono::seconds(60);
+        s_local.RefreshAt = now + std::chrono::minutes(10);
 
         // Measured, so the next session says whether this was the 50 ms hitch.
         const auto cTookMs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - cSearchStarted).count() / 1000.0;
         static std::chrono::steady_clock::time_point s_nextSearchLog{};
+        static uint32_t s_searches = 0;
+        static double s_worstMs = 0.0;
+        ++s_searches;
+        s_worstMs = std::max(s_worstMs, cTookMs);
         if (now >= s_nextSearchLog)
         {
             s_nextSearchLog = now + std::chrono::seconds(60);
-            spdlog::info("VRBodySync: local skeleton searched in {:.1f} ms (cached for 60 s, or until a bone node changes)", cTookMs);
+            spdlog::info("VRBodySync: local skeleton searched in {:.1f} ms because {} ({} searches since the last report, worst {:.1f} ms; two roots are remembered, each for 10 min or until a bone node changes)",
+                         cTookMs, pWhy ? pWhy : "?", s_searches, s_worstMs);
+            s_searches = 0;
+            s_worstMs = 0.0;
         }
     }
     const BoneNodes& nodes = s_local.Nodes;

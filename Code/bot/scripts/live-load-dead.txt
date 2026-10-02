@@ -1,0 +1,29 @@
+# A load two seconds after the player was killed, inside the five seconds the mod waits before bringing them back.
+#
+#   python Tools\VR\live-check.py live-load-dead
+#
+# On 2026-10-02 this took the game down in the no-headset rig: skyrimvrtools.dll+0x71B5, reading controller data
+# through an invalid index, 14 ms after "Finished loading". The same address as the crash with no controllers at
+# all, so whether it is the fake controllers or the death is what this script is for. Last in the list: when it
+# crashes, nothing after it runs.
+log live load dead
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+wait 6
+log CHECK game inworld
+wait 3
+
+log -- killed, then a load two seconds later
+log DO console player.kill
+wait 2
+log DO load last
+wait 45
+log CHECK game alive
+log CHECK game inworld
+log CHECK player alive
+wait 3
+
+log done
+stop

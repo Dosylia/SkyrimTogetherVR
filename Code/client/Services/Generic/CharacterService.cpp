@@ -10,6 +10,7 @@
 #include <Services/InventoryService.h>
 #include <Services/DiscoveryService.h>
 #include <RecentDeletes.h>
+#include <unordered_set>
 #include <CopyRemovalPolicy.h>
 
 #include <Games/References.h>
@@ -88,6 +89,34 @@ namespace
 // this client goes away. Disable is saved with the reference, so a crash while a ghost is disabled leaves that one
 // spawn point disabled in the save made during the session; a small, known cost (2026-09-19).
 TiltedPhoques::Map<uint32_t, uint32_t> s_ghosts;
+
+// The temporary actors this client made itself -- copies of other players and of their creatures -- by form id.
+//
+// "Temporary and remote" used to be taken to mean exactly that, and it does not: an actor the game spawned on its
+// own (a summon, a random encounter, anything placed by a script) is temporary too, and becomes remote the moment
+// the server hands it to another player -- which it does during this player's load screens. When the cell then
+// unloads, the game disposes of its own actor and says so, and CancelServerAssignment disabled it in the middle of
+// that as if it were a copy of ours. 25 ms later the game's movement code ran on it and crashed
+// (SkyrimVR.exe+0x714EB2, twice out of twice on 2026-10-01 with a Seeker placed by console, a bot in range and one
+// trip through a load door; the crash report shows the actor already marked deleted by the game, which this client
+// never does on that path). Only what is in this set is this client's to disable or delete.
+//
+// An id has to leave this set the moment its copy stops being ours, at every place that happens, because the game
+// hands a deleted actor's form id to the next actor it makes. Three places deleted copies without saying so here
+// (a removal ordered by the server, the clean-up on connect, the other players' copies on disconnect), and on
+// 2026-10-02 `live-temp-reuse` got the crash back with them: the bot left, its copy FF0008E4 was deleted, the game
+// gave FF0008E4 to a Seeker placed by console ten seconds later, and when the player walked away the client took
+// that Seeker for its copy and disabled it -- SkyrimVR.exe+0x714EB2 again, 256 ms later, the Seeker in R15. A third
+// Seeker in the same run, with an id never used for a copy, was left to the game and did nothing. When in doubt an
+// id is taken out: a copy mistaken for the game's is left standing, the other mistake is the crash.
+std::unordered_set<uint32_t> s_ownCopies;
+
+Actor* RememberOwnCopy(Actor* apActor) noexcept
+{
+    if (apActor)
+        s_ownCopies.insert(apActor->formID);
+    return apActor;
+}
 
 struct BaseMatch
 {
@@ -171,7 +200,7 @@ void MarkForeignGraph(World& aWorld, const entt::entity aEntity, Actor* apActor,
 // adopts the local creature as before.
 Actor* StandInForForeignCreature(Actor* apLocal, TESNPC* apOwnerBase) noexcept
 {
-    Actor* pCopy = Actor::Create(apOwnerBase);
+    Actor* pCopy = RememberOwnCopy(Actor::Create(apOwnerBase));
     if (!pCopy)
     {
         spdlog::warn("Ghost: could not create a copy of {:X} for reference {:X}, adopting the local creature instead", apOwnerBase->formID, apLocal->formID);
@@ -283,6 +312,7 @@ void FreeCopy(Actor* apActor, const uint32_t aFormId, const char* acpWhy) noexce
     // reader -- and session-report.py -- that a line can be trusted to mean what it says.
     spdlog::info("Temporary Remote Deleted {:X}: {}", aFormId, acpWhy);
     apActor->Delete();
+    s_ownCopies.erase(aFormId); // the game may give this id to an actor of its own next
 }
 
 void RunWaitingCopies() noexcept
@@ -303,7 +333,10 @@ void RunWaitingCopies() noexcept
     {
         Actor* pActor = Cast<Actor>(TESForm::GetById(waiting.FormId));
         if (!pActor || pActor->IsDeleted() || !pActor->IsTemporary())
+        {
+            s_ownCopies.erase(waiting.FormId);
             continue; // gone already, which is the outcome we wanted
+        }
 
         const auto waitedMs = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now - waiting.QueuedAt).count());
         const bool overBound = stillWaiting.size() >= CopyRemovalPolicy::kMaxWaiting;
@@ -507,7 +540,10 @@ void CharacterService::DeleteTempActor(const uint32_t aFormId) noexcept
     Actor* pActor = Cast<Actor>(TESForm::GetById(aFormId));
     if (pActor && ((pActor->formID & 0xFF000000) == 0xFF000000))
     {
+        const uint32_t refWord = static_cast<uint32_t>(pActor->handleRefObject.refCount);
+        RecentDeletes::Record(pActor, aFormId, refWord & 0x3FF, refWord, RecentDeletes::kOnServersWord);
         pActor->Delete();
+        s_ownCopies.erase(aFormId); // the game may give this id to an actor of its own next
         spdlog::info("\tDeleted actor {:X}", aFormId);
         ReleaseGhostOf(aFormId);
     }
@@ -654,7 +690,12 @@ void CharacterService::OnConnected(const ConnectedEvent& acConnectedEvent) const
         {
             Actor* pActor = Cast<Actor>(TESForm::GetById(formIdComponent.Id));
             if (pActor)
+            {
+                const uint32_t refWord = static_cast<uint32_t>(pActor->handleRefObject.refCount);
+                RecentDeletes::Record(pActor, formIdComponent.Id, refWord & 0x3FF, refWord, RecentDeletes::kOnConnect);
                 pActor->Delete();
+            }
+            s_ownCopies.erase(formIdComponent.Id);
 
             continue;
         }
@@ -694,10 +735,18 @@ void CharacterService::OnDisconnected(const DisconnectedEvent& acDisconnectedEve
             continue;
 
         if (pExtension->IsRemotePlayer())
+        {
+            const uint32_t refWord = static_cast<uint32_t>(pActor->handleRefObject.refCount);
+            RecentDeletes::Record(pActor, formIdComponent.Id, refWord & 0x3FF, refWord, RecentDeletes::kOnDisconnect);
             pActor->Delete();
+        }
         else
             pExtension->SetRemote(false);
     }
+
+    // The players' copies are deleted and every other copy has just been handed to the game: none of them is this
+    // client's to disable or delete any more, and their ids will be given out again. See s_ownCopies.
+    s_ownCopies.clear();
 
     m_world.clear<WaitingForAssignmentComponent, LocalComponent, RemoteComponent>();
 
@@ -1039,7 +1088,7 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
             FaceGenSystem::Setup(m_world, *entity, acMessage.FaceTints);
         }
 
-        pActor = Actor::Create(pNpc);
+        pActor = RememberOwnCopy(Actor::Create(pNpc));
     }
     else
     {
@@ -1064,7 +1113,7 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
             // between 14:49 and 14:51 on 2026-09-20 while "something invisible" attacked. A copy of the owner's base
             // stands in, registered as a ghost so the local reference is disabled if it turns up later.
             TESNPC* pOwnerBase = acMessage.BaseId != GameId{} ? Cast<TESNPC>(TESForm::GetById(World::Get().GetModSystem().GetGameId(acMessage.BaseId))) : nullptr;
-            Actor* pCopy = pOwnerBase ? Actor::Create(pOwnerBase) : nullptr;
+            Actor* pCopy = pOwnerBase ? RememberOwnCopy(Actor::Create(pOwnerBase)) : nullptr;
             if (!pCopy)
             {
                 spdlog::error("Failed to retrieve Actor {:X}, it will not be spawned, possibly missing mod", cActorId);
@@ -2018,7 +2067,18 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
 
         if (pActor)
         {
-            if (pActor->IsTemporary() && !IsProcessExiting())
+            if (pActor->IsTemporary() && !IsProcessExiting() && s_ownCopies.find(aFormId) == s_ownCopies.end())
+            {
+                // The game's own temporary actor, which only became remote because the server gave it to somebody
+                // else. The game is disposing of it right now and will finish; all that is ours here is the record
+                // of it. See s_ownCopies.
+                spdlog::info("Temporary remote {:X} was made by the game, not by this client; left to the game (form flags {:X})", aFormId, pActor->flags);
+                const uint32_t refWord = static_cast<uint32_t>(pActor->handleRefObject.refCount);
+                RecentDeletes::Record(pActor, aFormId, refWord & 0x3FF, refWord, RecentDeletes::kLeftToGame);
+                if (ActorExtension* pExtension = pActor->GetExtension())
+                    pExtension->SetRemote(false);
+            }
+            else if (pActor->IsTemporary() && !IsProcessExiting())
             {
                 // Deleted on a later frame, not here.
                 //
@@ -2110,6 +2170,7 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
                 }
 
                 pActor->Delete();
+                s_ownCopies.erase(aFormId);
                 ReleaseGhostOf(aFormId);
 
                 // This is a decision taken here, not one the server asked for: the reference went away because a
@@ -2129,6 +2190,11 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
 
         return;
     }
+
+    // Not remote: if this was a copy of ours, it has since been given to this client to run, and the game is
+    // letting go of it like any actor of its own. It is not deleted here, so its id must not stay in the list of
+    // copies that are. See s_ownCopies.
+    s_ownCopies.erase(aFormId);
 
     // Keep the cookie until the server response arrives so awarded ownership can be relinquished.
     if (m_world.all_of<WaitingForAssignmentComponent>(aEntity))
@@ -2224,7 +2290,7 @@ Actor* CharacterService::CreateCharacterForEntity(entt::entity aEntity) const no
             FaceGenSystem::Setup(m_world, aEntity, acMessage.FaceTints);
         }
 
-        pActor = Actor::Create(pNpc);
+        pActor = RememberOwnCopy(Actor::Create(pNpc));
     }
 
     auto& remoteComponent = m_world.get<RemoteComponent>(aEntity);
@@ -2770,7 +2836,16 @@ void CharacterService::RunRemotePlayerDiag() noexcept
         // timing out. A diagnostic that destabilises the thing it is watching is worse than no diagnostic, so the
         // measuring runs every 30 s and the cheap corrective pass above -- which is what actually puts an
         // invisible copy right -- keeps its five.
-        if (now < s_nextBody)
+        //
+        // Thirty seconds was still a stall of 17 to 34 ms every thirty seconds for as long as another player is near
+        // -- thirteen "Mod update took ..." warnings naming this function in seventeen minutes on 2026-10-01, two or
+        // three dropped frames each at 90 Hz. Each copy is now measured once when it is first seen, which is the
+        // sample that says how it arrived, and after that every five minutes.
+        static std::unordered_set<uint32_t> s_measuredOnce;
+        if (s_measuredOnce.size() > 256)
+            s_measuredOnce.clear();
+        const bool cFirstSight = s_measuredOnce.insert(pActor->formID).second;
+        if (!cFirstSight && now < s_nextBody)
             continue;
 
         spdlog::info("CopyDiag: player copy {:X} '{}' {:.0f} units away, dz {:.0f}, form flags {:X}, health {:.0f}, dead {}, bleedout {}, state1 {:X}, invisibility {:.2f}, {}", pActor->formID,
@@ -2780,7 +2855,7 @@ void CharacterService::RunRemotePlayerDiag() noexcept
     }
 
     if (measured)
-        s_nextBody = now + 30s;
+        s_nextBody = now + 5min;
 }
 #else
 void CharacterService::RunRemotePlayerDiag() noexcept {}

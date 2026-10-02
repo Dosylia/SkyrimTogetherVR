@@ -2,8 +2,9 @@
 
 #include <cstdint>
 
-// VR addresses for ids missing from the official VR Address Library CSV, merged in by
-// VersionDb::LoadCSV(). The CSV always wins; an entry here is only used when its id is not in it.
+// VR addresses for the ids this client looks up that the official VR Address Library CSV does not answer, merged
+// in by VersionDb::LoadCSV(). An entry here wins over the CSV: most keys are AE ids, and a CSV row with the same
+// number is an SE id for some other function. A disagreement is logged at start-up ("Address id ... differs").
 //
 // Keys are the ids the client code looks up on VR (the last POINTER_SKYRIMSE argument). Most are
 // AE ids that were never translated, mapped to the address of the matching SE/VR function.

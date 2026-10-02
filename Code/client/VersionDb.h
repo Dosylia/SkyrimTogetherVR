@@ -5,6 +5,7 @@
 #include <map>
 #include <stdio.h>
 #include <sstream>
+#include <vector>
 
 #ifdef SKYRIMVR
 #include "VRAddressOverrides.h"
@@ -20,9 +21,19 @@ public:
 
     static VersionDb& Get();
 
+    //! An id both the VR Address Library and our own table answer, differently. Ours is used; see LoadCSV.
+    struct OverrideConflict
+    {
+        unsigned long long Id;
+        unsigned long long Ours;
+        unsigned long long Library;
+    };
+    const std::vector<OverrideConflict>& GetOverrideConflicts() const { return _overrideConflicts; }
+
 private:
     std::map<unsigned long long, unsigned long long> _data;
     std::map<unsigned long long, unsigned long long> _rdata;
+    std::vector<OverrideConflict> _overrideConflicts;
     int _ver[4];
     std::string _verStr;
     std::string _moduleName;
@@ -407,13 +418,21 @@ public:
         }
 
 #ifdef SKYRIMVR
+        // Our own table wins where the two disagree. Its keys are the ids this client looks up, and most are AE
+        // ids that were never translated -- so when the library has the same number, that is an SE id and a
+        // different function. It used to be the other way round ("the CSV always wins"), which held only as long as
+        // the library never grew into one of our numbers: 0.158.0 did not have 35269, 0.275.0 does, and with it the
+        // dialogue-option hook would have been installed on an unrelated function without a word (found
+        // 2026-10-01, before it shipped). A disagreement is kept, and logged once there is a log to write to.
+        _overrideConflicts.clear();
         for (const auto& entry : kVRAddressOverrides)
         {
-            if (_data.find(entry.id) == _data.end())
-            {
-                _data[entry.id] = entry.offset;
-                _rdata[entry.offset] = entry.id;
-            }
+            const auto existing = _data.find(entry.id);
+            if (existing != _data.end() && existing->second != entry.offset)
+                _overrideConflicts.push_back({entry.id, entry.offset, existing->second});
+
+            _data[entry.id] = entry.offset;
+            _rdata[entry.offset] = entry.id;
         }
 #endif
 

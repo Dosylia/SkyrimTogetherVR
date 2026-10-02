@@ -1,0 +1,98 @@
+# A remote player's whole life, against a real game with nobody in the headset: Tools\VR\live-check.py runs this
+# bot and, at every "CHECK" line, asks the game itself (through DevBench) what its copy of this bot looks like.
+#
+#   python Tools\VR\live-check.py live-copy
+#
+# Each wait before a CHECK is the time the game gets to apply what was sent. The checks are the driver's; this file
+# only says when to look and what should be true.
+log live copy
+waitfor connected 45
+collect spawn health death
+record live copy
+expect known me
+waitfor known other 40
+health 100
+wait 8
+
+log CHECK copy exists
+log CHECK copy 3d
+log CHECK copy alive
+log CHECK copy health 100
+# The driver asks the game at each CHECK while this script carries on, so every group is followed by a wait: without
+# it the next change is already there by the time the last question is asked (the first run read 60 for "health 100").
+wait 3
+
+log -- hurt to 60
+health 60
+wait 5
+log CHECK copy health 60
+wait 3
+
+# By design a player's copy is never killed here ("Players should never be killed", ActorValueService::
+# OnDeathStateChange) and its health is floored at 25 ("a copy never goes down"). So a dead player is a standing
+# copy at 25 health on the other screen -- the open VR_TODO item about showing "X is down". These two checks say
+# that this is still what happens; they are not a statement that it is what should happen.
+log -- dying
+die
+wait 6
+log CHECK copy alive
+log CHECK copy health 25
+wait 3
+
+log -- back up
+respawn
+wait 7
+log CHECK copy alive
+log CHECK copy health 100
+wait 3
+
+log -- walking five cells away and losing health out there, where it cannot be sent
+walk rel 20000 0 3000
+wait 6
+health 55
+wait 4
+walk rel -20000 0 3000
+wait 9
+log CHECK copy exists
+log CHECK copy health 55
+wait 3
+
+log -- walking away again and dying out there
+walk rel 20000 0 3000
+wait 6
+die
+wait 4
+walk rel -20000 0 3000
+wait 9
+log CHECK copy exists
+log CHECK copy alive
+log CHECK copy health 25
+wait 3
+
+log -- back up for the last part
+respawn
+wait 7
+log CHECK copy alive
+log CHECK copy health 100
+wait 3
+
+log -- hitting the player for 30, as a sword does
+log CHECK player mark
+wait 1
+hit other -30
+wait 2
+log CHECK player dropped 30
+wait 2
+
+log -- burning the player, 8 a second for 3 seconds, as flames do
+log CHECK player mark
+wait 1
+burn other 8 3
+wait 2
+log CHECK player dropped 24
+wait 2
+
+record off
+report bot-live-copy.txt
+log done
+stop

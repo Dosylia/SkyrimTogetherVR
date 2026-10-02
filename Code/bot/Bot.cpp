@@ -48,6 +48,7 @@
 
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <regex>
 #include <thread>
@@ -363,7 +364,7 @@ void Bot::Tick() noexcept
                 SendCellEntry();
             }
         }
-        if (now - m_lastMovement >= kMovementPeriod)
+        if (!m_replaying && now - m_lastMovement >= kMovementPeriod)
             SendMovement();
         if (m_healthRestorePending && now >= m_healthRestoreAt)
         {
@@ -390,6 +391,7 @@ void Bot::SendAuthentication() noexcept
     request.MO2Active = false;
     request.Token = m_options.Password.c_str();
     request.Version = BUILD_COMMIT;
+    request.Protocol = BUILD_PROTOCOL;
     request.Username = m_options.Name.c_str();
     request.Level = 1;
 
@@ -742,7 +744,7 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
                               : message.Type == RT::kWrongPassword      ? "wrong password"
                               : message.Type == RT::kServerFull         ? "server full"
                                                                         : "?";
-            spdlog::error("Refused: {}. Server version '{}', ours '{}'", why, message.Version.c_str(), BUILD_COMMIT);
+            spdlog::error("Refused: {}. Server version '{}', ours '{}' (protocol {})", why, message.Version.c_str(), BUILD_COMMIT, BUILD_PROTOCOL);
             m_phase = Phase::Stopped;
             Close();
             return;
@@ -810,6 +812,7 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
             const auto health = message.InitialActorValues.ActorValuesList.find(kHealth);
             KnownActor& actor = Actor(message.ServerId);
             actor.IsPlayer = false;
+            actor.Base = message.BaseId;
             actor.Health = health != message.InitialActorValues.ActorValuesList.end() ? health->second : 0.f;
             actor.HealthKnown = health != message.InitialActorValues.ActorValuesList.end();
             actor.Dead = message.IsDead;
@@ -875,7 +878,7 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         }
 
         const KnownPlayer* pHost = Host();
-        if (pHost && pHost->PlayerId == message.PlayerId && !m_options.Standalone)
+        if (pHost && pHost->PlayerId == message.PlayerId && !m_options.Standalone && m_followHostCell)
             FollowHostIntoCell(message.CellId, message.WorldSpaceId);
         return;
     }
@@ -930,6 +933,9 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         const auto& message = static_cast<const ServerReferencesMoveRequest&>(acMessage);
         for (const auto& entry : message.Updates)
         {
+            if (m_capturing && entry.first == m_captureId)
+                m_capture.push_back({static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - m_captureStart).count()), entry.second});
+
             if (KnownPlayer* pPlayer = FindPlayerCharacter(entry.first))
             {
                 pPlayer->Position = FromNet(entry.second.UpdatedMovement.Position);
@@ -1316,6 +1322,183 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return true;
     }
 
+    // "capture <who> <seconds>" records the movement stream the server relays for one character: "other" (the first
+    // other player), "npc" (the first NPC this bot has a copy of) or a hex server id. Kept in memory for "replay".
+    if (name == "capture")
+    {
+        const float seconds = (!args.empty() && args[0] == "base") ? arg(2, 10.f) : arg(1, 10.f);
+        if (aFirstTick)
+        {
+            m_captureId = kNoId;
+            m_captureBase = GameId{};
+            if (!args.empty() && args[0] == "other")
+            {
+                for (const auto& player : m_players)
+                    if (player.ServerId != m_serverId)
+                    {
+                        m_captureId = player.ServerId;
+                        break;
+                    }
+            }
+            else if (!args.empty() && args[0] == "npc")
+            {
+                for (const auto& actor : m_actors)
+                    if (!actor.IsPlayer && !actor.OwnedByUs && actor.ServerId != m_serverId)
+                    {
+                        m_captureId = actor.ServerId;
+                        break;
+                    }
+            }
+            else if (args.size() >= 2 && args[0] == "base")
+            {
+                // "capture base <hex> <seconds>": the newest copy of that kind of creature. A real game hands over
+                // every animal in the neighbourhood, so "the first NPC" is a rabbit more often than not.
+                const uint32_t wanted = static_cast<uint32_t>(std::strtoul(args[1].c_str(), nullptr, 16)) & 0x00FFFFFF;
+                for (const auto& actor : m_actors)
+                    if (!actor.IsPlayer && !actor.OwnedByUs && (actor.Base.BaseId & 0x00FFFFFF) == wanted)
+                        m_captureId = actor.ServerId;
+            }
+            else if (!args.empty())
+                m_captureId = static_cast<uint32_t>(std::strtoul(args[0].c_str(), nullptr, 16));
+
+            if (m_captureId == kNoId)
+            {
+                spdlog::warn("Line {}: nobody to capture", acCommand.Line);
+                return true;
+            }
+            for (const auto& actor : m_actors)
+                if (actor.ServerId == m_captureId)
+                    m_captureBase = actor.Base;
+            m_capture.clear();
+            m_captureStart = now;
+            m_capturing = true;
+            spdlog::info("Capturing the movement of {:X} for {:.0f} s", m_captureId, seconds);
+        }
+        if (m_captureId == kNoId)
+            return true;
+        if (Seconds(now - m_captureStart) < seconds)
+            return false;
+
+        m_capturing = false;
+        size_t withVariables = 0, actions = 0, withPose = 0;
+        float travelled = 0.f;
+        for (size_t i = 0; i < m_capture.size(); ++i)
+        {
+            const auto& update = m_capture[i].Update;
+            const auto& variables = update.UpdatedMovement.Variables;
+            if (!variables.Booleans.empty() || !variables.Integers.empty() || !variables.Floats.empty())
+                ++withVariables;
+            actions += update.ActionEvents.size();
+            if (update.UpdatedVRPose != VRPose{})
+                ++withPose;
+            if (i > 0)
+                travelled += glm::distance(FromNet(update.UpdatedMovement.Position), FromNet(m_capture[i - 1].Update.UpdatedMovement.Position));
+        }
+        spdlog::info("Captured {} updates of {:X}: {} with animation variables, {} actions, {} with a VR pose, {:.0f} units travelled", m_capture.size(), m_captureId, withVariables,
+                     actions, withPose, travelled);
+
+        // Which actions, by name. One actor repeating one event hundreds of times is what fills a stream and starves
+        // everything behind it (the "Unequip loop" of 2026-09-24); a Netch sent 1521 actions in twelve seconds on
+        // 2026-10-02, and a count alone does not say of what.
+        if (actions > 0)
+        {
+            std::map<std::string, size_t> byName;
+            for (const auto& captured : m_capture)
+                for (const auto& action : captured.Update.ActionEvents)
+                    ++byName[action.EventName.empty() ? fmt::format("(no name, action {:X}, idle {:X})", action.ActionId, action.IdleId) : std::string(action.EventName.c_str())];
+            std::vector<std::pair<std::string, size_t>> sorted(byName.begin(), byName.end());
+            std::sort(sorted.begin(), sorted.end(), [](const auto& acLeft, const auto& acRight) { return acLeft.second > acRight.second; });
+            std::string summary;
+            for (size_t i = 0; i < sorted.size() && i < 6; ++i)
+                summary += fmt::format("{}{} x{}", i ? ", " : "", sorted[i].first, sorted[i].second);
+            spdlog::info("Captured actions of {:X}: {} different, most frequent: {}", m_captureId, sorted.size(), summary);
+        }
+        return true;
+    }
+
+    // "replay [me|npc] [times]" sends the captured stream back as this bot's own character, or as the NPC it owns,
+    // at the pace it arrived and starting from where that body stands now.
+    if (name == "replay")
+    {
+        const bool asNpc = !args.empty() && args[0] == "npc";
+        const int times = std::max(1, static_cast<int>(arg(1, 1.f)));
+        if (aFirstTick)
+        {
+            m_replayTarget = kNoId;
+            if (asNpc)
+            {
+                for (const auto& actor : m_actors)
+                    if (actor.OwnedByUs && !actor.IsPlayer && actor.ServerId != m_serverId)
+                        m_replayTarget = actor.ServerId;
+            }
+            else if (m_hasCharacter)
+                m_replayTarget = m_serverId;
+
+            if (m_replayTarget == kNoId || m_capture.empty())
+            {
+                spdlog::warn("Line {}: nothing to replay ({} updates captured, {})", acCommand.Line, m_capture.size(), m_replayTarget == kNoId ? "no body to play them on" : "body found");
+                m_replayTarget = kNoId;
+                return true;
+            }
+            m_replayBase = asNpc ? m_npcPosition : m_position;
+            m_replayIndex = 0;
+            m_replayRound = 0;
+            m_replaying = !asNpc; // the bot's own heartbeat would drag its character back between two updates
+            spdlog::info("Replaying {} updates as {:X}, {} time(s), from ({:.0f}, {:.0f}, {:.0f})", m_capture.size(), m_replayTarget, times, m_replayBase.x, m_replayBase.y, m_replayBase.z);
+        }
+        if (m_replayTarget == kNoId)
+            return true;
+
+        const glm::vec3 origin = FromNet(m_capture.front().Update.UpdatedMovement.Position);
+        const uint32_t length = m_capture.back().AtMs + 100;
+        const auto elapsed = static_cast<uint32_t>(Seconds(now - m_commandStart) * 1000.f);
+        while (m_replayRound < times)
+        {
+            const uint32_t roundStart = static_cast<uint32_t>(m_replayRound) * length;
+            if (m_replayIndex >= m_capture.size())
+            {
+                // Each round carries on from where the last one ended, so a walk repeated is a longer walk.
+                m_replayBase += FromNet(m_capture.back().Update.UpdatedMovement.Position) - origin;
+                m_replayIndex = 0;
+                ++m_replayRound;
+                continue;
+            }
+            const CapturedUpdate& captured = m_capture[m_replayIndex];
+            if (roundStart + captured.AtMs > elapsed)
+                break;
+
+            ClientReferencesMoveRequest message{};
+            message.Tick = GetClock().GetCurrentTick();
+            ReferenceUpdate& update = message.Updates[m_replayTarget];
+            update = captured.Update;
+            const glm::vec3 place = m_replayBase + (FromNet(captured.Update.UpdatedMovement.Position) - origin);
+            update.UpdatedMovement.Position = ToNet(place);
+            update.UpdatedMovement.CellId = m_cell;
+            update.UpdatedMovement.WorldSpaceId = m_worldSpace;
+            for (auto& action : update.ActionEvents)
+            {
+                action.ActorId = m_replayTarget;
+                action.Tick = message.Tick;
+            }
+            SendMsg(message);
+
+            if (!asNpc)
+            {
+                m_position = place;
+                m_lastMovement = now;
+            }
+            else
+                m_npcPosition = place;
+            ++m_replayIndex;
+        }
+        if (m_replayRound < times)
+            return false;
+
+        m_replaying = false;
+        spdlog::info("Replay finished at ({:.0f}, {:.0f}, {:.0f})", asNpc ? m_npcPosition.x : m_position.x, asNpc ? m_npcPosition.y : m_position.y, asNpc ? m_npcPosition.z : m_position.z);
+        return true;
+    }
+
     // "burn <who> <dps> <seconds>" hurts somebody else the way a concentration spell does. A sword hit is one change
     // of many points; flames take a fraction of a point a frame, which ActorValueService::OnHealthChange does not send
     // one by one -- anything under a point is added up per actor and sent every 250 ms by RunSmallHealthUpdates. So
@@ -1569,6 +1752,15 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return true;
     }
 
+    // Stop going where the host goes. A bot follows the host through every load door, which is what most tests
+    // want; the ones about what is left behind when a player walks away need somebody to stay behind.
+    if (name == "stay")
+    {
+        m_followHostCell = false;
+        spdlog::info("[script] staying in this cell from here on, wherever the host goes");
+        return true;
+    }
+
     // Register an NPC owned by this bot.
     //
     // Two headless bots have nothing between them but their own two player characters, and those can never
@@ -1583,7 +1775,25 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
             return true;
         }
 
-        const uint32_t baseId = static_cast<uint32_t>(std::strtoul(args[0].c_str(), nullptr, 16)) & 0x00FFFFFF;
+        // "npc temp <base>" registers a temporary actor made from a base NPC, the way the game reports a creature it
+        // spawned itself: a reference id in the temporary range and the base in FormId. A real client on the other
+        // side then builds a new actor from that base, instead of taking over a reference that already exists in its
+        // world -- "npc A2C94" is Lydia's own reference, which is fine between two bots and not in somebody's game.
+        // "npc captured" registers a temporary creature of the kind last captured, under the base form id the server
+        // sent for it -- the only way this bot can name a form from a plugin other than Skyrim.esm.
+        const bool captured = args[0] == "captured";
+        if (captured && !m_captureBase)
+        {
+            spdlog::error("[script] npc captured: nothing has been captured, or what was captured had no base form");
+            return true;
+        }
+        const bool temporary = captured || args[0] == "temp";
+        if (temporary && !captured && args.size() < 2)
+        {
+            spdlog::error("[script] npc temp needs a hex base form id, e.g. 'npc temp A91A0'");
+            return true;
+        }
+        const uint32_t baseId = captured ? m_captureBase.BaseId : static_cast<uint32_t>(std::strtoul(args[temporary ? 1 : 0].c_str(), nullptr, 16)) & 0x00FFFFFF;
         if (baseId == 0x14)
         {
             spdlog::error("[script] npc 14 is the player and can never change hands; pick another form");
@@ -1595,8 +1805,8 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
 
         AssignCharacterRequest request{};
         request.Cookie = m_npcCookie;
-        request.ReferenceId = GameId(m_skyrimModId, baseId);
-        request.FormId = GameId(m_skyrimModId, baseId);
+        request.ReferenceId = temporary ? GameId(std::numeric_limits<uint32_t>::max(), 0xFF000000u | (m_npcCookie & 0x00FFFFFFu)) : GameId(m_skyrimModId, baseId);
+        request.FormId = captured ? m_captureBase : GameId(m_skyrimModId, baseId);
         request.CellId = m_cell;
         request.WorldSpaceId = m_worldSpace;
         request.Position = ToNet(m_position);
@@ -1605,6 +1815,7 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         request.CurrentActorData.InitialActorValues.ActorMaxValuesList[kHealth] = 100.f;
         request.CurrentActorData.IsDead = false;
         SendMsg(request);
+        m_npcPosition = m_position;
 
         spdlog::info("[script] asked the server to register NPC {:X}:{:X}", m_skyrimModId, baseId);
         return true;

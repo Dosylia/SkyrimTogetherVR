@@ -1,0 +1,47 @@
+# Losing the server and going back in, with temporary actors standing around: one the game made, one this client
+# made as a copy.
+#
+#   python Tools\VR\live-check.py live-temp-reconnect
+#
+# Two of the places where the client deletes temporary actors. On disconnect it deletes the other players' copies
+# and hands every other remote actor back to the game (CharacterService::OnDisconnected). On connect it deletes
+# every temporary actor it knows of, whoever made it (CharacterService::OnConnected, "delete all temporary actors
+# on connect"). A dropped connection is ordinary in a real session, and a summon or a quest spawn standing next to
+# the player at that moment is ordinary too.
+#
+# The checks are that the game is still there and in the world after it has gone back in.
+log live temp reconnect
+waitfor connected 45
+collect spawn ownership
+expect known me
+waitfor known other 40
+wait 5
+
+log -- a bear of this bot's: the game makes a copy of it
+npc temp 23A8A
+waitfor owned == 1 20
+wait 8
+log CHECK npc exists
+wait 3
+
+log -- and a creature the game spawns itself, next to the player
+log DO console player.placeatme 0201EEC9 1
+wait 10
+
+# From here the driver keeps the time ("DO sleep"): this bot loses the server as well, and its own waits run out
+# while the driver is still waiting for the game to go back in.
+log -- the server goes away and comes back
+log DO server restart
+log DO sleep 20
+log CHECK game alive
+log CHECK game inworld
+
+log -- and once more, with whatever the first time left behind
+log DO console player.placeatme 0201EEC9 1
+log DO sleep 10
+log DO server restart
+log DO sleep 20
+log CHECK game alive
+log CHECK game inworld
+log done
+stop

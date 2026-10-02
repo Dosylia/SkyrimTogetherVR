@@ -21,7 +21,7 @@ DEFAULT_LOG = r'E:\FUS\tools\Skyrim Together VR\logs\tp_client.log'
 # What each shipped fix writes when it fires, and what its absence means. The wording matters: "did not fire" is
 # not the same as "is broken", and several of these only fire when the player does the thing.
 CHECKS = [
-    ('Corpse dragging, sending',   r'is being moved here',
+    ('Corpse dragging, sending',   r'VRBodySync: body [0-9A-F]+ is being moved here',
      'you dragged a dead body and its bones went out'),
     ('Corpse dragging, receiving', r'posing body [0-9A-F]+ from its owner',
      'you saw a body the other player was moving'),
@@ -49,6 +49,34 @@ CHECKS = [
      'an NPC you both hit turned on the other player too'),
     ('Wrong-spell fallback',       r'did not resolve here; falling back',
      'a spell id could not be resolved and the staged one was used'),
+    # Since 2026-09-30: items on the floor.
+    ('Item you dropped, shared',   r'DroppedItem: dropped [0-9A-F]+:[0-9A-F]+ x\d+ as',
+     'you dropped something and the server was told where it lies'),
+    ('Item placed for you',        r'DroppedItem: placed \d+',
+     'something the other player dropped was put on your floor'),
+    ('Item adopted, not doubled',  r'DroppedItem: \d+ (is our own|was already lying here)',
+     'an item your save already had was matched instead of being placed a second time'),
+    ('Item picked up, yours',      r'DroppedItem: picked up \d+',
+     'you picked up a shared item and everyone was told'),
+    ('Item picked up elsewhere',   r'was picked up elsewhere; removed',
+     'the other player picked one up and it left your floor'),
+    ('Item moved by you',          r'DroppedItem: \d+ \([0-9A-F]+\) is being moved here',
+     'you carried, kicked or threw a shared item and its movement went out'),
+    ('Item followed',              r'is being moved over there; holding it here and following',
+     'you saw a shared item the other player was moving'),
+    ('Item put where it was left', r'was moved while we were away',
+     'an item moved in your absence was put where it had been left'),
+    ('Earlier drops announced',    r"the player's dropped-item list holds",
+     'items you dropped in earlier sessions were found and offered to the server'),
+    # Since 2026-10-01.
+    ('Game-made actor left alone', r'was made by the game, not by this client',
+     'a creature the game spawned itself was removed without this client touching it (the load-door crash)'),
+    ('Stale cached copy caught',   r'no longer resolves to a live object',
+     'a copy whose memory had been freed was noticed before it was used (the crash of 2026-09-30)'),
+    ('Respawned by the mod',       r'PlayerService: respawn done',
+     'you went down while connected and were brought back'),
+    ('Creature captured',          r'CaptureUnmatchedBehaviour: wrote',
+     'a creature with no animation data was met; its folder is in logs\\behaviours, ready to become a replacer'),
 ]
 
 # The questions this week's measurements were shipped to answer. Presence alone is not an answer for any of them,
@@ -73,6 +101,11 @@ MEASURED = [
     ('Copies claimed at removal', r'DeleteClaim: deleting'),
     ('Copies held back', r'Temporary Remote Held'),
     ('Copies let go naturally', r'Temporary Remote Deleted \w+: the game let go'),
+    ('Deaths not applied', r'Death sync: .* arrived and was not applied'),
+    ('Bodies not posed', r'not posed this time'),
+    ('Local skeleton search', r'local skeleton searched in'),
+    ('Slow mod updates', r'Mod update took'),
+    ('Address ids that differ', r'Address id \d+ differs'),
 ]
 
 PROBLEMS = [
@@ -83,6 +116,9 @@ PROBLEMS = [
     ('Local VR pose unreadable',   r'could not read the local VR pose'),
     ('Starved interpolation',      r'updates had no future point'),
     ('Copy freed while still held', r'CopyFreedHeld:'),
+    ('Item placed but no reference', r'DroppedItem: placing \d+ .* produced no reference'),
+    ('Item this game does not have', r'which this game does not have'),
+    ('Item 3D rebuilt on a move',  r'rebuilt its 3D'),
 ]
 
 COPY_WORDS = re.compile(r"copy words \[([^\]]*)\].*player words \[([^\]]*)\]")
@@ -113,6 +149,10 @@ SILENCE = re.compile(r'Silence: sent nothing for (\d+) ms; menus \[([^\]]*)\]')
 OBJECT_MOVE = re.compile(r'ObjectMove: ([0-9A-F]+) moved ([0-9.]+) units')
 JUMP = re.compile(r'JumpDiag: a buffered point was ([0-9.]+) units from the one before it, at \(([-0-9.]+), ([-0-9.]+), ([-0-9.]+)\).*?(\d+) since')
 BACKLOG = re.compile(r'newest buffered tick (-?\d+) to (-?\d+) ms ahead of playback, (\d+) updates had no future point')
+SLOW_UPDATE = re.compile(r'Mod update took ([0-9.]+) ms, slowest section ([A-Za-z:]+)')
+SKELETON_SEARCH = re.compile(r'local skeleton searched in ([0-9.]+) ms')
+NOT_POSED = re.compile(r'not posed this time: (.+?) \(')
+DEATH_UNAPPLIED = re.compile(r'arrived and was not applied: (.+)$')
 BODY_GRAB = re.compile(r'BodyGrabDiag: remote body ([0-9A-F]+) has been moving here for (\d+) ms, ([0-9.]+) units')
 
 # The copy-removal path, which is what four failed attempts and one confirmed use-after-free were about.
@@ -246,8 +286,10 @@ def analyse(lines):
         moves = sum(s[1] for s in slides)
         share = (100.0 * frozen / moves) if moves else 0.0
         verdict = ('bodies are walking as they should' if share < 5 else
-                   'this is the sliding: a body translating while the variables that drive its legs do not change')
-        out.append(('Sliding', '%d of %d moves (%.1f%%) came with unchanged animation variables. %s' % (frozen, moves, share, verdict)))
+                   'this is the sliding: a body translating while the variables that drive its legs say nothing')
+        # Builds before 2026-10-02 counted any unchanged set, which is also true of a steady run; from that build on
+        # the set must also be empty of any non-zero value. A high share from an older build may be a false alarm.
+        out.append(('Sliding', '%d of %d moves (%.1f%%) came with animation variables that had not changed. %s' % (frozen, moves, share, verdict)))
 
     jumps = [(float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4)), int(m.group(5))) for m in (JUMP.search(l) for l in lines) if m]
     if jumps:
@@ -263,6 +305,33 @@ def analyse(lines):
         out.append(('A body handled here',
                     '%d reports, longest continuous movement %d ms, across %d bodies. A claim rule has to tell this apart from a settling ragdoll.'
                     % (len(grabs), longest, len(set(g[0] for g in grabs)))))
+
+    slow = [(m.group(2), float(m.group(1))) for m in (SLOW_UPDATE.search(l) for l in lines) if m]
+    if slow:
+        by_section = {}
+        for section, ms in slow:
+            count, worst = by_section.get(section, (0, 0.0))
+            by_section[section] = (count + 1, max(worst, ms))
+        detail = '; '.join('%s x%d, worst %.0f ms' % (k, v[0], v[1]) for k, v in sorted(by_section.items(), key=lambda kv: -kv[1][1])[:6])
+        out.append(('Slow mod updates',
+                    '%s. A frame at 90 Hz is 11 ms, so each of these is one or more dropped frames; a section that repeats on a '
+                    'fixed beat is a timer of ours doing too much at once.' % detail))
+
+    searches = [float(m.group(1)) for m in (SKELETON_SEARCH.search(l) for l in lines) if m]
+    if searches:
+        out.append(('Local skeleton search', '%d searches logged, worst %.1f ms. From the build of 2026-10-02 a search happens when '
+                    'the body changes and otherwise every ten minutes, so a handful per session is the fixed state; once a minute '
+                    'was the build before, and every five seconds at 50 ms was the hitch of 2026-09-30.' % (len(searches), max(searches))))
+
+    unposed = Counter(m.group(1) for m in (NOT_POSED.search(l) for l in lines) if m)
+    if unposed:
+        out.append(('Bodies not posed', ', '.join('%s x%d' % kv for kv in unposed.most_common()) +
+                    '. Each is a dragged body whose bones arrived and were not applied, with the reason.'))
+
+    deaths = Counter(m.group(1) for m in (DEATH_UNAPPLIED.search(l) for l in lines) if m)
+    if deaths:
+        out.append(('Deaths not applied', ', '.join('%s x%d' % kv for kv in deaths.most_common()) +
+                    '. "no copy of that character here" is normal for something out of range; the others are worth a look.'))
 
     out.extend(copies(lines))
     return out

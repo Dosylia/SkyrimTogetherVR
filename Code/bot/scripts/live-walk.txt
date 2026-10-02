@@ -1,0 +1,54 @@
+# Does the other player slide? Measured by the game itself, with a bot that moves the way a real player does.
+#
+#   python Tools\VR\live-check.py live-walk
+#
+# A bot that walks sends positions and nothing else, so its copy glides: the game's SlideDiag counts every one of
+# its moves as "came with animation variables that had not changed". That is the baseline, and it is how every
+# other player looked for half a session on 2026-09-26. Then the real player is walked forward (a held W key),
+# this bot records the stream the server relays for them -- positions, animation variables, actions, VR pose --
+# and plays it back as its own character. The same measurement on that is the answer to "does a real player's
+# copy slide here": the variables are a real player's, so the legs should move.
+log live walk
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+wait 6
+log CHECK copy exists
+wait 2
+
+# Two measurements each time. "gait" asks the copy itself: while it travels, does its animation graph hold a speed?
+# "slide" is the game's own SlideDiag line, which is what a session log has. They have to agree.
+log -- baseline: walking the way a bot always has, with no animation data
+log CHECK slide mark
+wait 1
+log CHECK copy gait sliding 7
+walk rel 500 0 140
+walk rel -500 0 140
+wait 12
+log CHECK slide above 90
+wait 2
+
+# God mode: the player is walked forward blind, and Mistwatch has edges to walk off.
+log DO god on
+wait 3
+log -- the real player walks for six seconds while this bot records what it is sent about them
+log DO key w 6000
+capture other 8
+wait 2
+
+log -- the recording, played back as this bot's own character, twice over
+log CHECK slide mark
+wait 1
+log CHECK copy gait walking 8
+replay me 2
+log SHOT walking of copy
+replay me 1
+wait 12
+log CHECK slide below 20
+wait 2
+
+log DO god off
+wait 3
+log done
+stop

@@ -1,0 +1,5 @@
+# The player who is there first, and stays. See Tools/VR/leaver-check.py.
+log leaver host
+waitfor connected 45
+wait 120
+stop

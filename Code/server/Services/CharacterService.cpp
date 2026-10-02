@@ -159,7 +159,9 @@ void CharacterService::HandOffAbandonedActors() const noexcept
         return;
     s_nextSweep = now + 2s;
 
-    constexpr auto cSilence = 3s;
+    // static: a lambda may use it without capturing it. MSVC lets a plain local constexpr through as well; GCC does not
+    // ("'cSilence' is not captured", Seen's Linux build of 2026-10-01).
+    static constexpr auto cSilence = 3s;
     const auto isSilent = [now](const Player* apPlayer)
     { return apPlayer->GetLastMovementAt() != std::chrono::steady_clock::time_point{} && now - apPlayer->GetLastMovementAt() > cSilence; };
 

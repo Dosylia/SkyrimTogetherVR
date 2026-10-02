@@ -12,6 +12,7 @@
 //   unequip <hex form id> [left|both]
 //   health <value>  damage <n>  die (health -4)  respawn
 //   cell <hex id> | cell out       enter an interior cell, or go back outside (no door needed)
+//   stay                            stop following the host through load doors
 //   disconnect  reconnect  loop  stop
 //   start <x> <y>                   where to look for the host (same as --x --y)
 
@@ -138,7 +139,7 @@ int main(int argc, char** argv)
         // warning on every single run, which is the fastest way to teach somebody to ignore version-skew warnings.
         if (arg == "--version")
         {
-            std::printf("STBot %s\n", BUILD_COMMIT);
+            std::printf("STBot %s protocol %s\n", BUILD_COMMIT, BUILD_PROTOCOL);
             return 0;
         }
 

@@ -1,0 +1,7 @@
+iSyncIdleLocomotion
+iSyncTurnState
+iState
+iRightHandType
+iLeftHandType
+iCombatStance
+iGetUpType

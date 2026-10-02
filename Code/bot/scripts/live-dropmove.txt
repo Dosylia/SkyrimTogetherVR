@@ -1,0 +1,70 @@
+# Against a real game, not another bot: drops an item next to the player, carries it the way a hand does, puts it
+# down, moves it once more in one go, and picks it up. At each CHECK Tools\VR\live-check.py reads the placed item's
+# position out of the game. Written 2026-10-01 for the first run with nobody in the headset.
+#
+#   python Tools\VR\live-check.py live-dropmove
+log live dropmove
+waitfor connected 45
+collect spawn
+waitfor known other 40
+wait 5
+
+log -- dropping an iron dagger next to the player
+dropitem 12EB7
+waitfor drops == 1 15
+# The game places it and lets it fall. At Mistwatch it then rolls down the hillside for some seconds, and the game
+# sends that roll here, so this bot's idea of where the item lies ends up where it came to rest.
+wait 14
+log CHECK drop exists
+log CHECK drop mark
+wait 3
+
+log -- lifting it and carrying it 150 units, five steps a second
+moveitem 0 0 40 held
+wait 0.2
+moveitem 0 0 40 held
+wait 0.2
+moveitem 0 15 0 held
+wait 0.2
+moveitem 0 15 0 held
+wait 0.2
+moveitem 0 15 0 held
+wait 0.2
+moveitem 0 15 0 held
+wait 0.2
+moveitem 0 15 0 held
+wait 0.2
+moveitem 0 15 0 held
+wait 0.2
+moveitem 0 15 0 held
+wait 0.2
+moveitem 0 15 0 held
+wait 0.2
+moveitem 0 15 0 held
+wait 0.2
+moveitem 0 15 0 held
+wait 0.2
+log -- put down, in mid-air
+moveitem 0 0 0 rest
+wait 2
+log CHECK drop moved 0 150 80
+log SHOT carried of drop
+# Handed back to physics two seconds after the last word, it stays where it is until something touches it (found
+# 2026-10-01). Asked again after that moment, so a change in that behaviour shows up here.
+wait 5
+log CHECK drop moved 0 150 80
+wait 3
+
+log -- moved once more in a single step, 250 units away, as a throw that was only seen landing
+moveitem 250 0 60 rest
+wait 4
+log CHECK drop moved 250 150 140
+wait 3
+
+log -- picking it up
+pickup
+wait 4
+log CHECK drop gone
+wait 3
+log done
+stop

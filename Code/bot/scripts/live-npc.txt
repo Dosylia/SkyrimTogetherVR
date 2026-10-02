@@ -1,0 +1,50 @@
+# An NPC owned by the other player, against a real game: it arrives, is hurt, dies and is brought back to life,
+# and at every "CHECK" line Tools\VR\live-check.py asks the game what its copy of that NPC looks like.
+#
+#   python Tools\VR\live-check.py live-npc
+#
+# A temporary bear (base 23A8A), not a reference from the player's own world. A bear because the bot claims 100
+# health for whatever it brings: the first run used a chicken, whose own health is 5, and its copy came back from
+# the dead at 5 -- reviving puts a copy back on its own base values, so the animal has to have room for 100.
+log live npc
+waitfor connected 45
+collect spawn health death ownership
+expect known me
+waitfor known other 40
+wait 5
+
+log -- bringing a bear
+npc temp 23A8A
+waitfor owned == 1 20
+wait 8
+log CHECK npc exists
+log CHECK npc alive
+wait 3
+
+log -- hurt to 40
+npclife alive 40
+wait 5
+log CHECK npc alive
+log CHECK npc health 40
+wait 3
+
+log -- it dies
+npclife dead 0
+wait 6
+log CHECK npc dead
+wait 3
+
+# Reviving replaces the copy with a fresh one (Actor::Respawn), which stands at its own full health. A health the
+# owner sends in the same moment lands on the copy that is about to be replaced and is lost -- found here on
+# 2026-10-01 with a bear revived "at 100" that stood at its own 310. In play a revive is to full health on the
+# owner's side as well, so "full" is the right thing to see; the gap is only that nothing sends the owner's number
+# again afterwards.
+log -- and is brought back to life
+npclife alive 100
+wait 7
+log CHECK npc alive
+log CHECK npc health full
+wait 3
+
+log done
+stop

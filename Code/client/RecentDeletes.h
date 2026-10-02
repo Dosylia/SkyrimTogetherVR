@@ -42,6 +42,15 @@ enum Claim : uint32_t
     kHas3D = 1 << 3,              //!< still has a loaded model, so "unloaded" was wrong about it
     kDeadOrDying = 1 << 4,
     kIsPlayerTeammate = 1 << 5,
+
+    // Which way it went, for everything outside the unload path. Until 2026-10-02 only that path was recorded, and
+    // that evening's crash on a freed actor (SkyrimVR.exe+0x3AC1A8, the physics asking a contact's owner a question
+    // and the owner being freed memory) could not be checked against the three copies deleted on the server's word
+    // in the minutes before it, nor against the seven game-made actors let go of 0.7 s before it.
+    kOnServersWord = 1 << 6, //!< the server removed the character
+    kOnConnect = 1 << 7,     //!< the clean-up of temporary actors when a connection starts
+    kOnDisconnect = 1 << 8,  //!< another player's copy, when the connection ended
+    kLeftToGame = 1 << 9,    //!< NOT deleted here: a temporary actor the game made itself, which this client let go of
 };
 
 constexpr size_t kCount = 32;

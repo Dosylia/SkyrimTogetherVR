@@ -1,0 +1,34 @@
+# The player dies while connected, with another player standing by.
+#
+#   python Tools\VR\live-check.py live-death
+#
+# VR_TODO, "Death ends at the main menu, connected only" (2026-09-18 onwards; level-up, which took the same routine,
+# is confirmed fixed). The player is killed by console; PlayerService should bring them back five seconds later, in
+# the world, still connected -- not at the main menu, and not in a reload.
+log live death
+waitfor connected 45
+collect spawn health death
+expect known me
+waitfor known other 40
+wait 6
+log CHECK game inworld
+log CHECK player alive
+wait 3
+
+log -- the player is killed
+log DO console player.kill
+wait 14
+log CHECK game alive
+log CHECK game inworld
+log CHECK player alive
+wait 3
+
+log -- and once more, straight away
+log DO console player.kill
+wait 14
+log CHECK game inworld
+log CHECK player alive
+wait 3
+
+log done
+stop

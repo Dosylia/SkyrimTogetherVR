@@ -172,6 +172,8 @@ void ProcessKeyboard(uint16_t aKey, uint16_t aScanCode, cef_key_event_type_t aTy
         }
     }
 
+    if (!s_pOverlay)
+        return;
     auto& overlay = *s_pOverlay;
 
     const auto pApp = overlay.GetOverlayApp();
@@ -209,6 +211,8 @@ void ProcessKeyboard(uint16_t aKey, uint16_t aScanCode, cef_key_event_type_t aTy
 
 void ProcessMouseMove(uint16_t aX, uint16_t aY)
 {
+    if (!s_pOverlay)
+        return;
     auto& overlay = *s_pOverlay;
 
     const auto pApp = overlay.GetOverlayApp();
@@ -233,6 +237,8 @@ void ProcessMouseMove(uint16_t aX, uint16_t aY)
 
 void ProcessMouseButton(uint16_t aX, uint16_t aY, cef_mouse_button_type_t aButton, bool aDown)
 {
+    if (!s_pOverlay)
+        return;
     auto& overlay = *s_pOverlay;
 
     const auto pApp = overlay.GetOverlayApp();
@@ -257,6 +263,8 @@ void ProcessMouseButton(uint16_t aX, uint16_t aY, cef_mouse_button_type_t aButto
 
 void ProcessMouseWheel(uint16_t aX, uint16_t aY, int16_t aZ)
 {
+    if (!s_pOverlay)
+        return;
     auto& overlay = *s_pOverlay;
 
     const auto pApp = overlay.GetOverlayApp();
@@ -299,6 +307,11 @@ UINT GetRealACP()
 
 LRESULT CALLBACK InputService::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+    // The game's window procedure is hooked for the whole life of the window (BSGraphicsRenderer.cpp); this service
+    // is not. A message that arrives before it is built or after it is torn down finds no overlay to hand it to.
+    if (!s_pOverlay)
+        return 0;
+
     const auto pApp = s_pOverlay->GetOverlayApp();
     if (!pApp)
         return 0;

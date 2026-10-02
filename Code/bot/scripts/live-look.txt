@@ -1,0 +1,27 @@
+# Pictures of the other player's copy, taken by the game itself: the one kind of check a number cannot do.
+#
+#   python Tools\VR\live-check.py live-look
+#
+# `log SHOT <name> of copy` puts a free camera in front of the game's copy of this bot and takes a screenshot (saved
+# under build\...\logs\shots). Nothing judges the pictures; they are there to be looked at, and they answer "is
+# the body drawn" in a way no actor value ever did -- every reading of an invisible copy on 2026-09-20 and after
+# said it was fine. A second picture shows the player from the same distance, for comparison.
+log live look
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+health 100
+wait 8
+log CHECK copy exists
+log CHECK copy 3d
+wait 2
+
+log -- a picture of the copy, and one of the player
+log SHOT copy of copy
+wait 4
+log SHOT player of player
+wait 4
+
+log done
+stop

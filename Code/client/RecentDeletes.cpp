@@ -24,6 +24,14 @@ TiltedPhoques::String DescribeClaims(const uint32_t aFlags, const uint32_t aHand
         out += acpWhat;
     };
 
+    if (aFlags & kLeftToGame)
+        add("NOT deleted by this client: the game made it and was left to dispose of it");
+    if (aFlags & kOnServersWord)
+        add("deleted because the server removed it");
+    if (aFlags & kOnConnect)
+        add("deleted in the clean-up on connect");
+    if (aFlags & kOnDisconnect)
+        add("deleted on disconnect");
     if (aFlags & kPlayerCombatTarget)
         add("the player is fighting it");
     if (aFlags & kOtherCombatTarget)
@@ -56,7 +64,7 @@ void Record(const void* apActor, const uint32_t aFormId, const uint32_t aHandles
 
     // Said as it happens, not only on a crash: an actor deleted while somebody still holds a handle to it is a
     // use-after-free waiting to be collected, whether or not this session is the one that collects it.
-    if (aHandles > 0 || (aFlags & (kPlayerCombatTarget | kOtherCombatTarget)))
+    if (!(aFlags & kLeftToGame) && (aHandles > 0 || (aFlags & (kPlayerCombatTarget | kOtherCombatTarget))))
         spdlog::warn("DeleteClaim: deleting {:X} while something still holds it -- {}", aFormId, DescribeClaims(aFlags, aHandles));
 }
 
@@ -71,7 +79,7 @@ void Report(const uint64_t* apRegisters, const size_t aRegisterCount) noexcept
     }
 
     const uint32_t count = written < kCount ? written : kCount;
-    spdlog::error("RecentDeletes: the last {} actors this client deleted, newest first, checked against every crashing register.", count);
+    spdlog::error("RecentDeletes: the last {} actors this client deleted or let go of, newest first, checked against every crashing register.", count);
 
     bool matched = false;
     for (uint32_t i = 1; i <= count; ++i)

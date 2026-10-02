@@ -1,0 +1,42 @@
+# The crash of 2026-10-01 18:45, as a test: a creature the game spawned itself, handed to the other player while
+# this player is away, and the game's own removal of it when the player comes back.
+#
+#   python Tools\VR\live-check.py live-away-seeker
+#
+# What happened: a Seeker placed by console (any actor the game makes itself will do -- a summon, a quest spawn)
+# stood next to the player. The player left through a load door; the server handed the Seeker to this bot, so on
+# the player's side it became a "remote" actor. On coming back, the game disposed of its own temporary actor and
+# told the client so. The client took every temporary remote actor for a copy it had made, and disabled this one
+# in the middle of the game's disposal; 25 ms later the game's movement code ran on it and crashed
+# (SkyrimVR.exe+0x714EB2, the Seeker in R15, marked deleted by the game).
+#
+# The last line is the whole test: the game is still there.
+log live away seeker
+waitfor connected 45
+collect spawn ownership
+expect known me
+waitfor known other 40
+wait 5
+
+# Combat AI is off for the whole run (live-check.py sees to it), so the Seeker stands there instead of attacking.
+log -- a creature the game spawns itself, next to the player
+log DO console player.placeatme 0201EEC9 1
+wait 10
+
+# Where Lydia stands is under water in Emma's save; without this the player drowns in half a minute.
+log DO god on
+wait 3
+log -- the player leaves through a load door
+log DO console player.moveto A2C94
+wait 40
+
+log -- the player comes back
+log DO console player.moveto 45A63
+wait 45
+log CHECK game alive
+wait 3
+
+log DO god off
+wait 3
+log done
+stop

@@ -1,0 +1,69 @@
+# Do the creatures the mod had no animation data for still slide on the other screen?
+#
+#   python Tools\VR\live-check.py live-creatures
+#
+# Lurker, Netch and Seeker have their own replacer folders since 2026-09-30/10-01, and the game picks them up; what
+# was left open is whether a copy of one on the *other* player's screen then moves its legs, which needed two real
+# games. One game and this bot will do: the game spawns the creature and lets it attack the player (combat AI on,
+# god mode on), this bot records the stream the server relays for it, registers a creature of the same kind itself,
+# and plays the stream back. The game's copy of that creature is then asked whether its animation graph has a speed
+# while it travels ("gait").
+log live creatures
+waitfor connected 45
+collect spawn ownership
+expect known me
+waitfor known other 40
+wait 6
+log DO god on
+wait 2
+log DO combat on
+wait 2
+
+log -- seeker: the game spawns one, and it comes for the player
+log DO console player.placeatme 0201EEC9 1
+wait 6
+capture base 1EEC9 12
+log -- a creature of the same kind, brought by this bot, plays that back
+npc captured
+waitfor owned == 1 20
+wait 6
+log CHECK npc exists
+log CHECK npc gait walking 9
+replay npc 2
+log SHOT seeker of npc
+wait 4
+
+log -- lurker: the game spawns one, and it comes for the player
+log DO console player.placeatme 02014494 1
+wait 6
+capture base 14494 12
+log -- a creature of the same kind, brought by this bot, plays that back
+npc captured
+waitfor owned == 2 20
+wait 6
+log CHECK npc exists
+log CHECK npc gait walking 9
+replay npc 2
+log SHOT lurker of npc
+wait 4
+
+log -- netch: the game spawns one, and it comes for the player
+log DO console player.placeatme 0202173B 1
+wait 6
+capture base 2173B 12
+log -- a creature of the same kind, brought by this bot, plays that back
+npc captured
+waitfor owned == 3 20
+wait 6
+log CHECK npc exists
+log CHECK npc gait walking 9
+replay npc 2
+log SHOT netch of npc
+wait 4
+
+log DO combat off
+wait 2
+log DO god off
+wait 2
+log done
+stop

@@ -103,6 +103,188 @@ unplayed item gets, and the git history keeps every word of them. What is left t
   **[untested in game] done for dropped items** -- see "Dropped items are moved for everyone" below. Objects placed by
   a plugin (a cup on a table) are still the open entry "Objects moved by hand are not seen moving".
 
+## Autonomous queue (2026-10-02)
+
+What can be worked on with nobody in the headset: the no-headset game (`Tools/VR/headless.ps1`), a bot as the other
+player (`Tools/VR/live-check.py`, `Tools/VR/run-all-pairs.ps1`), and reading code and logs. Worked top to bottom, one
+item at a time. Each item ends as one of:
+
+- `[x]` done -- with the evidence in one line (red before, green after, or the log line that settles it);
+- `[!]` needs Emma -- with the exact question or the one action only she can take, copied to "Needs Emma" below;
+- `[-]` not worth doing -- with why.
+
+A longer write-up goes in the section the item belongs to further down; this list stays one line per item.
+
+**Needs Emma** (questions and actions collected from the queue; newest last)
+
+- Whether to show "X is down" when the other player dies (asked 2026-10-01, not answered).
+- **Commit and push, and send Seen the new exe (2026-10-02).** The login message changed (it carries the protocol id
+  now), so an older client or server is refused by a newer one, once. Seen's Linux build needs the two GCC fixes in
+  the working tree. After that the exe in the tools folder and a server built from the commit accept each other even
+  though their version strings differ: only `Code/encoding` has to be the same.
+  **Seen has to rebuild his server from that commit**, not only take the exe: one of the two fixes of the evening
+  is in the server (a player who left before having a character took the first player's character with them).
+- **A two-minute test in the headset (2026-10-02):** connected, with the bow in hand, let yourself be killed; then
+  load a save from the menu **either while you are down or within ten seconds of standing up again**. Does the game
+  crash? With nobody in the headset it does, every time (three of three), in `skyrimvrtools.dll`; a load forty
+  seconds later is fine (two of two). Whether real controllers avoid it cannot be told without them. See "Seen, on
+  the load after death".
+
+### Tooling first, because every later item gets cheaper
+
+- [x] One command that runs every real-game test: `Tools/VR/run-live.ps1` (up, all nine `live-*.txt`, one table, down). First full run 2026-10-02: 38 of 40, the two failures a drowned player (fixed in the scripts).
+- [x] Screenshots: `log SHOT <name> [of copy|npc|drop|player]` in a live script (DevBench capture plus its free camera). The bot's copy and the player are both visibly drawn in `logs/shots/live-look-*.png`.
+- [x] Linux build check: `Tools/VR/check-linux-build.ps1` (the repo's Dockerfile; build, unit tests under GCC, protocol id compared with Windows). First run found a second GCC-only error (`Inventory.h` used `std::optional` without including it); fixed, then clean, 3807 assertions passing on Linux.
+- [x] Protocol id: a digest of `Code/encoding`, sent at login and compared by the server instead of the version. A bot from build `5f5d7f3` was let in by a server from build `eb60a4e` (same id `7016c98d`), refused after a message file changed (`957d2ba5`), and Linux computes the same id as Windows.
+- [x] Bot replay of real movement: `capture` / `replay` in the bot, `live-walk` and `live-creatures`. A bot walking as before: its copy has no speed in its animation graph (0 of 16 samples). Replaying the real player's walk: 14 of 14. Seeker without its replacer 17%, with it 78%; Lurker 69-85%.
+- [-] Our own questions in DevBench: not worth it. It means building DevBench's API source into the client everyone runs, for a tool only this machine has, and the tests have read what they need from the log in every run.
+- [x] `session-report.py`: dropped items, game-made actors, respawns, captures, deaths not applied, slow updates by section, skeleton searches; and "is being moved here" no longer counts a dropped item as a dragged corpse. Run on 2026-10-02's sessions.
+
+### Crashes and stability
+
+- [x] Death while connected: `live-death`, killed twice by console, back in the world after 5 s both times, alive at 335, still connected, never at the main menu (7 of 7 checks).
+- [!] Loading a save after dying: crashes in the no-headset rig when the load falls inside our death sequence (3 of 3), not 40 s later (2 of 2) and never without our respawn (4 of 4). Needs Emma's headset test, above.
+- [-] Wrist menu crash: not reproducible here. Tween then inventory opened 20 times through DevBench, 170 ms and 20 ms apart, while connected: no crash, nothing left open. The crash had controller input reaching a menu mid-start and no frame of ours; DevBench opens menus without a controller.
+- [-] Seen's stuck journal: not reproducible here. Journal opened and closed 25 times while connected (10 with a second open, 15 closed 50 ms after opening), game window unfocused throughout: it closed every time. If it happens to Seen again, his log's `Menu queued` and `Probe` lines around it are what to send.
+- [ ] Quit crash: a larger batch of quits; close the item if clean. (Eleven clean quits by `qqq` on 2026-10-01/02, no crash report from any; close at twenty.)
+- [x] The other places that delete temporary actors: none of the three crashes on a game-spawned creature by itself (`live-temp-remove` 3 of 3, `live-temp-reconnect` 5 of 5), but all three left the deleted copy's id in the client's "my copies" list and the game hands ids out again. `live-temp-reuse`: a Seeker given a deleted copy's id was taken for a copy and the game crashed at `SkyrimVR.exe+0x714EB2`, the crash of 2026-10-01 again; with the ids taken out, the same Seeker is left to the game (2 of 2 at the time of writing).
+- [x] Found on the way, in the server: a player who left before having a character had the first player's character removed instead (`value_or(entity 0)` in the disconnect clean-up). The host became invisible to every newcomer and the server logged `Entity is invalid: 0` four times a second. `Tools/VR/leaver-check.py` (three bots, no game): red once, green twice.
+- [ ] Script-engine crash on freed forms: soak runs with form caching on and off.
+- [ ] Overlay calls that can run before the in-headset menu exists: audit.
+- [ ] The two havok crash guards from the other VR port: port if any of our crash reports match.
+- [x] "Not a crime faction": already fixed (found by load index); five deaths on 2026-10-02 logged `Solstheim crime faction found at 2018279` and no error.
+- [ ] Crime alarm guard: trigger a crime by console and confirm it fires.
+
+### Performance
+
+- [ ] Benchmark, same save and spot: mod off, on but not connected, connected alone, connected with a bot.
+- [ ] Spawn bursts on cell change: measure, spread over frames, measure again.
+- [ ] Remote movement shown 300 ms late: follow measured ping; measure lag before and after with a walking bot.
+- [ ] The once-a-second naked-NPC check: measure, limit to a few actors per tick.
+- [ ] The once-a-second equipment snapshot: rebuild only when something was equipped.
+- [x] Skeleton search on every menu: the player's 3D root changes when a menu opens and closes, and each change cost a search of 6 to 23 ms. Fifty menu opens: 68 searches and 51 slow updates before, 2 searches and 1 slow update with two roots remembered. The safety re-search is every ten minutes, not every minute.
+- [ ] Other per-frame costs: linear searches over all entities, form lookups inside loops.
+- [ ] The dashboard overlay is created on the game thread right after the first load and stops the game: 0.9 and 1.5 s in Emma's sessions of 2026-09-30 and 10-01, 0.2 to 8.6 s with no headset (`OverlayService::OnUpdate`, at "dashboard overlay created").
+- [ ] Frame-rate drop after kills (reported 2026-09-30): kill creatures by console and watch what gets slow.
+- [ ] The unequip loop: add the planned logging, run a session with NPCs around. (Same shape, seen 2026-10-02: a Netch standing still sent `IdleSpecialStart` 282 times in 12 s, and 1521 actions in another 12 s. `capture` in the bot names the actions of any actor; start there.)
+
+### Sync: verify in the real game, fix what fails
+
+- [ ] A creature the game made (placed, a quest spawn) that was handed to the other player while its maker was away comes back twice: the maker's game still has its own, and the server sends it back as a copy as well (2026-10-02 22:32, three Seekers placed, six standing after the walk: `FF001164..66` and copies `FF0011BD`, `FF0011E4`, `FF0011E7`). Count them in a test, then decide which one goes.
+- [ ] The real game as sender: health, death, equipment, kills of its own NPCs and cell changes reach the bot.
+- [ ] Dropping and picking up from the game's side (console drop, bot sees it; pick up, bot sees it go).
+- [ ] Old dropped items announced on connect.
+- [ ] Equipment on a copy: the bot equips, the real copy holds it.
+- [ ] Factions corrected on return.
+- [ ] Levelled creatures: a different animal at the same spawn point.
+- [ ] Whiterun gate: the copy goes when inside and comes back when out.
+- [ ] Weather and time applied on VR.
+- [ ] Mounts, by script.
+- [ ] A player in a menu keeps sending, so its creatures are not handed away.
+- [ ] Hits on the other player's NPC reach the owner and come back.
+- [ ] NPCs below the floor: watch `SinkDiag` over unattended sessions; close if it names nothing.
+- [ ] The downed follower "lying sideways and running": bot-owned NPC in bleedout that keeps moving.
+- [ ] Enemy health bar on the other player: is it drawn (needs screenshots).
+- [ ] The invisible body, indoors and outdoors (needs screenshots).
+
+### Sync: things to build
+
+- [ ] Objects already in the world moved by hand (a cup on a table): positions in `ObjectService`, as for drops.
+- [ ] Removals for the viewer who walked away (the asymmetric range path).
+- [ ] A newer ownership number accepted by the six receiving handlers instead of exact equality.
+- [ ] Shared follower: the follower belongs to the player it follows.
+- [ ] Dragon range check for remote dragons with no local copy.
+- [ ] Dragged bodies: the bot sends a body's bones, to see why the receiving side skips or misplaces them.
+- [ ] Nocked arrow on the other player's bow (build; seeing it needs a recording).
+- [ ] Ownership warnings in the logs ("actor for ownership transfer not found"): where from.
+- [ ] Copies spawned on the ground when the incoming height is invalid; fade in.
+- [ ] Item and body drift fixes from the other VR port, if drift shows up.
+- [ ] Wake a floating item when its carrier disconnects mid-carry.
+- [ ] Re-send an NPC's health after a revive.
+
+### Making it shareable
+
+- [ ] Start-up checks with plain messages: address library present, fewer than 255 plugins, plugin header.
+- [ ] Install script (finds MO2, copies the tool, adds the launch entry, creates the connect file).
+- [ ] Guide for other modlists.
+- [ ] Licence check before sharing builds.
+- [ ] Server defaults for VR (difficulty, PvP, time scale).
+- [ ] A test checklist per build.
+
+### Housekeeping
+
+- [ ] Bring this file in line with what was confirmed on 2026-10-01 (48 "untested" markers, superseded entries).
+- [ ] Warn on screen, not only in the log, when the installed address library disagrees with our own table.
+
+## Checked against the real game with nobody in the headset, 2026-10-01
+
+The game now runs without a headset (`Tools/VR/headless.ps1 up|down`: SteamVR's null driver with two virtual
+controllers, DevBench to load the save and ask the game questions, a bot as the other player), and
+`Tools/VR/live-check.py <script>` runs a bot script and asks the game itself at every `CHECK` line. Everything below was
+read out of the running game, not out of the server. What a headset is still needed for is how things look and feel.
+
+**Fixed, found by these runs:**
+
+- **A crash on walking through a load door with a game-spawned creature nearby.** `SkyrimVR.exe+0x714EB2`, twice out of
+  twice before the fix, none in two runs and one more in passing after it. During this player's load screen the server
+  hands their creatures to the other player, so on this side they become "remote"; the old cell unloads and the game
+  disposes of any temporary actor it had spawned itself (a summon, a random encounter, anything a script placed).
+  `CancelServerAssignment` took every temporary remote actor for a copy this client had made and disabled it in the
+  middle of that disposal; 25 ms later the game's movement code ran on it. The client now keeps a list of the copies it
+  really made (`s_ownCopies`) and leaves everything else to the game, saying so in the log (`was made by the game, not
+  by this client; left to the game`). Test: `live-away-seeker`.
+- **A diagnostic stalling the game every 30 s.** `RunRemotePlayerDiag`'s `CopyDiag` line walks a whole skeleton by name:
+  17 to 34 ms, thirteen times in seventeen minutes with one other player near. Each copy is now measured once when
+  first seen and then every five minutes.
+- **"failure to find self in behaviorPool, Lurker / Netch"** at every start was a false alarm (a replacer for a creature
+  the mod has no built-in behaviour for has no "self" to find) and is now one info line.
+
+**Sliding, measured on 2026-10-02 with one game and a bot that plays back real movement:**
+
+- `live-walk`: the bot walks as it always did and its copy slides (no speed in the copy's animation graph in any of
+  16 moving samples; SlideDiag 196 of 196). The real player is then walked forward by a held key, the bot records the
+  stream the server relays for them and plays it back as its own character: the copy has a speed in 14 of 14 samples
+  (SlideDiag 0 of 810), and the screenshot shows it mid-stride. So a real player's copy does not slide here.
+- `live-creatures`: the game spawns a creature, the bot records its stream and plays it back on a creature of its
+  own. **Seeker**: with its replacer folder taken out, none of 102 updates carried animation variables and the copy
+  had a speed in 17% of samples; with it, 107 of 107 and 78%. **Lurker**: 69-85%. **Netch**: hovers on the spot, so
+  there is no gait to read; its updates do carry variables (102 of 102). That was the question left open on
+  2026-10-01 as needing two real games.
+- **SlideDiag was counting steady movement as sliding.** It called a move "sliding" when the animation variables had
+  not changed between two snapshots, which is also true of anything running at a constant speed: the replayed walk
+  was 122 of 122 "sliding" while the picture showed legs moving. It now also requires that the variables say nothing
+  (no non-zero float), which is what the bug of 2026-09-26 actually was. Real sessions did not show it because an
+  analog stick never holds still.
+- **A Netch floods the stream.** Standing still, it sent `IdleSpecialStart` 282 times in 12 s (1521 actions in an
+  earlier 12 s). Not looked into yet; see the unequip-loop item in the queue.
+
+**Confirmed working:**
+
+- Lurker, Netch and **Seeker** replacers match in the game (`found match ... has original behavior Seeker signature
+  iState_HMDaedraDefault`). The Seeker was captured by spawning one; its folder is in `GameFiles` and in Emma's mod
+  folder. **Seen needs the `Seeker` folder too.** Whether they still slide on the *other* screen needs two real games.
+- The 5-second hitch is gone: `local skeleton searched in ~7 ms`, once a minute; `RunLocalUpdates` no worse than 10 ms.
+- A remote player's copy: arrives with its 3D loaded; follows the owner's health (100, 60); is rebuilt on respawn at
+  100; **is put right when the player comes back from five cells away** (health 55, the stale-copy repair).
+- Damage from another player reaches this player exactly: a hit of 30 took 30, flames of 8 a second for 3 s took 24.
+- The player's health is re-sent every 3 s whether or not it changed (36 snapshots in a row, all 335).
+- An NPC owned by the other player: arrives, takes its owner's health (`NPC ... health corrected from 100 to its owner's
+  40`), dies when its owner says so, comes back to life, and **is dead on this side when it died while this player was
+  away** (through a load door and back) -- the oldest report on this list.
+- Dropped items placed, followed while carried, and removed (see "Dropped items are moved for everyone").
+- Copy removal: `DeleteClaim` / `Temporary Remote Held` fire and nothing crashed on our own copies.
+
+**By design, and worth a decision:**
+
+- **A dead player is a standing copy at 25 health on the other screen.** `OnDeathStateChange` never kills a player's
+  copy ("Players should never be killed") and health is floored at 25 ("a copy never goes down"). That exit is the one
+  silent one left in the death receiver. It is the open item about showing "X is down".
+- **A revived NPC stands at its own full health, whatever its owner sent.** `Actor::Respawn` replaces the copy with a
+  fresh one; a health value arriving in the same moment lands on the copy being replaced. In play a revive is to full
+  health on the owner's side too, so both read "full"; it differs only for an NPC whose health differs between the two
+  games (a levelled one). Nothing sends the owner's number again afterwards. Not changed.
+- **A dropped item handed back to physics in mid-air stays there** until something touches it.
+
 ## Work done without a session, 2026-09-28: tests, tooling, and one thing the log was getting wrong
 
 Five items agreed as safe to do alone, because each is either a test, a tool, or a log line -- nothing here
@@ -972,7 +1154,18 @@ because that was built by hand in September. Everything else a hand does is invi
         moved again while the other bot is outside -- not relayed; the other bot comes back -- given the item where it
         was left, 424 units from where it fell), red with the server not keeping the place, green with it. Unit test
         for the move message.
-      - **Owed a session, and what to watch for:** the log says `DroppedItem: N (...) is being moved here` on the side
+      - **Run against the real game on 2026-10-01, with nobody in the headset** (null driver + DevBench, a bot as the
+        other player; script `live-dropmove.txt`, positions read from the game every half second):
+        the dagger was placed; it rolled 800 units down the hillside at Mistwatch and the game **sent that roll** to the
+        bot, about ten moves a second, then "at rest"; carried by the bot in twelve steps it sat at exactly the commanded
+        position at every sample; a single far move landed exactly; the pick-up removed it. No `rebuilt its 3D` line:
+        `MoveTo` does not rebuild an item. One finding: handed back to physics in mid-air it **stays there** until
+        something touches it (the game does not wake a body whose motion type was changed). For an item put on a
+        surface or held still in a hand that is the right picture; only a carrier who goes quiet mid-carry leaves it
+        floating. Not changed.
+      - **Still owed a headset:** whether it looks smooth, whether its turn follows while held, and whether a real
+        grab is seen as a move on the holder's side (a roll is; a grab should be).
+      - **What to watch for in a session:** the log says `DroppedItem: N (...) is being moved here` on the side
         that picks it up, `is being moved over there; holding it here and following` on the other. Three things I
         could not check without the headset: whether it follows smoothly or in visible steps (ten updates a second,
         each a `MoveTo`; if it steps, the engine's own `TranslateTo` is the next thing to try -- and if a move rebuilds
@@ -1070,6 +1263,22 @@ the task is to find the cause rather than guess at one.
       path as the long-standing "level-up and death end at the main menu" item.
       **Debug plan:** the `SaveLoad` probes already installed name the caller and the stack; read the next
       occurrence from them rather than from the dump.
+
+      **A load crash made on purpose, 2026-10-02, and probably not the same one.** With nobody in the headset
+      (`live-load`, `live-load-dead`): the player is killed by console while connected and a save is loaded through
+      DevBench. Loaded while the player is down (2 s after the kill), or about 10 s after standing up again (inside
+      the knock-down and the ten seconds of protection), the game dies 14 ms after `Finished loading`, three times
+      of three. Loaded 40 s after the respawn it is fine, twice; two loads in a row with no death are fine; and with
+      the mod not connected -- so the game's own death and reload, with no respawn of ours -- death, reload and two
+      further loads are all fine. So it is our death sequence, interrupted by a load.
+      The crash itself is `skyrimvrtools.dll+0x71B5` reading a device pose at index 0xFFFFFFFF, called from a
+      Papyrus native, `GetSteamVRDevicePosition`, and only one mod on the list calls that: Simple Realistic Archery
+      VR (`sravrQuestScript`), which polls the controllers when a bow is in hand. Seen's crash was 68 ms after the
+      load *request*, with a `MovementHandlerArbiter` in the registers; this one is after the load *finished*, in a
+      different module. What cannot be told here is whether a controller reads as missing at that moment with real
+      hardware too, or only with the rig's two virtual ones (the same address is where the game died with no
+      controllers at all on 2026-10-01). Putting the bow away and taking it out again after a respawn does not
+      crash. Not changed: nothing is known yet about what a fix would have to restore.
 
 ### 3. Known broken, plan already written, waiting on a session
 

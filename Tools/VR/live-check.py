@@ -1,0 +1,545 @@
+"""Runs a bot against the real game and checks, in the game itself, what the bot's script says should be true.
+
+    python Tools/VR/live-check.py live-copy [live-npc ...]
+    python Tools/VR/live-check.py --all            every script in ALL, in that order
+    powershell -File Tools/VR/run-live.ps1         the same, with the game brought up before and down after
+
+The game must be up and connected (Tools/VR/headless.ps1 up). A script marks a check with a line `log CHECK ...`;
+when the bot prints it, this asks the running game through DevBench (http://127.0.0.1:8921) and prints PASS or FAIL
+with the value it read. The bot alone can only say what the server sent; this says what the game did with it.
+
+Checks:
+    copy exists | copy 3d | copy alive | copy dead | copy health <n>      the game's copy of the bot's character
+    npc exists  | npc alive | npc dead | npc health <n|full>             its copy of an NPC the bot owns
+    player mark | player dropped <n>                                      the local player's health, before and after
+    drop exists | drop gone | drop mark | drop moved <dx> <dy> <dz>       the item the game placed for the bot's drop
+    player alive                                                          the local player is not dead
+    game alive | game inworld                                             the game still answers | and is in the
+                                                                          world with a save loaded, not at a menu
+    slide mark | slide below <pct> | slide above <pct>                    the game's own SlideDiag since the mark: the
+                                                                          share of a remote body's moves that came
+                                                                          with animation variables that said nothing
+    copy gait walking <s> | copy gait sliding <s>                         watches the copy for that many seconds: when
+                                                                          it moves, does its own animation graph have
+                                                                          a speed (walking) or none (sliding)
+
+A line `log DO console <command>` runs that console command in the game at that point of the script, and
+`log DO key <name> <ms>` holds a key down in the game for that long (DevBench's keyboard input; `w` walks the player
+forward even in VR), and `log DO load last` loads the most recent save (while connected, which is the point of asking). `log DO combat on` and
+`log DO combat off` switch combat AI (off is the run's default, so a creature a test spawns just stands there; on makes
+it come for the player, which is how it is made to move). `log DO god on` and
+`log DO god off` set god mode for a script that sends the player somewhere dangerous: the away tests go to wherever
+Lydia stands, which in Emma's save is under water, and the player drowned there twice on 2026-10-02.
+
+`log DO server restart` stops the server and starts it again, and waits until the game has gone back in by itself
+(the game reconnects on its own; so does the bot, and its script carries on once it is back in the world).
+The bot's script does not stop while the driver is busy with that, so its own `wait` lines run out meanwhile:
+`log DO sleep <seconds>` makes the driver itself wait before it reads the next line.
+
+`log CHECK ids reused <name>` passes when the game gave an actor of that name a form id under which this client had
+deleted a copy earlier in the session (what live-temp-reuse needs to have happened to mean anything).
+
+Before the first script, combat AI is switched off and god mode off, by reading what the console answers rather than
+by toggling blind: a wild snow bear killed the player in the middle of the first full run (2026-10-02), and a
+script that toggles leaves the next one with the opposite setting.
+A line `log SHOT <name>` takes a screenshot of the game (DevBench's capture tool, the game's own screenshot) and
+saves it as build/.../logs/shots/<script>-<name>.png. `log SHOT <name> of copy|npc|drop|player` first puts a free
+camera 260 units south of that thing and a little above it, looking at it, and puts the view back afterwards --
+turning the player does not turn a VR view, which follows the headset. Nothing judges the picture; it is there to
+be looked at.
+
+Checks are asked while the script carries on, so a script puts a wait after each group of them.
+"""
+import io, json, math, os, re, shutil, subprocess, sys, time, urllib.request
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+RELEASE = os.path.join(ROOT, 'build', 'windows', 'x64', 'release')
+CLIENT_LOG = 'E:/FUS/tools/Skyrim Together VR/logs/tp_client.log'
+DEVBENCH = 'http://127.0.0.1:8921/api/tool/'
+HEALTH_TOLERANCE = 1.5
+PLAYER_TOLERANCE = 2.0
+DROP_TOLERANCE = 4.0    # units; a position travels packed to about one unit
+SHOTS = os.path.join(RELEASE, 'logs', 'shots')
+CAPTURES = 'E:/FUS/overwrite/SKSE/Plugins/devbench/captures'   # where MO2 puts what DevBench writes under Data
+
+# Order matters: the last two move the player through a load door and leave them wherever a bandit stands.
+ALL = ['live-copy', 'live-npc', 'live-dropmove', 'live-look', 'live-walk', 'live-creatures', 'live-npc-away', 'live-away-seeker',
+       'live-temp-remove', 'live-temp-reuse', 'live-temp-reconnect', 'live-death', 'live-load', 'live-load-dead']
+
+
+def tool(name, body, timeout=6):
+    req = urllib.request.Request(DEVBENCH + name, data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
+def papyrus(script, function, form, args=None):
+    body = {'action': 'call', 'script': script, 'function': function, 'self': {'form': '0x' + form}}
+    if args is not None:
+        body['args'] = args
+    try:
+        return tool('papyrus', body).get('returned')
+    except Exception as e:  # a deleted reference answers with an HTTP error
+        return 'ERR ' + type(e).__name__
+
+
+def session_lines():
+    """This game session's part of the client log."""
+    with io.open(CLIENT_LOG, encoding='utf-8', errors='replace') as f:
+        lines = f.read().splitlines()
+    start = 0
+    for i, l in enumerate(lines):
+        if 'Skyrim Together client, build' in l:
+            start = i
+    return lines[start:]
+
+
+def restart_server():
+    """Server down and up again; returns how long the game took to be back in, or raises."""
+    before = len(session_lines())
+    subprocess.run(['taskkill', '/F', '/IM', 'SkyrimTogetherServer.exe'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    started = time.time()
+    # The game only notices once its connection times out; a server that is back before that is a server that never
+    # left, as far as the game can tell.
+    deadline = started + 60
+    while time.time() < deadline:
+        if any('Disconnected' in l or 'disconnected' in l for l in session_lines()[before:]):
+            break
+        time.sleep(1)
+    else:
+        raise RuntimeError('the game never noticed the server was gone')
+    noticed = time.time() - started
+    subprocess.Popen([os.path.join(RELEASE, 'SkyrimTogetherServer.exe')], cwd=RELEASE, creationflags=0x00000010 | 0x00000200,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.time() + 150
+    while time.time() < deadline:
+        new = session_lines()[before:]
+        tries = [i for i, l in enumerate(new) if 'VRConnectService: connecting to' in l]
+        if tries and any('Grid change: reporting centre' in l for l in new[tries[-1]:]):
+            return noticed, time.time() - started
+        time.sleep(1)
+    raise RuntimeError('the game did not reconnect in 150 s')
+
+
+def form_of_server_id(server_id):
+    """The actor the game made for a server id, from its own spawn lines; the newest one wins."""
+    form = None
+    wanted = server_id.upper()
+    for l in session_lines():
+        m = re.search(r'CharacterSpawnRequest, server id: ([0-9A-Fa-f]+), form id: ([0-9A-Fa-f]+)', l)
+        if m and m.group(1).upper() == wanted:
+            form = m.group(2).upper()
+    return form
+
+
+def dropped_ref():
+    """The reference the game placed for the newest drop it was sent, or None once it has been removed."""
+    ref = None
+    for l in session_lines():
+        m = re.search(r'DroppedItem: placed \d+ \(.*\) as ([0-9A-F]{8})', l)
+        if m:
+            ref = m.group(1)
+        elif ref and ('removed ' + ref) in l:
+            ref = None
+    return ref
+
+
+def position(form):
+    p = [papyrus('ObjectReference', f, form) for f in ('GetPositionX', 'GetPositionY', 'GetPositionZ')]
+    return p if all(isinstance(v, (int, float)) for v in p) else None
+
+
+def ensure(command, wanted):
+    """Puts a console toggle in a known state: runs it, reads the answer, and runs it once more if it went the wrong way."""
+    for _ in range(2):
+        tool('console', {'action': 'exec', 'command': command, 'capture': True})
+        time.sleep(1.2)
+        answer = ' '.join(tool('console', {'action': 'read'}).get('lines', []))
+        if wanted.lower() in answer.lower():
+            return True
+    return False
+
+
+def screenshot(name, target=None):
+    """The game's own screenshot through DevBench, moved out of the mod manager's overwrite folder.
+
+    With a target (a world position), the picture is taken from a free camera looking at it."""
+    if target:
+        eye = (target[0], target[1] - 260.0, target[2] + 150.0)
+        aim = (target[0], target[1], target[2] + 60.0)          # about the middle of a body
+        dx, dy, dz = aim[0] - eye[0], aim[1] - eye[1], aim[2] - eye[2]
+        yaw = math.atan2(dx, dy)                                 # 0 is north (+y), growing towards east (+x)
+        pitch = math.atan2(-dz, math.hypot(dx, dy))              # positive looks down
+        tool('camera', {'action': 'freecam', 'on': True})
+        tool('camera', {'action': 'drive', 'x': eye[0], 'y': eye[1], 'z': eye[2], 'pitch': pitch, 'yaw': yaw})
+        time.sleep(0.5)                                          # a rendered frame or two before the picture
+    try:
+        r = tool('capture', {'kind': 'native', 'checkpointId': name, 'cleanup': True}, timeout=40)
+    finally:
+        if target:
+            tool('camera', {'action': 'freecam', 'on': False})
+    if not r.get('ok'):
+        return None
+    os.makedirs(SHOTS, exist_ok=True)
+    target = os.path.join(SHOTS, name + '.png')
+    for base, _, files in os.walk(CAPTURES):
+        if name + '.png' in files:
+            # Copy and delete, not a rename: the overwrite folder and the build folder are on different drives.
+            shutil.copyfile(os.path.join(base, name + '.png'), target)
+            os.remove(os.path.join(base, name + '.png'))
+            return target
+    return None
+
+
+class Run:
+    def __init__(self, script):
+        self.script = script
+        self.drop_mark = None
+        self.slide_mark = 0
+        self.shots = []
+        self.bot_id = None     # the bot character's server id
+        self.npc_id = None     # the NPC it registered
+        self.mark = None
+        self.heal_rate = None
+        self.results = []
+
+    def subject(self, who):
+        sid = self.bot_id if who == 'copy' else self.npc_id
+        if not sid:
+            return None, 'the bot never reported that id'
+        form = form_of_server_id(sid)
+        if not form:
+            return None, 'the game logged no spawn for server id %s' % sid
+        return form, None
+
+    def check(self, text):
+        words = text.split()
+        who, what = words[0], words[1]
+        ok, detail = False, ''
+        try:
+            if who == 'game':
+                # "game alive": it still answers, and has run frames since the last time it was asked.
+                health = json.loads(urllib.request.urlopen('http://127.0.0.1:8921/api/health', timeout=6).read().decode())
+                ok = bool(health.get('ok'))
+                detail = 'frame %s, %s' % (health.get('frame'), health.get('lastLifecycle'))
+                if ok and what == 'inworld':
+                    menus = tool('menu', {'action': 'list'}).get('openMenus', [])
+                    loaded = tool('inspect', {'kind': 'state'}).get('playerLoaded')
+                    at_menu = [m for m in menus if m in ('Main Menu', 'Loading Menu')]
+                    ok = bool(loaded) and not at_menu
+                    detail += ', player loaded %s, menus %s' % (loaded, menus)
+            elif who == 'ids' and what == 'reused':
+                # "ids reused Seeker": the game gave an actor of that name a form id this client had deleted a copy
+                # under earlier in the session. Not a fault: it is what makes live-temp-reuse a test of anything.
+                deleted, reused = set(), []
+                for l in session_lines():
+                    m = re.search(r'Deleted actor ([0-9A-Fa-f]+)', l)
+                    if m:
+                        deleted.add(m.group(1).upper())
+                    m = re.search(r'Spawn Actor: ([0-9A-Fa-f]+), and NPC (.*)$', l)
+                    if m and m.group(1).upper() in deleted and m.group(2).strip() == ' '.join(words[2:]):
+                        reused.append(m.group(1).upper())
+                ok = bool(reused)
+                detail = ('reused: %s' % ', '.join(sorted(set(reused)))) if ok else 'none of the %d deleted ids came back; the run proves nothing' % len(deleted)
+            elif who == 'player' and what == 'alive':
+                dead = papyrus('Actor', 'IsDead', '14')
+                health = tool('inspect', {'kind': 'player'})['actorValues']['health']['current']
+                ok = dead is False and health > 0
+                detail = 'IsDead %s, health %.0f' % (dead, health)
+            elif who == 'slide':
+                lines = session_lines()
+                if what == 'mark':
+                    self.slide_mark = len(lines)
+                    ok, detail = True, 'from log line %d of this session' % self.slide_mark
+                else:
+                    frozen = moved = 0
+                    for l in lines[self.slide_mark:]:
+                        m = re.search(r'SlideDiag: (\d+) of (\d+) moves', l)
+                        if m:
+                            frozen += int(m.group(1))
+                            moved += int(m.group(2))
+                    wanted = float(words[2])
+                    if not moved:
+                        ok, detail = False, 'the game logged no SlideDiag line since the mark (the body did not move, or 10 s have not passed)'
+                    else:
+                        pct = 100.0 * frozen / moved
+                        ok = pct < wanted if what == 'below' else pct > wanted
+                        detail = '%d of %d moves with unchanged animation variables (%.0f%%), wanted %s %.0f%%' % (frozen, moved, pct, what, wanted)
+            elif who == 'drop':
+                ref = dropped_ref()
+                if what == 'gone':
+                    ok, detail = ref is None, ('no placed item left' if ref is None else 'still there as %s' % ref)
+                elif not ref:
+                    ok, detail = False, 'the game logged no placed item'
+                else:
+                    at = position(ref)
+                    if what == 'exists':
+                        ok = at is not None
+                        detail = 'item %s at %s' % (ref, ('(%.0f, %.0f, %.0f)' % tuple(at)) if at else 'no position')
+                    elif what == 'mark':
+                        self.drop_mark = at
+                        ok = at is not None
+                        detail = 'item %s at %s' % (ref, ('(%.0f, %.0f, %.0f)' % tuple(at)) if at else 'no position')
+                    elif what == 'moved':
+                        wanted = [float(w) for w in words[2:5]]
+                        if at is None or self.drop_mark is None:
+                            ok, detail = False, 'no position, or no mark taken'
+                        else:
+                            moved = [at[i] - self.drop_mark[i] for i in range(3)]
+                            ok = all(abs(moved[i] - wanted[i]) <= DROP_TOLERANCE for i in range(3))
+                            detail = 'item %s moved (%.0f, %.0f, %.0f), wanted (%.0f, %.0f, %.0f)' % tuple([ref] + moved + wanted)
+                    else:
+                        detail = 'unknown check'
+            elif who == 'player':
+                health = tool('inspect', {'kind': 'player'})['actorValues']['health']['current']
+                if what == 'mark':
+                    # The player regenerates a few points a second, which read as "the spell did 14 of its 24".
+                    # Switched off for the length of the run and put back at the end; nothing is saved.
+                    if self.heal_rate is None:
+                        # The multiplier, forced: setting the rate itself leaves whatever a perk or an enchantment
+                        # adds on top, which still gave back a point a second.
+                        self.heal_rate = papyrus('Actor', 'GetActorValue', '14', ['HealRateMult'])
+                        papyrus('Actor', 'ForceActorValue', '14', ['HealRateMult', 0.0])
+                        time.sleep(0.3)
+                        health = tool('inspect', {'kind': 'player'})['actorValues']['health']['current']
+                    self.mark = health
+                    ok, detail = True, 'health %.0f' % health
+                else:
+                    wanted = float(words[2])
+                    dropped = (self.mark if self.mark is not None else health) - health
+                    ok = abs(dropped - wanted) <= PLAYER_TOLERANCE
+                    detail = 'health %.0f -> %.0f, dropped %.0f (wanted %.0f)' % (self.mark, health, dropped, wanted)
+            else:
+                form, why = self.subject(who)
+                if not form:
+                    ok, detail = False, why
+                elif what == 'exists':
+                    x = papyrus('ObjectReference', 'GetPositionX', form)
+                    ok = isinstance(x, (int, float))
+                    detail = 'actor %s, x %s' % (form, x)
+                elif what == '3d':
+                    loaded = papyrus('ObjectReference', 'Is3DLoaded', form)
+                    ok = loaded is True
+                    detail = 'actor %s, Is3DLoaded %s' % (form, loaded)
+                elif what in ('alive', 'dead'):
+                    dead = papyrus('Actor', 'IsDead', form)
+                    ok = dead is (what == 'dead')
+                    detail = 'actor %s, IsDead %s' % (form, dead)
+                elif what == 'gait':
+                    # The body's position and the "Speed" its animation graph holds, sampled together. A body that
+                    # travels while its graph says zero is sliding; this asks the copy itself, not the stream.
+                    seconds = float(words[3]) if len(words) > 3 else 8.0
+                    end = time.time() + seconds
+                    last = position(form)
+                    moving = legs = 0
+                    top = 0.0
+                    while time.time() < end:
+                        time.sleep(0.3)
+                        at = position(form)
+                        speed = papyrus('ObjectReference', 'GetAnimationVariableFloat', form, ['Speed'])
+                        if at and last and isinstance(speed, (int, float)):
+                            if math.dist(at, last) > 10.0:
+                                moving += 1
+                                if abs(speed) > 1.0:
+                                    legs += 1
+                                top = max(top, abs(speed))
+                        last = at
+                    share = (100.0 * legs / moving) if moving else 0.0
+                    if not moving:
+                        # Nothing to judge, which is not the same as sliding: a Netch hovers on the spot.
+                        ok, detail = True, 'SKIPPED: actor %s did not travel in %.0f s, so there is no gait to read' % (form, seconds)
+                    else:
+                        # 50, not 80: a creature lunges, stops and is pushed about, and its copy trails the stream by
+                        # 300 ms, so even a healthy one is in the 70s. The broken cases measured 0 and 17.
+                        ok = share >= 50.0 if words[2] == 'walking' else share <= 20.0
+                        detail = 'actor %s moved in %d samples, %d of them with a speed in its animation graph (%.0f%%, top %.0f)' % (form, moving, legs, share, top)
+                elif what == 'health':
+                    value = papyrus('Actor', 'GetActorValue', form, ['Health'])
+                    base = papyrus('Actor', 'GetBaseActorValue', form, ['Health'])
+                    # "full" is whatever this game says the actor's own health is, which a script cannot know.
+                    wanted = float(base) if words[2] == 'full' and isinstance(base, (int, float)) else float(words[2] if words[2] != 'full' else 'nan')
+                    ok = isinstance(value, (int, float)) and abs(value - wanted) <= HEALTH_TOLERANCE
+                    detail = 'actor %s, health %s (wanted %.0f; its base health here is %s)' % (
+                        form, ('%.1f' % value) if isinstance(value, (int, float)) else value, wanted,
+                        ('%.0f' % base) if isinstance(base, (int, float)) else base)
+                else:
+                    detail = 'unknown check'
+        except Exception as e:
+            ok, detail = False, 'could not ask the game: %s %s' % (type(e).__name__, e)
+        self.results.append((ok, text, detail))
+        print('   %s  %-24s %s' % ('PASS' if ok else 'FAIL', text, detail), flush=True)
+
+    def run(self):
+        exe = os.path.join(RELEASE, 'STBot.exe')
+        cmd = [exe, os.path.join('scripts', self.script + '.txt'), '--server', '127.0.0.1:10578', '--name', 'Bot']
+        # Where the player stands, asked of the game. Left to itself the bot looks for a position line near the end
+        # of the client log, and after a busy script there is none there: it then waits at the world origin for
+        # five minutes and the script never starts (second run of live-temp-reuse, 2026-10-02).
+        try:
+            where = position('14')
+            if where:
+                cmd += ['--x', '%.0f' % where[0], '--y', '%.0f' % where[1]]
+        except Exception:
+            pass
+        print('== %s' % self.script, flush=True)
+        proc = subprocess.Popen(cmd, cwd=RELEASE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+        log = io.open(os.path.join(RELEASE, 'logs', self.script + '-bot.log'), 'w', encoding='utf-8')
+        for line in proc.stdout:
+            log.write(line)
+            m = re.search(r'ok: known me \(([0-9A-Fa-f]+) is known\)', line) or re.search(r'Character assigned.*?([0-9A-Fa-f]+)', line)
+            if m and not self.bot_id:
+                self.bot_id = m.group(1)
+            m = re.search(r'NPC registered as actor ([0-9A-Fa-f]+)', line)
+            if m:
+                self.npc_id = m.group(1)
+            m = re.search(r'\[script\] (CHECK .*|DO console .*|DO key .*|DO load last|DO server restart|DO sleep \d+|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
+            if m:
+                text = m.group(1)
+                if text.startswith('CHECK '):
+                    self.check(text[6:].strip())
+                elif text.strip() in ('DO combat on', 'DO combat off'):
+                    on = text.strip().endswith('on')
+                    if ensure('tcai', 'is On' if on else 'is Off'):
+                        print('   (combat AI %s)' % ('on' if on else 'off'), flush=True)
+                    else:
+                        print('   FAIL  combat AI could not be set', flush=True)
+                        self.results.append((False, text.strip(), 'console did not confirm'))
+                elif text.strip() in ('DO god on', 'DO god off'):
+                    on = text.strip().endswith('on')
+                    if ensure('tgm', 'enabled' if on else 'disabled'):
+                        print('   (god mode %s)' % ('on' if on else 'off'), flush=True)
+                    else:
+                        print('   FAIL  god mode could not be set', flush=True)
+                        self.results.append((False, text.strip(), 'console did not confirm'))
+                elif text.startswith('DO key '):
+                    parts = text.split()
+                    try:
+                        r = tool('input', {'action': 'down', 'device': 'keyboard', 'key': parts[2], 'maxHoldMs': int(parts[3]), 'owner': 'live-check'})
+                        print('   (key %s held for %s ms: %s)' % (parts[2], parts[3], 'accepted' if r.get('accepted') else r), flush=True)
+                    except Exception as e:
+                        print('   FAIL  key %s: %s' % (parts[2], type(e).__name__), flush=True)
+                        self.results.append((False, text.strip(), type(e).__name__))
+                elif text.startswith('DO sleep '):
+                    time.sleep(int(text.split()[2]))
+                elif text.strip() == 'DO server restart':
+                    try:
+                        noticed, back = restart_server()
+                        print('   (server restarted: the game noticed after %.0f s and was back in after %.0f s)' % (noticed, back), flush=True)
+                    except Exception as e:
+                        print('   FAIL  server restart: %s' % e, flush=True)
+                        self.results.append((False, 'server restart', str(e)))
+                elif text.strip() == 'DO load last':
+                    try:
+                        r = tool('game', {'action': 'loadLast'})
+                        print('   (load: %s)' % r.get('name'), flush=True)
+                    except Exception as e:
+                        print('   FAIL  load last: %s' % type(e).__name__, flush=True)
+                        self.results.append((False, 'load last', type(e).__name__))
+                elif text.startswith('DO console '):
+                    # Something only the game can do, at a moment only the script knows: move the player, say.
+                    command = text[len('DO console '):].strip()
+                    try:
+                        tool('console', {'action': 'exec', 'command': command})
+                        print('   (console: %s)' % command, flush=True)
+                    except Exception as e:
+                        print('   FAIL  console %s: %s' % (command, type(e).__name__), flush=True)
+                        self.results.append((False, 'console ' + command, type(e).__name__))
+                elif text.startswith('SHOT '):
+                    words = text[5:].split()
+                    name = '%s-%s' % (self.script, words[0])
+                    target = None
+                    if len(words) >= 3 and words[1] == 'of':
+                        if words[2] == 'player':
+                            target = position('14')
+                        elif words[2] == 'drop':
+                            ref = dropped_ref()
+                            target = position(ref) if ref else None
+                        else:
+                            form, _ = self.subject(words[2])
+                            target = position(form) if form else None
+                        if not target:
+                            print('   FAIL  screenshot %s: nothing to point the camera at' % name, flush=True)
+                            self.results.append((False, 'screenshot ' + name, 'no %s to look at' % words[2]))
+                            continue
+                    try:
+                        path = screenshot(name, target)
+                    except Exception as e:
+                        path = None
+                        print('   FAIL  screenshot %s: %s' % (name, type(e).__name__), flush=True)
+                    if path:
+                        self.shots.append(path)
+                        print('   (screenshot: %s)' % path, flush=True)
+                    else:
+                        self.results.append((False, 'screenshot ' + name, 'no picture came back'))
+                else:
+                    print('   ' + text, flush=True)
+        proc.wait()
+        log.close()
+        if isinstance(self.heal_rate, (int, float)):
+            papyrus('Actor', 'ForceActorValue', '14', ['HealRateMult', float(self.heal_rate)])
+        return self.results
+
+
+def main():
+    args = sys.argv[1:]
+    scripts = ALL if (not args or args == ['--all']) else args
+    try:
+        state = tool('inspect', {'kind': 'state'})
+    except Exception as e:
+        print('The game does not answer on DevBench (%s). Run Tools/VR/headless.ps1 up first.' % type(e).__name__)
+        return 2
+    if not state.get('playerLoaded'):
+        print('The game is up but no save is loaded.')
+        return 2
+
+    # Scripts are tracked in Code/bot/scripts; the bot reads them from the release folder.
+    src = os.path.join(ROOT, 'Code', 'bot', 'scripts')
+    for name in scripts:
+        with io.open(os.path.join(src, name + '.txt'), 'rb') as f:
+            data = f.read()
+        with io.open(os.path.join(RELEASE, 'scripts', name + '.txt'), 'wb') as f:
+            f.write(data)
+
+    if not ensure('tcai', 'is Off'):
+        print('Could not switch combat AI off; wildlife may attack the player during the run.')
+    if not ensure('tgm', 'disabled'):
+        print('Could not confirm god mode is off; the damage checks may read zero.')
+
+    failed = 0
+    total = 0
+    table = []
+    shots = []
+    for name in scripts:
+        # A game that went down takes every later script with it; say so once instead of failing each in turn.
+        try:
+            urllib.request.urlopen('http://127.0.0.1:8921/api/health', timeout=6).read()
+        except Exception:
+            table.append((name, 0, 0, 'NOT RUN: the game is gone'))
+            failed += 1
+            continue
+        run = Run(name)
+        results = run.run()
+        bad = [text for ok, text, _ in results if not ok]
+        total += len(results)
+        failed += len(bad)
+        shots += run.shots
+        if not results:
+            # A script whose bot never got going has no failed check either.
+            failed += 1
+            table.append((name, 0, 0, 'NOT RUN: no check was reached; see logs/%s-bot.log' % name))
+            time.sleep(6)
+            continue
+        table.append((name, len(results), len(bad), 'ok' if not bad else 'FAILED: ' + '; '.join(bad)))
+        time.sleep(6)  # let the server finish removing the bot before the next one joins
+
+    print('\n%-20s %6s %6s  %s' % ('script', 'checks', 'failed', ''))
+    for name, n, bad, note in table:
+        print('%-20s %6d %6d  %s' % (name, n, bad, note))
+    print('%d checks, %d failed' % (total, failed))
+    for path in shots:
+        print('screenshot: ' + path)
+    return 1 if failed else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

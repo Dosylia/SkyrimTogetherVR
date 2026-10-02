@@ -1,0 +1,7 @@
+# Joins after somebody else has come and gone, and looks for the player who was there first.
+# See Tools/VR/leaver-check.py.
+log leaver checker
+waitfor connected 30
+waitfor known other 20
+expect known other
+stop

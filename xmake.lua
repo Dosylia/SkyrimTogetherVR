@@ -83,8 +83,8 @@ add_requireconfs("magnum-integration.imgui", { override = true })
 on_load(function (target)
     if not _g.tilted_version then
         import("modules.version")
-        local branch, commitHash, timestamp, describe = version()
-        _g.tilted_version = { branch = branch, describe = describe }
+        local branch, commitHash, timestamp, describe, protocol = version()
+        _g.tilted_version = { branch = branch, describe = describe, protocol = protocol }
     end
     target:add("defines", "BUILD_BRANCH=\"" .. _g.tilted_version.branch .. "\"", "BUILD_COMMIT=\"" .. _g.tilted_version.describe .. "\"")
 end)
@@ -96,10 +96,12 @@ end)
 on_load(function (target)
     if not _g.tilted_version then
         import("modules.version")
-        local branch, commitHash, timestamp, describe = version()
-        _g.tilted_version = { branch = branch, describe = describe }
+        local branch, commitHash, timestamp, describe, protocol = version()
+        _g.tilted_version = { branch = branch, describe = describe, protocol = protocol }
     end
     target:add("defines", 'BUILD_BRANCH="' .. _g.tilted_version.branch .. '"', 'BUILD_COMMIT="' .. _g.tilted_version.describe .. '"')
+    -- What the server compares on connect: a digest of Code/encoding alone. See modules/version.lua.
+    target:add("defines", 'BUILD_PROTOCOL="' .. _g.tilted_version.protocol .. '"')
 end)
 
 before_build(function (target)
@@ -144,6 +146,9 @@ before_build(function (target)
 #endif
 #ifndef BUILD_COMMIT
 #define BUILD_COMMIT "unknown-version"
+#endif
+#ifndef BUILD_PROTOCOL
+#define BUILD_PROTOCOL "unknown-protocol"
 #endif
 ]]
     if not os.exists(buildInfoPath) or io.readfile(buildInfoPath) ~= buildInfo then

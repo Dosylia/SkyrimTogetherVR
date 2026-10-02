@@ -1,0 +1,46 @@
+# An NPC that dies while the player is somewhere else: is it dead when the player comes back?
+#
+#   python Tools\VR\live-check.py live-npc-away
+#
+# VR_TODO, "a copy that goes out of range is never put right when you come back": a body left where it was last
+# seen is the oldest report there is, and "the stale-copy repair now applies death state" has been waiting for a
+# session since 2026-09-26. The player is moved by console (a "DO console" line, run by the driver): out through a
+# load door to wherever Lydia is, and back to one of Mistwatch's own bandits. This bot is not standalone, so it
+# follows the player's cell both ways; the bear stays where it was registered and stays this bot's.
+log live npc away
+waitfor connected 45
+collect spawn health death ownership
+expect known me
+waitfor known other 40
+wait 5
+
+log -- bringing a bear
+npc temp 23A8A
+waitfor owned == 1 20
+wait 8
+log CHECK npc exists
+log CHECK npc alive
+wait 3
+
+# Where Lydia stands is under water in Emma's save; without this the player drowns in half a minute.
+log DO god on
+wait 3
+log -- the player leaves through a load door
+log DO console player.moveto A2C94
+wait 40
+
+log -- the bear dies while the player is away
+npclife dead 0
+wait 6
+
+log -- the player comes back
+log DO console player.moveto 45A63
+wait 45
+log CHECK npc exists
+log CHECK npc dead
+wait 3
+
+log DO god off
+wait 3
+log done
+stop

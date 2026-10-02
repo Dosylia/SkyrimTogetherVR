@@ -47,12 +47,15 @@ Details live in `VR_TODO.md`. This is the short version.
 - Crash tools, bot test pairs
 - Dropped items remembered by the server
 - Dropped items moved by hand, seen moving
-- Lurker and Netch animations synced
+- Lurker, Netch and Seeker animations synced
+- Game runs and is tested without a headset
+- Load-door crash with spawned creatures fixed
+- 30-second diagnostic stall removed
 
 ## Steps to go
 
 1. **Confirm in play:** the 30 `[untested]` items in `VR_TODO.md`, sliding first
-2. **Creature sliding:** capture the Seeker, add it as a replacer
+2. **Creature sliding:** Lurker and Seeker measured walking on the receiving side (one game plus a bot replaying real movement); a quick look with Seen is still worth having
 3. **Crashes:** wrist menu crash, loading after death; confirm death no longer drops to the main menu (same cause as level-up, now fixed)
 4. **Performance:** measure first, then spawn bursts and the 300 ms remote delay
 5. **Followers:** end the tug of war over a shared follower

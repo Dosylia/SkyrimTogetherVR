@@ -184,6 +184,7 @@ GameServer::GameServer(Console::ConsoleRegistry& aConsole) noexcept
 
     UpdateInfo();
     spdlog::info("Server {} started on port {}", BUILD_COMMIT, GetPort());
+    spdlog::info("Protocol {}: clients built with the same message definitions are let in, whatever their version", BUILD_PROTOCOL);
     UpdateTitle();
 
     m_pWorld = MakeUnique<World>();
@@ -634,13 +635,20 @@ void GameServer::OnDisconnection(const ConnectionId_t aConnectionId, EDisconnect
         notify.Username = pPlayer->GetUsername();
         SendToPlayers(notify);
 
-        entt::entity playerCharacter = pPlayer->GetCharacter().value_or(static_cast<entt::entity>(0));
+        // No character is no character. This read `.value_or(static_cast<entt::entity>(0))`, and entity 0 is a real
+        // entity: the first one a server makes, which is the character of whoever was in first. So a player who left
+        // before having a character -- a client that connected and crashed, timed out or gave up while loading --
+        // had the first player's character removed in their place. Everybody else lost sight of that player, no
+        // newcomer was ever sent them again, and the server logged "Entity is invalid: 0" for every health update
+        // they went on sending. Found 2026-10-02 with the real game as the first player and a bot that could not
+        // find it; Tools/VR/leaver-check.py is the test.
+        const auto playerCharacter = pPlayer->GetCharacter();
 
         // Cleanup all entities that we own
         auto ownerView = m_pWorld->view<OwnerComponent>();
         for (auto entity : ownerView)
         {
-            if (entity == playerCharacter)
+            if (playerCharacter && entity == *playerCharacter)
             {
                 m_pWorld->GetDispatcher().enqueue(CharacterRemoveEvent(World::ToInteger(entity)));
                 continue;
@@ -836,13 +844,20 @@ void GameServer::HandleAuthenticationRequest(const ConnectionId_t aConnectionId,
         Kick(aConnectionId);
     };
 #if 1
-    // to make our testing life a bit easier.
-    if (acRequest->Version != BUILD_COMMIT)
+    // The protocol, not the version. The version changes with any edit anywhere and with every commit, so comparing
+    // it refused clients that spoke exactly this server's messages: a bot after a bot-only fix, a client built just
+    // before a commit against a server built just after. The protocol id is a digest of Code/encoding alone.
+    if (acRequest->Protocol != BUILD_PROTOCOL)
     {
-        spdlog::info("New player {:x} '{}' tried to connect with client {} - Version mismatch", aConnectionId, remoteAddress, acRequest->Version.c_str());
+        spdlog::info("New player {:x} '{}' tried to connect with client {} (protocol '{}'); this server speaks protocol {} - refused", aConnectionId, remoteAddress,
+                     acRequest->Version.c_str(), acRequest->Protocol.c_str(), BUILD_PROTOCOL);
+        // The client shows this string as "the version the server expected"; the protocol is what it needs to match.
+        serverResponse.Version = BUILD_COMMIT " (protocol " BUILD_PROTOCOL ")";
         sendKick(RT::kWrongVersion);
         return;
     }
+    if (acRequest->Version != BUILD_COMMIT)
+        spdlog::info("Player {:x} '{}' is on another build ({}) with the same protocol {}; let in", aConnectionId, remoteAddress, acRequest->Version.c_str(), BUILD_PROTOCOL);
 #endif
 
     if (m_pWorld->GetPlayerManager().Count() >= uMaxPlayerCount.value_as<uint32_t>())

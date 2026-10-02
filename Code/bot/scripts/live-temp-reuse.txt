@@ -1,0 +1,67 @@
+# The game gives one of its own actors the form id a deleted copy had. Does the client still take it for a copy?
+#
+#   python Tools\VR\live-check.py live-temp-reuse
+#
+# The fix for the crash of 2026-10-01 18:45 (live-away-seeker) rests on the client knowing which temporary actors
+# it made itself: it keeps their form ids in a list (s_ownCopies in CharacterService.cpp) and leaves every other
+# temporary actor to the game. The game hands form ids out again once an actor is deleted -- the log of 2026-10-02
+# has "Deleted actor FF001169" three times in two minutes -- so an id that stays in the list after its copy is
+# gone will sooner or later belong to an actor the game made, and that actor is then disabled and deleted in the
+# middle of the game's own disposal of it, which is the crash.
+#
+# So: this bot brings a bear and goes away, which makes the game delete two copies (the bear and this bot's
+# character). The game then spawns Seekers, which are free to get those ids. Then the same walk as live-away-seeker.
+# "ids reused" is the check that a Seeker did get a deleted copy's id; without that the rest proves nothing.
+log live temp reuse
+waitfor connected 45
+collect spawn ownership
+expect known me
+waitfor known other 40
+wait 5
+
+log -- a bear of this bot's: the game makes a copy of it
+npc temp 23A8A
+waitfor owned == 1 20
+wait 8
+log CHECK npc exists
+wait 3
+
+log -- this bot leaves: the server removes the bear and this bot, and the game deletes both copies
+disconnect
+wait 10
+
+# Combat AI is off for the whole run (live-check.py sees to it), so the Seekers stand there instead of attacking.
+log -- creatures the game spawns itself, next to the player
+log DO console player.placeatme 0201EEC9 3
+wait 8
+log CHECK ids reused Seeker
+wait 3
+
+reconnect
+waitfor connected 45
+waitfor known other 40
+wait 5
+ownership accept
+stay
+
+# Where Lydia stands is under water in Emma's save; without this the player drowns in half a minute.
+log DO god on
+wait 3
+log -- the player leaves; this bot stays and is given the creatures
+log DO console player.moveto A2C94
+waitfor owned >= 1 60
+wait 25
+log CHECK game alive
+wait 3
+
+log -- the player comes back
+log DO console player.moveto 45A63
+wait 45
+log CHECK game alive
+log CHECK game inworld
+wait 3
+
+log DO god off
+wait 3
+log done
+stop

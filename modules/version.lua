@@ -14,6 +14,7 @@ function main (target)
 	local commit = "unknown-commit"
 	local timestamp = ""
 	local describe = "unknown-version"
+	local protocol = "unknown-protocol"
 	try
 	{
 		function ()
@@ -55,6 +56,61 @@ function main (target)
 					describe = describe .. "-dirty." .. os.iorunv(git, {"hash-object", tmp}):trim():sub(1, 7)
 					os.rm(tmp)
 				end
+
+				-- The protocol id: what the server actually compares on connect. It is a digest of the contents of
+				-- Code/encoding -- every message, struct and opcode -- and of nothing else, so two builds accept
+				-- each other exactly when they agree on what goes over the wire. The version above changes with any
+				-- edit anywhere and with every commit, which is right for telling builds apart and wrong for
+				-- deciding who may talk to whom: on 2026-10-01 a build made before a commit and one made after it,
+				-- from the same files, could not connect to each other.
+				--
+				-- Contents, not history: each file is hashed by git (which also evens out line endings between a
+				-- Windows and a Linux checkout), and the list of path-and-hash pairs is folded in order. Committed,
+				-- staged or neither makes no difference.
+				local listed = os.iorunv(git, {"ls-files", "-co", "--exclude-standard", "--", "Code/encoding"})
+				local paths = {}
+				for line in listed:gmatch("[^\r\n]+") do
+					if os.isfile(line) then
+						table.insert(paths, line)
+					end
+				end
+				table.sort(paths)
+				local folded = 2166136261
+				local function fold(text)
+					for i = 1, #text do
+						-- FNV-1a in plain arithmetic: xor the low byte, then multiply by 16777619 modulo 2^32.
+						local low = folded % 256
+						local byte = text:byte(i)
+						local mixed = 0
+						local bit = 1
+						for _ = 1, 8 do
+							if (low % 2) ~= (byte % 2) then
+								mixed = mixed + bit
+							end
+							low = math.floor(low / 2)
+							byte = math.floor(byte / 2)
+							bit = bit * 2
+						end
+						folded = folded - (folded % 256) + mixed
+						folded = (((folded % 256) * 16777216) + folded * 403) % 4294967296
+					end
+				end
+				local batch = 60
+				for first = 1, #paths, batch do
+					local args = {"hash-object", "--"}
+					for i = first, math.min(first + batch - 1, #paths) do
+						table.insert(args, paths[i])
+					end
+					local hashes = os.iorunv(git, args)
+					local i = first
+					for hash in hashes:gmatch("[^\r\n]+") do
+						fold(paths[i] .. ":" .. hash:trim() .. ";")
+						i = i + 1
+					end
+				end
+				if #paths > 0 then
+					protocol = string.format("%08x", folded)
+				end
 			else
 				error("git not found")
 			end
@@ -68,5 +124,5 @@ function main (target)
 		}
     }
 
-    return branch, commit, timestamp, describe
+    return branch, commit, timestamp, describe, protocol
 end

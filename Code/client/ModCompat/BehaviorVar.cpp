@@ -842,6 +842,15 @@ void BehaviorVar::Init()
     {
         static size_t firsttime = 0;
 
+        // A replacer without an original hash describes a creature this mod has no built-in behaviour for (Lurker and
+        // Netch, 2026-09-30), so there is no "self" among the built-in ones to find. Checking it anyway logged
+        // "failure to find self" as critical at every start, for two folders that were working as intended.
+        if (signature.origHash == 0)
+        {
+            spdlog::info(__FUNCTION__ ": {} is a creature of its own, with no built-in behaviour behind it; matched by signature {} alone", signature.creatureName, signature.signatureVar);
+            continue;
+        }
+
         auto matches = SignatureMatches(signature.origHash, signature.signatureVar);
         switch (matches.size())
         {

@@ -1,0 +1,52 @@
+# A creature the game spawned itself, removed by the server while the player is somewhere else.
+#
+#   python Tools\VR\live-check.py live-temp-remove
+#
+# Same family as the crash of 2026-10-01 18:45 (live-away-seeker), by another road. There the game disposed of its
+# own temporary actor and the client interfered. Here it is the server that says "that actor is gone": the player
+# walks away from a creature the game made, the other player is given it, and then the other player leaves too.
+# Nobody is left to own it, the server removes it for everyone, and the client deletes temporary actors it is told
+# to remove (CharacterService::DeleteTempActor) without asking who made them.
+#
+# The checks are that the game is still there after the removal and after going back to where the creature stood.
+log live temp remove
+waitfor connected 45
+collect spawn ownership
+expect known me
+waitfor known other 40
+wait 5
+
+# Keep what the server hands over, and do not follow the player out.
+ownership accept
+stay
+
+# Combat AI is off for the whole run (live-check.py sees to it), so the Seeker stands there instead of attacking.
+log -- a creature the game spawns itself, next to the player
+log DO console player.placeatme 0201EEC9 1
+wait 10
+
+# Where Lydia stands is under water in Emma's save; without this the player drowns in half a minute.
+log DO god on
+wait 3
+log -- the player leaves through a load door; this bot stays and is given what the player left
+log DO console player.moveto A2C94
+waitfor owned >= 1 60
+wait 12
+
+log -- this bot leaves too: nobody is left to own the creature, so the server removes it for everyone
+disconnect
+wait 12
+log CHECK game alive
+wait 3
+
+log -- the player comes back to where the creature stood
+log DO console player.moveto 45A63
+wait 45
+log CHECK game alive
+log CHECK game inworld
+wait 3
+
+log DO god off
+wait 3
+log done
+stop

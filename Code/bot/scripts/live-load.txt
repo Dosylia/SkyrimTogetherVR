@@ -1,0 +1,44 @@
+# Loading a save while connected: twice in a row, and once more after dying and coming back.
+#
+#   python Tools\VR\live-check.py live-load
+#
+# VR_TODO, "Seen, on the load after death" (2026-09-24): a save/load request built while connected, the Loading
+# Menu up, and an access violation 68 ms later. `log DO load last` loads the most recent save through DevBench at a
+# chosen moment. This bot stands by throughout, so there is a copy to tear down each time. The load in the middle of
+# dying is its own script (live-load-dead), because that one takes the game down in the no-headset rig.
+log live load
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+wait 6
+log CHECK game inworld
+wait 3
+
+log -- loading the last save while connected
+log DO load last
+wait 45
+log CHECK game inworld
+log CHECK player alive
+wait 3
+
+log -- and again
+log DO load last
+wait 45
+log CHECK game inworld
+log CHECK player alive
+wait 3
+
+log -- killed, brought back by the mod, then a load
+log DO console player.kill
+wait 14
+log CHECK player alive
+wait 2
+log DO load last
+wait 45
+log CHECK game inworld
+log CHECK player alive
+wait 3
+
+log done
+stop

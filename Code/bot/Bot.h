@@ -17,6 +17,7 @@
 #include <Messages/AssignCharacterResponse.h>
 #include <Messages/CharacterSpawnRequest.h>
 #include <Structs/GameId.h>
+#include <Structs/ReferenceUpdate.h>
 #include <Structs/Inventory.h>
 #include <Structs/Tints.h>
 
@@ -69,6 +70,8 @@ struct BotOptions
 struct KnownActor
 {
     uint32_t ServerId{};
+    //! The base form the server sent with an NPC's spawn. Empty for players and for NPCs this bot registered itself.
+    GameId Base{};
     std::string Name;      // when the server named it
     float Health{};
     bool HealthKnown{};
@@ -226,6 +229,7 @@ private:
     //! something it cannot drive -- every existing test relies on that. The ownership-churn pair turns it on,
     //! because handing an actor back and forth on purpose is the thing it measures.
     bool m_acceptOwnership{false};
+    bool m_followHostCell{true}; // false after `stay`
     //! The cookie of an NPC this bot asked the server to register, kept apart from m_cookie so the response for
     //! its own character and the response for the NPC can be told apart.
     uint32_t m_npcCookie{};
@@ -262,6 +266,30 @@ private:
     bool m_commandFresh = true;
     glm::vec3 m_walkTarget{};
     float m_walkSpeed{};
+    //! `capture` and `replay`: the movement stream the server relayed for one character -- positions, animation
+    //! variables, actions and VR pose, exactly as any client is given them -- and when each piece arrived. Replayed
+    //! as this bot's own character (or an NPC it owns), it is a remote body that moves the way a real one does,
+    //! which a bot walking in straight lines with no animation data never was.
+    struct CapturedUpdate
+    {
+        uint32_t AtMs{};
+        ReferenceUpdate Update{};
+    };
+    std::vector<CapturedUpdate> m_capture;
+    uint32_t m_captureId{};
+    bool m_capturing{false};
+    Clock::time_point m_captureStart{};
+    size_t m_replayIndex{};
+    uint32_t m_replayTarget{};
+    int m_replayRound{};
+    bool m_replaying{false};
+    glm::vec3 m_replayBase{};
+    //! Where the NPC this bot registered stands, which is where a replay for it starts from.
+    glm::vec3 m_npcPosition{};
+    //! The base form of the last character captured, as the server names it: what "npc captured" registers a
+    //! creature of. The bot only knows Skyrim.esm's mod id itself, and a Seeker is not in Skyrim.esm.
+    GameId m_captureBase{};
+
     //! `burn`: who is being hurt and how many quarter-second batches have gone out.
     uint32_t m_burnTarget{};
     int m_burnSent{};

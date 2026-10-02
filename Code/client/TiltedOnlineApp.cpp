@@ -80,6 +80,13 @@ TiltedOnlineApp::TiltedOnlineApp()
     set_default_logger(logger);
 
     spdlog::info("Skyrim Together client, build " BUILD_BRANCH "@" BUILD_COMMIT);
+
+#ifdef SKYRIMVR
+    // Loaded before there was a log; said now. Each of these is an id the installed VR Address Library also defines,
+    // as something else -- harmless while our own address is used, and worth a look when the library is updated.
+    for (const auto& conflict : VersionDb::Get().GetOverrideConflicts())
+        spdlog::warn("Address id {} differs: the VR Address Library says {:X}, this client uses its own {:X}", conflict.Id, conflict.Library, conflict.Ours);
+#endif
 }
 
 TiltedOnlineApp::~TiltedOnlineApp() = default;

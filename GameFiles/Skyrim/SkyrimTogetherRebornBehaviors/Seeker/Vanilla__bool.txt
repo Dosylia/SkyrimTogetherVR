@@ -1,0 +1,12 @@
+bAnimationDriven
+bAllowRotation
+IsStaggering
+IsCasting
+IsAttackReady
+IsEquipping
+bMLh_Ready
+bMRh_Ready
+bWantCastRight
+bWantCastLeft
+bEquipOk
+bWeapReady
