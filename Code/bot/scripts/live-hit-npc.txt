@@ -1,0 +1,38 @@
+# Hits on the other player's NPC reach its owner and come back: the player here burns the bot's bear.
+#
+#   python Tools\VR\live-check.py live-hit-npc
+#
+# The bear belongs to this bot, so the game holds a copy it does not run. A Firebolt cast by the player at the copy
+# (Spell.Cast, there is no sword arm without a controller) has to reach this bot as damage to its bear, and what this
+# bot then reports as the owner -- the bear dead -- has to come back to the copy. The copy's own health does not move
+# when it is hit: the owner decides (first run, 2026-10-03: the bot saw -109, the copy stayed at 100 until told).
+log live hit npc
+waitfor connected 45
+collect health spawn
+expect known me
+waitfor known other 40
+wait 5
+
+log -- a bear of this bot's
+npc temp 23A8A
+waitfor owned == 1 20
+wait 8
+log CHECK npc exists
+log CHECK npc health 100
+wait 3
+
+log -- the player casts a Firebolt at it
+log DO papyrus Spell Cast 12FCD 14 npc
+wait 6
+expect health npc < 100
+wait 3
+
+# This bot does not simulate its bear: a real owner's game would apply the damage and report the result. It reports
+# here what the damage did -- the bear dead -- and that has to come back to the game's copy.
+log -- the owner reports its bear dead
+npclife dead 0
+wait 6
+log CHECK npc dead
+wait 3
+log done
+stop

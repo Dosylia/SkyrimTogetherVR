@@ -10,6 +10,8 @@
 #include <Messages/NotifyDroppedItemRemoved.h>
 #include <Messages/RequestDroppedItemMove.h>
 #include <Messages/NotifyDroppedItemMove.h>
+#include <Messages/RequestWorldObjectMove.h>
+#include <Messages/NotifyWorldObjectMove.h>
 #include <Messages/EnterInteriorCellRequest.h>
 #include <Messages/EnterExteriorCellRequest.h>
 #include <Messages/ShiftGridCellRequest.h>
@@ -44,6 +46,7 @@ DroppedItemService::DroppedItemService(World& aWorld, entt::dispatcher& aDispatc
     , m_addConnection(aDispatcher.sink<PacketEvent<RequestDroppedItemAdd>>().connect<&DroppedItemService::OnAdd>(this))
     , m_removeConnection(aDispatcher.sink<PacketEvent<RequestDroppedItemRemove>>().connect<&DroppedItemService::OnRemove>(this))
     , m_moveConnection(aDispatcher.sink<PacketEvent<RequestDroppedItemMove>>().connect<&DroppedItemService::OnMove>(this))
+    , m_objectMoveConnection(aDispatcher.sink<PacketEvent<RequestWorldObjectMove>>().connect<&DroppedItemService::OnObjectMove>(this))
     , m_interiorConnection(aDispatcher.sink<PacketEvent<EnterInteriorCellRequest>>().connect<&DroppedItemService::OnEnterInteriorCell>(this))
     , m_exteriorConnection(aDispatcher.sink<PacketEvent<EnterExteriorCellRequest>>().connect<&DroppedItemService::OnEnterExteriorCell>(this))
     , m_gridConnection(aDispatcher.sink<PacketEvent<ShiftGridCellRequest>>().connect<&DroppedItemService::OnShiftGridCell>(this))
@@ -162,6 +165,32 @@ void DroppedItemService::OnMove(const PacketEvent<RequestDroppedItemMove>& acMes
     }
 }
 
+// A placed world object moved by a player's hand (2026-10-03: a bottle carried around the castle and a cart pushed,
+// neither seen by the other player). Relayed to everyone in range, and remembered once it stops.
+void DroppedItemService::OnObjectMove(const PacketEvent<RequestWorldObjectMove>& acMessage) noexcept
+{
+    const auto& message = acMessage.Packet;
+    const uint64_t cKey = (static_cast<uint64_t>(message.ObjectId.ModId) << 32) | message.ObjectId.BaseId;
+
+    if (message.AtRest)
+        m_objects[cKey] = ObjectPlace{message.ObjectId, message.CellId, message.WorldSpaceId, message.Position, message.Rotation};
+
+    NotifyWorldObjectMove notify{};
+    notify.ObjectId = message.ObjectId;
+    notify.CellId = message.CellId;
+    notify.WorldSpaceId = message.WorldSpaceId;
+    notify.Position = message.Position;
+    notify.Rotation = message.Rotation;
+    notify.AtRest = message.AtRest;
+
+    const CellIdComponent cell{message.CellId, message.WorldSpaceId, GridCellCoords::CalculateGridCellCoords(message.Position)};
+    for (Player* pPlayer : m_world.GetPlayerManager())
+    {
+        if (pPlayer != acMessage.pPlayer && pPlayer->GetCellComponent().IsInRange(cell, false))
+            pPlayer->Send(notify);
+    }
+}
+
 // The packet, not the player's cell component: another service updates that component from the same packet, and the
 // order the two run in is not something to rely on.
 void DroppedItemService::OnEnterInteriorCell(const PacketEvent<EnterInteriorCellRequest>& acMessage) const noexcept
@@ -188,6 +217,21 @@ void DroppedItemService::SendInRange(Player* apPlayer, const CellIdComponent& ac
     {
         if (acViewer.IsInRange(CellOf(item), false))
             Send(apPlayer, item);
+    }
+
+    for (const auto& [key, place] : m_objects)
+    {
+        const CellIdComponent cell{place.CellId, place.WorldSpaceId, GridCellCoords::CalculateGridCellCoords(place.Position)};
+        if (!acViewer.IsInRange(cell, false))
+            continue;
+        NotifyWorldObjectMove notify{};
+        notify.ObjectId = place.ObjectId;
+        notify.CellId = place.CellId;
+        notify.WorldSpaceId = place.WorldSpaceId;
+        notify.Position = place.Position;
+        notify.Rotation = place.Rotation;
+        notify.AtRest = true;
+        apPlayer->Send(notify);
     }
 }
 

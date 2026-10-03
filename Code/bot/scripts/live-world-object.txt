@@ -1,0 +1,57 @@
+# An object placed in the world, moved by hand, is seen moving by the other player -- both ways.
+#
+#   python Tools\VR\live-check.py live-world-object
+#
+# On 2026-10-03 Emma and Seen each carried a bottle around and Emma pushed a cart; neither saw the other's. Dropped
+# items had their own sync, objects that were always there had none. Now a client watches the movable objects within
+# 400 units of its player and sends where one goes; the other client holds it (keyframed) and follows.
+#
+# The object is a wooden plate of Skyrim.esm by Mistwatch (reference 92D04, about 1800 units from where the test save
+# starts). The player is moved to it; the game moves it the way a hand would (papyrus SetPosition, since the VR
+# console refuses "<id>.<command>"), and the bot must hear of that; then the bot moves it, and the game's plate must be
+# where the bot put it.
+log live world object
+waitfor connected 45
+expect known me
+waitfor known other 40
+wait 5
+
+# The plate is an ordinary reference, in memory only while its cell is loaded: the script before this one in the suite
+# (live-whiterun) leaves the player in Whiterun, and from there "moveto 92D04" finds nothing (2026-10-03 13:05).
+log -- to Mistwatch, where the plate is
+log DO god on
+log DO console cow Tamriel 34 -9
+wait 30
+log -- the player goes to the plate
+log DO console player.moveto 92D04
+wait 10
+
+log -- the game moves the plate; the bot must hear of it
+log DO papyrus ObjectReference SetPosition 92D04 f:139200 f:-33349 f:-9679
+wait 1
+log DO papyrus ObjectReference SetPosition 92D04 f:139200 f:-33300 f:-9679
+waitfor objectmoves >= 1 15
+log CHECK logged WorldObject: 92D04 is being moved here
+wait 4
+
+log -- the bot moves the plate: the game holds it and follows
+moveobject 92D04 139080 -33240 -9600 held
+wait 0.5
+moveobject 92D04 139060 -33230 -9600 held
+wait 0.5
+moveobject 92D04 139040 -33220 -9600 held
+wait 0.5
+moveobject 92D04 139020 -33210 -9600 held
+log CHECK ref 92D04 near 139020 -33210 -9600 30
+wait 0.5
+moveobject 92D04 139020 -33210 -9600 held
+wait 0.5
+moveobject 92D04 139020 -33210 -9600 rest
+log CHECK logged WorldObject: 92D04 is being moved over there; holding it here and following
+wait 4
+log CHECK logged WorldObject: 92D04 was put down over there; handed back to physics here
+log CHECK game alive
+log DO god off
+wait 3
+log done
+stop

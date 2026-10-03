@@ -14,6 +14,8 @@
 #include <Messages/NotifyDroppedItemRemoved.h>
 #include <Messages/RequestDroppedItemMove.h>
 #include <Messages/NotifyDroppedItemMove.h>
+#include <Messages/RequestWorldObjectMove.h>
+#include <Messages/NotifyWorldObjectMove.h>
 #include <Events/UpdateEvent.h>
 #include <NetImmerse/NiTransform.h>
 
@@ -119,6 +121,7 @@ DroppedItemService::DroppedItemService(World& aWorld, entt::dispatcher& aDispatc
     m_notifyConnection = aDispatcher.sink<NotifyDroppedItem>().connect<&DroppedItemService::OnNotifyDroppedItem>(this);
     m_removedConnection = aDispatcher.sink<NotifyDroppedItemRemoved>().connect<&DroppedItemService::OnNotifyDroppedItemRemoved>(this);
     m_moveConnection = aDispatcher.sink<NotifyDroppedItemMove>().connect<&DroppedItemService::OnNotifyDroppedItemMove>(this);
+    m_objectMoveConnection = aDispatcher.sink<NotifyWorldObjectMove>().connect<&DroppedItemService::OnNotifyWorldObjectMove>(this);
     m_updateConnection = aDispatcher.sink<UpdateEvent>().connect<&DroppedItemService::OnUpdate>(this);
 }
 
@@ -136,6 +139,17 @@ void DroppedItemService::OnDisconnected(const DisconnectedEvent&) noexcept
     m_announced.clear();
     m_reportedOldDrops = false;
     m_motion.clear();
+
+    // Whatever the other player was holding is let go here.
+    for (const auto& [formId, motion] : m_objectMotion)
+    {
+        if (!motion.Held)
+            continue;
+        if (TESObjectREFR* pRef = Cast<TESObjectREFR>(TESForm::GetById(formId)); pRef && !pRef->IsDeleted())
+            pRef->SetMotionType(TESObjectREFR::kMotionDynamic);
+    }
+    m_objectMotion.clear();
+    m_objectCandidates.clear();
 }
 
 void DroppedItemService::OnCellChange(const CellChangeEvent&) noexcept
@@ -190,7 +204,16 @@ bool DroppedItemService::SendAdd(TESObjectREFR* apRef, const Inventory::Entry& a
 void DroppedItemService::OnItemDropped(const ItemDroppedEvent& acEvent) noexcept
 {
     if (!m_transport.IsConnected())
+    {
+        // Kept for the next connection: nobody can be told now, and the game's own list of the player's drops is
+        // nowhere this client can find it (see m_droppedOffline).
+        if (acEvent.Item.BaseId != GameId{} && m_droppedOffline.size() < 256)
+        {
+            m_droppedOffline.emplace_back(acEvent.RefFormId, acEvent.Item);
+            spdlog::info("DroppedItem: dropped {:X} while not connected; it is announced once connected", acEvent.RefFormId);
+        }
         return;
+    }
 
     TESObjectREFR* pRef = Cast<TESObjectREFR>(TESForm::GetById(acEvent.RefFormId));
     if (!pRef || acEvent.Item.BaseId == GameId{})
@@ -370,6 +393,23 @@ void DroppedItemService::AnnounceOldDrops() noexcept
     if (!pPlayer)
         return;
 
+    // First what this client saw the player drop while offline, if it still lies where it fell.
+    if (!m_droppedOffline.empty() && m_transport.IsConnected())
+    {
+        uint32_t announced = 0;
+        for (const auto& [refFormId, item] : m_droppedOffline)
+        {
+            TESObjectREFR* pRef = Cast<TESObjectREFR>(TESForm::GetById(refFormId));
+            if (!IsItem(pRef) || pRef->IsDisabled() || pRef->IsDeleted() || m_idByRef.count(refFormId) || m_announced.count(refFormId))
+                continue;
+            m_announced.insert(refFormId);
+            if (SendAdd(pRef, item, true))
+                ++announced;
+        }
+        spdlog::info("DroppedItem: {} of the {} item(s) dropped while not connected announced", announced, m_droppedOffline.size());
+        m_droppedOffline.clear();
+    }
+
     // Both types have to have resolved on this build: DynamicCast with a null type descriptor is not safe to call.
     if (!internal::RttiLocator<BSExtraData>::Get() || !internal::RttiLocator<ExtraDroppedItemList>::Get())
     {
@@ -438,15 +478,17 @@ void DroppedItemService::AnnounceOldDrops() noexcept
 
 void DroppedItemService::OnUpdate(const UpdateEvent&) noexcept
 {
-    if (m_refById.empty() || !m_transport.IsConnected())
+    if (!m_transport.IsConnected())
         return;
 
-    // Ten times a second is enough to follow a hand, and the list is a handful of items.
+    // Thirty times a second. Ten was not enough to follow a hand: Seen saw Emma's bowl move "sluggish and stuttering
+    // like there is not enough updates of its position" (2026-10-03 09:12), and the receiving side places the item
+    // where each update says, with nothing in between. The list is a handful of items.
     static std::chrono::steady_clock::time_point s_next{};
     const auto now = std::chrono::steady_clock::now();
     if (now < s_next)
         return;
-    s_next = now + std::chrono::milliseconds(100);
+    s_next = now + std::chrono::milliseconds(33);
 
     for (const auto& [id, refFormId] : m_refById)
     {
@@ -520,6 +562,182 @@ void DroppedItemService::OnUpdate(const UpdateEvent&) noexcept
             spdlog::info("DroppedItem: {} came to rest at ({:.0f}, {:.0f}, {:.0f})", id, position.x, position.y, position.z);
         }
     }
+
+    UpdateWorldObjects(now);
+}
+
+namespace
+{
+// What a hand can pick up or push in the world: items, alchemy apparatus (33) and movable statics (36, carts, buckets
+// on hooks). Statics and furniture never move.
+bool IsMovableObject(const TESObjectREFR* apRef) noexcept
+{
+    if (IsItem(apRef))
+        return true;
+    if (!apRef || !apRef->baseForm)
+        return false;
+    const auto cType = static_cast<uint8_t>(apRef->baseForm->formType);
+    return cType == 33 || cType == 36;
+}
+} // namespace
+
+// Objects placed in the world, moved by the player's hand (HIGGS) or pushed: on 2026-10-03 Emma and Seen both carried a
+// bottle around the castle and Emma pushed a cart, and neither was seen by the other. Watched the way dropped items
+// are, but only near the player, and identified by their own reference id, which every game shares.
+void DroppedItemService::UpdateWorldObjects(const std::chrono::steady_clock::time_point aNow) noexcept
+{
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    TESObjectCELL* pCell = pPlayer ? pPlayer->GetParentCellEx() : nullptr;
+    if (!pCell)
+        return;
+
+    constexpr float cWatchRadius = 400.f;
+    const glm::vec3 playerAt(pPlayer->position.x, pPlayer->position.y, pPlayer->position.z);
+
+    if (aNow >= m_candidatesAt)
+    {
+        m_candidatesAt = aNow + std::chrono::seconds(1);
+        m_objectCandidates.clear();
+
+        static const Vector<FormType> s_types = []
+        {
+            Vector<FormType> types(kItemTypes);
+            types.push_back(static_cast<FormType>(33));
+            types.push_back(static_cast<FormType>(36));
+            return types;
+        }();
+        for (TESObjectREFR* pRef : pCell->GetRefsByFormTypes(s_types))
+        {
+            // Temporary references are dropped items, which have their own record above.
+            if (!pRef || pRef->formID >= 0xFF000000 || m_idByRef.count(pRef->formID))
+                continue;
+            if (pRef->IsDisabled() || pRef->IsDeleted() || !pRef->GetNiNode() || DistanceTo(pRef, playerAt) > cWatchRadius)
+                continue;
+            m_objectCandidates.push_back(pRef->formID);
+            if (m_objectCandidates.size() >= 128)
+                break;
+        }
+
+        // Held for the other player until it is let go, wherever it is now.
+        for (const auto& [formId, motion] : m_objectMotion)
+            if (motion.Held && std::find(m_objectCandidates.begin(), m_objectCandidates.end(), formId) == m_objectCandidates.end())
+                m_objectCandidates.push_back(formId);
+
+        for (auto it = m_objectMotion.begin(); it != m_objectMotion.end();)
+        {
+            const bool cWatched = std::find(m_objectCandidates.begin(), m_objectCandidates.end(), it->first) != m_objectCandidates.end();
+            it = cWatched ? std::next(it) : m_objectMotion.erase(it);
+        }
+    }
+
+    auto& modSystem = m_world.GetModSystem();
+    for (const uint32_t cFormId : m_objectCandidates)
+    {
+        TESObjectREFR* pRef = Cast<TESObjectREFR>(TESForm::GetById(cFormId));
+        if (!pRef || pRef->IsDeleted() || pRef->IsDisabled() || !pRef->GetNiNode() || !IsMovableObject(pRef))
+            continue;
+
+        const glm::vec3 position = WorldPositionOf(pRef);
+        const glm::vec3 rotation = RotationOf(pRef);
+
+        const auto found = m_objectMotion.find(cFormId);
+        if (found == m_objectMotion.end())
+        {
+            // First seen: where it is now is where it was, and a second of quiet covers a cell still settling.
+            Motion motion{};
+            motion.LastPosition = position;
+            motion.LastRotation = rotation;
+            motion.QuietUntil = aNow + std::chrono::seconds(1);
+            m_objectMotion.emplace(cFormId, motion);
+            continue;
+        }
+        Motion& motion = found->second;
+
+        if (motion.Held && aNow - motion.LastRemote > std::chrono::seconds(2))
+        {
+            pRef->SetMotionType(TESObjectREFR::kMotionDynamic);
+            motion.Held = false;
+            motion.QuietUntil = aNow + std::chrono::seconds(2);
+            spdlog::info("WorldObject: {:X} {}; handed back to physics here", cFormId, motion.RemoteAtRest ? "was put down over there" : "stopped being moved over there");
+        }
+
+        if (motion.Held || aNow < motion.QuietUntil)
+        {
+            motion.LastPosition = position;
+            motion.LastRotation = rotation;
+            continue;
+        }
+
+        const glm::vec3 turned = glm::abs(rotation - motion.LastRotation);
+        const bool cMoved = glm::distance(position, motion.LastPosition) > kMovedDistance || std::max({turned.x, turned.y, turned.z}) > kMovedAngle;
+
+        const auto send = [&](const bool aAtRest)
+        {
+            RequestWorldObjectMove request{};
+            if (!modSystem.GetServerModId(cFormId, request.ObjectId))
+                return;
+            if (TESObjectCELL* pObjectCell = pRef->GetParentCellEx())
+                modSystem.GetServerModId(pObjectCell->formID, request.CellId);
+            if (TESWorldSpace* pWorldSpace = pRef->GetWorldSpace())
+                modSystem.GetServerModId(pWorldSpace->formID, request.WorldSpaceId);
+            request.Position = position;
+            request.Rotation = rotation;
+            request.AtRest = aAtRest;
+            m_transport.Send(request);
+        };
+
+        if (cMoved)
+        {
+            if (!motion.Moving)
+                spdlog::info("WorldObject: {:X} is being moved here; sending where it is", cFormId);
+            motion.LastPosition = position;
+            motion.LastRotation = rotation;
+            motion.LastLocalMove = aNow;
+            motion.Moving = true;
+            send(false);
+        }
+        else if (motion.Moving && aNow - motion.LastLocalMove >= std::chrono::milliseconds(600))
+        {
+            motion.Moving = false;
+            send(true);
+            spdlog::info("WorldObject: {:X} came to rest at ({:.0f}, {:.0f}, {:.0f})", cFormId, position.x, position.y, position.z);
+        }
+    }
+}
+
+void DroppedItemService::OnNotifyWorldObjectMove(const NotifyWorldObjectMove& acMessage) noexcept
+{
+    const uint32_t cFormId = m_world.GetModSystem().GetGameId(acMessage.ObjectId);
+    TESObjectREFR* pRef = cFormId ? Cast<TESObjectREFR>(TESForm::GetById(cFormId)) : nullptr;
+    // Not loaded here: the server sends where it was left again when this player comes near.
+    if (!pRef || pRef->IsDeleted() || pRef->IsDisabled() || !pRef->GetNiNode() || !IsMovableObject(pRef))
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    Motion& motion = m_objectMotion[cFormId];
+    if (!motion.Held)
+    {
+        pRef->SetMotionType(TESObjectREFR::kMotionKeyframed);
+        motion.Held = true;
+        spdlog::info("WorldObject: {:X} is being moved over there; holding it here and following", cFormId);
+    }
+
+    const glm::vec3 position(acMessage.Position);
+    const NiNode* pNodeBefore = pRef->GetNiNode();
+    pRef->SetRotation(acMessage.Rotation.x, acMessage.Rotation.y, acMessage.Rotation.z);
+    if (TESObjectCELL* pObjectCell = pRef->GetParentCellEx())
+        pRef->MoveTo(pObjectCell, NiPoint3(position));
+    if (const NiNode* pNodeAfter = pRef->GetNiNode(); pNodeBefore && pNodeAfter && pNodeAfter != pNodeBefore)
+        pRef->SetMotionType(TESObjectREFR::kMotionKeyframed);
+
+    motion.LastRemote = now;
+    motion.LastPosition = position;
+    motion.LastRotation = acMessage.Rotation;
+    motion.Moving = false;
+    motion.RemoteAtRest = acMessage.AtRest;
+
+    if (std::find(m_objectCandidates.begin(), m_objectCandidates.end(), cFormId) == m_objectCandidates.end())
+        m_objectCandidates.push_back(cFormId);
 }
 
 void DroppedItemService::OnNotifyDroppedItemMove(const NotifyDroppedItemMove& acMessage) noexcept

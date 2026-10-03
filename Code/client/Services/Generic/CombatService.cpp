@@ -16,6 +16,7 @@
 #include <Forms/TESObjectWEAP.h>
 #include <Forms/TESAmmo.h>
 #include <Games/ActorExtension.h>
+#include <Games/Skyrim/Interface/UI.h>
 
 CombatService::CombatService(World& aWorld, TransportService& aTransport, entt::dispatcher& aDispatcher)
     : m_world(aWorld)
@@ -104,6 +105,21 @@ void CombatService::OnNotifyProjectileLaunch(const NotifyProjectileLaunch& acMes
     }
 
     FormIdComponent formIdComponent = remoteView.get<FormIdComponent>(*remoteIt);
+
+    // Not while this game is paused (the journal, the console). A projectile launched into a paused world hangs where it
+    // was made and everything launched meanwhile lands at once on unpause: on 2026-10-03 Seen had the journal and the
+    // console open from 09:12:55 to 09:14:04, three of Emma's arrows were launched on his side at 09:13:24-29, and he
+    // went down 0.13 s after closing them. A paused player is out of the fight on his own screen; so are the arrows.
+    if (const UI* pUI = UI::Get(); pUI && pUI->numPausesGame > 0)
+    {
+        static std::chrono::steady_clock::time_point s_nextSaid{};
+        if (std::chrono::steady_clock::now() >= s_nextSaid)
+        {
+            s_nextSaid = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            spdlog::info("Remote projectile from {:X} not launched: this game is paused, and it would land only on unpause", formIdComponent.Id);
+        }
+        return;
+    }
 
     Projectile::LaunchData launchData{};
 

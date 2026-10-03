@@ -501,6 +501,30 @@ CharacterService::CharacterService(World& aWorld, entt::dispatcher& aDispatcher,
     m_partyJoinedConnection = aDispatcher.sink<PartyJoinedEvent>().connect<&CharacterService::OnPartyJoinedEvent>(this);
 }
 
+// A copy just made for this character has this form id; no other character may still point at it. The game gives a
+// deleted actor's id to the next actor it makes, and a character whose copy the game had already thrown away kept the
+// old id: on 2026-10-03 at 09:32:53 Seen's game made Emma's copy as FF001231, lost it within 29 ms, and made a Bandit
+// Outlaw under the same id. Emma's character went on pointing at FF001231, so every frame the bandit was moved to
+// where Emma stood, and Emma was invisible to Seen -- a bandit in her place -- until he reconnected.
+void CharacterService::ClaimCopyId(const entt::entity aEntity, const uint32_t aFormId) const noexcept
+{
+    auto view = m_world.view<RemoteComponent>();
+    for (const auto other : view)
+    {
+        if (other == aEntity)
+            continue;
+        auto& remoteComponent = view.get<RemoteComponent>(other);
+        if (remoteComponent.CachedRefId != aFormId)
+            continue;
+
+        spdlog::warn("Copy id {:X} now belongs to server character {:X}; server character {:X} still pointed at it (its own copy is gone) and "
+                     "gets a new one", aFormId, m_world.get<RemoteComponent>(aEntity).Id, remoteComponent.Id);
+        remoteComponent.CachedRefId = 0;
+        if (const auto* pFormId = m_world.try_get<FormIdComponent>(other); pFormId && pFormId->Id == aFormId)
+            m_world.remove<FormIdComponent>(other);
+    }
+}
+
 void CharacterService::DeleteRemoteEntityComponents(entt::entity aEntity) const noexcept
 {
     m_world.remove<FaceGenComponent, InterpolationComponent, RemoteAnimationComponent, RemoteComponent, CacheComponent, WaitingFor3D, PlayerComponent>(aEntity);
@@ -619,12 +643,18 @@ void CharacterService::OnActorAdded(const ActorAddedEvent& acEvent) noexcept
     entt::entity entity;
 
     const auto view = m_world.view<RemoteComponent>();
+    // Same id and, for a copy this client made, the same base: an actor the game made under a reused id is its own
+    // (see ClaimCopyId).
     const auto it = std::find_if(
         std::begin(view), std::end(view),
-        [&acEvent, view](entt::entity entity)
+        [&acEvent, view, pActor](entt::entity entity)
         {
             auto& remoteComponent = view.get<RemoteComponent>(entity);
-            return remoteComponent.CachedRefId == acEvent.FormId;
+            if (remoteComponent.CachedRefId != acEvent.FormId)
+                return false;
+            if (remoteComponent.CachedBaseId != 0 && (!pActor || !pActor->baseForm || pActor->baseForm->formID != remoteComponent.CachedBaseId))
+                return false;
+            return true;
         });
 
     if (it != std::end(view))
@@ -1297,7 +1327,10 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
     if (acMessage.FormId != GameId{})
         ApplyLeveledNpcPick(pActor, acMessage.LeveledNpcPickId);
 
-    m_world.emplace_or_replace<RemoteComponent>(*entity, acMessage.ServerId, pActor->formID, acMessage.OwnershipEpoch);
+    auto& newRemote = m_world.emplace_or_replace<RemoteComponent>(*entity, acMessage.ServerId, pActor->formID, acMessage.OwnershipEpoch);
+    if (s_ownCopies.find(pActor->formID) != s_ownCopies.end() && pActor->baseForm)
+        newRemote.CachedBaseId = pActor->baseForm->formID;
+    ClaimCopyId(*entity, pActor->formID);
 
     auto& interpolationComponent = InterpolationSystem::Setup(m_world, *entity);
     interpolationComponent.Position = acMessage.Position;
@@ -1383,25 +1416,28 @@ void CharacterService::OnActionEvent(const ActionEvent& acActionEvent) const noe
 
 void CharacterService::OnFactionsChanges(const NotifyFactionsChanges& acEvent) const noexcept
 {
-    auto view = m_world.view<RemoteComponent, FormIdComponent, CacheComponent>();
+    // Every remote actor, not only those with a CacheComponent. Copies made from a server spawn never get one (it is
+    // set up for this client's own actors), so this handler matched none of them and a faction change made while
+    // both players were there never reached the other screen; only the spawn re-sent after a trip carried it
+    // (live-factions, 2026-10-03: the bot's bear joined BanditFaction in front of the player and the copy never did).
+    auto view = m_world.view<RemoteComponent, FormIdComponent>();
 
     for (const auto& [id, factions] : acEvent.Changes)
     {
         const auto itor = std::find_if(std::begin(view), std::end(view), [id = id, view](entt::entity entity) { return view.get<RemoteComponent>(entity).Id == id; });
 
-        if (itor != std::end(view))
-        {
-            auto& formIdComponent = view.get<FormIdComponent>(*itor);
+        if (itor == std::end(view))
+            continue;
 
-            auto* const pActor = Cast<Actor>(TESForm::GetById(formIdComponent.Id));
-            if (!pActor)
-                return;
+        auto* const pActor = Cast<Actor>(TESForm::GetById(view.get<FormIdComponent>(*itor).Id));
+        if (!pActor)
+            continue;
 
-            auto& cacheComponent = view.get<CacheComponent>(*itor);
-            cacheComponent.FactionsContent = factions;
+        if (auto* pCache = m_world.try_get<CacheComponent>(*itor))
+            pCache->FactionsContent = factions;
 
-            pActor->SetFactions(cacheComponent.FactionsContent);
-        }
+        pActor->SetFactions(factions);
+        spdlog::info("Factions of remote actor {:X} ({:X}) updated: {} faction(s) from its owner", pActor->formID, id, factions.NpcFactions.size() + factions.ExtraFactions.size());
     }
 }
 
@@ -1454,15 +1490,24 @@ void CharacterService::OnOwnershipTransfer(const NotifyOwnershipTransfer& acMess
     // A reference that rolled as another creature here stands behind a ghost copy of the owner's kind. Taking it
     // over would put our own roll in charge and flip the creature for everyone (a wolf on his side became a troll
     // on hers after a hand-off, 2026-09-20 11:50). Decline, and the server keeps looking.
+    //
+    // Matched by either id. The character is usually bound to the stand-in copy, not to the local reference the
+    // ghost list is keyed by, and looking up only the key missed it: on 2026-10-03 Emma's game took over Seen's bandit
+    // C00F8 through its stand-in copy FF001177 ("Gained ownership of actor 25"), ran a copy it had made itself, and
+    // the bandit stood frozen and could not be killed.
     if (isLocalOwner && pFormIdComponent)
     {
-        if (const auto ghost = s_ghosts.find(pFormIdComponent->Id); ghost != s_ghosts.end())
+        const uint32_t cBoundId = pFormIdComponent->Id;
+        const auto ghost = std::find_if(s_ghosts.begin(), s_ghosts.end(), [cBoundId](const auto& acEntry) { return acEntry.first == cBoundId || acEntry.second == cBoundId; });
+        if (ghost != s_ghosts.end())
         {
             const auto* pCopy = Cast<Actor>(TESForm::GetById(ghost->second));
-            const auto* pLocalBase = pActor ? Cast<TESNPC>(pActor->baseForm) : nullptr;
+            const Actor* pLocal = Cast<Actor>(TESForm::GetById(ghost->first));
+            const auto* pLocalBase = pLocal ? Cast<TESNPC>(pLocal->baseForm) : nullptr;
             const auto* pCopyBase = pCopy ? Cast<TESNPC>(pCopy->baseForm) : nullptr;
-            spdlog::info("Hand-off of {:X} (server id {:X}) declined: it rolled as {} here, the owner's kind is {}; taking it would flip it", pFormIdComponent->Id,
-                         acMessage.ServerId, pLocalBase ? pLocalBase->fullName.value.AsAscii() : "?", pCopyBase ? pCopyBase->fullName.value.AsAscii() : "?");
+            spdlog::info("Hand-off of {:X} (server id {:X}) declined: a copy of ours stands in for reference {:X} here ({} here, the owner's kind is {}); taking it "
+                         "would run our copy as the creature", pFormIdComponent->Id, acMessage.ServerId, ghost->first, pLocalBase ? pLocalBase->fullName.value.AsAscii() : "not loaded",
+                         pCopyBase ? pCopyBase->fullName.value.AsAscii() : "?");
             DeclineOwnership(acMessage.ServerId, acMessage.OwnershipEpoch);
             return;
         }
@@ -2286,6 +2331,15 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
                     s_waitingCopies.push_back(WaitingCopy{aFormId, std::chrono::steady_clock::now()});
                     ReleaseGhostOf(aFormId);
                     DeleteRemoteEntityComponents(aEntity);
+
+                    // The server still counts this character as spawned here, exactly as on the branch below, and
+                    // this branch forgot to say so. It is the one a copy takes when something still holds it, which
+                    // a player copy nearly always does -- so this was Seen invisible three times on 2026-10-03
+                    // (09:19, 09:30, 09:35): each time the server re-sent him as he came through the door, the
+                    // re-send landed on his old copy still in the previous cell, and 0.1 to 3 s later that cell's
+                    // teardown held the copy here and dropped the record. Nobody asked again until he reconnected.
+                    if (m_transport.IsConnected())
+                        DiscoveryService::RequestCellReannounce();
                     return;
                 }
 
@@ -2446,12 +2500,46 @@ Actor* CharacterService::CreateCharacterForEntity(entt::entity aEntity) const no
 
         pActor = RememberOwnCopy(Actor::Create(pNpc));
     }
+    else
+    {
+        // A placed reference whose stand-in copy is gone. Stand-ins are made at once for a reference that is not loaded
+        // here, which means at the owner's position, outside this game's loaded cells: they get no 3D, and the next
+        // grid shift unloads the cell they were parented to and the game deletes them without a word. Emma's session of
+        // 2026-10-03 lost five that way at 09:08:30.493, the very moment of a grid change, and those creatures were
+        // invisible to her from then on (the local references disabled as ghosts, the copies gone). This only runs
+        // once the character is inside the loaded grid, so the new stand-in is made where it can stay.
+        const uint32_t cRefId = m_world.GetModSystem().GetGameId(acMessage.FormId);
+        TESNPC* pOwnerBase = nullptr;
+        if (acMessage.LeveledNpcPickId != GameId{})
+            pOwnerBase = Cast<TESNPC>(TESForm::GetById(m_world.GetModSystem().GetGameId(acMessage.LeveledNpcPickId)));
+        if (!pOwnerBase && acMessage.BaseId != GameId{})
+            pOwnerBase = Cast<TESNPC>(TESForm::GetById(m_world.GetModSystem().GetGameId(acMessage.BaseId)));
+
+        if (pOwnerBase && cRefId != 0)
+        {
+            pActor = RememberOwnCopy(Actor::Create(pOwnerBase));
+            if (pActor)
+            {
+                s_ghosts[cRefId] = pActor->formID;
+                if (Actor* pLocal = Cast<Actor>(TESForm::GetById(cRefId)); pLocal && !pLocal->IsDisabled() && !IsProcessExiting())
+                    pLocal->Disable();
+                spdlog::info("Stand-in: the copy for reference {:X} (server id {:X}) was gone; copy {:X} of the owner's {} ({:X}) stands in again, inside the loaded cells",
+                             cRefId, m_world.get<RemoteComponent>(aEntity).Id, pActor->formID, pOwnerBase->fullName.value.AsAscii(), pOwnerBase->formID);
+            }
+        }
+    }
 
     auto& remoteComponent = m_world.get<RemoteComponent>(aEntity);
 
     if (!pActor)
     {
-        spdlog::error(__FUNCTION__ ": could not spawn actor for remote server id {:X}.", remoteComponent.Id);
+        // Once per character: RunSpawnUpdates asks again every five seconds.
+        static std::unordered_set<uint32_t> s_said;
+        if (s_said.size() > 1024)
+            s_said.clear();
+        if (s_said.insert(remoteComponent.Id).second)
+            spdlog::error(__FUNCTION__ ": could not spawn actor for remote server id {:X} ({}); asking again every 5 s", remoteComponent.Id,
+                          acMessage.FormId != GameId{} ? "a placed reference whose copy is gone" : "no base to build it from");
         return nullptr;
     }
 
@@ -3042,8 +3130,15 @@ void CharacterService::RunRemoteUpdates() noexcept
         InterpolationSystem::Update(pActor, interpolationComponent, tick, poseTick);
 
 #ifdef SKYRIMVR
-        // Measurement only, and cheap: it returns at once unless this is a dead body within arm's reach.
-        VRBodySync::ObserveRemoteBodyMotion(pActor);
+        // Cheap: it returns at once unless this is a dead body within arm's reach. A body somebody else owns that is
+        // being moved here is asked for, so that this side sends it: only the owner sends a body, and on 2026-10-03 a
+        // bandit Emma had killed was carried around by Seen (09:28) and did not move at all on her screen.
+        if (VRBodySync::ObserveRemoteBodyMotion(pActor) && pFormIdComponent)
+        {
+            const auto& remoteComponent = interpolatedEntities.get<RemoteComponent>(entity);
+            spdlog::info("Body {:X} (server id {:X}) is being moved here; asking for it, so that this side sends it", pFormIdComponent->Id, remoteComponent.Id);
+            RequestOwnership(pFormIdComponent->Id, remoteComponent.Id, entity);
+        }
 #endif
     }
 
@@ -3205,14 +3300,48 @@ void CharacterService::RunSpawnUpdates() const noexcept
                     pCached = nullptr;
                 }
 
+                // A copy whose base is not the one it was made with is not this character's copy any more: the game
+                // threw ours away and gave its id to an actor of its own. Moving that actor around would make it walk
+                // in this character's place (see ClaimCopyId).
+                if (pCached && remoteComponent.CachedBaseId != 0)
+                {
+                    const auto* pCachedActor = Cast<Actor>(pCached);
+                    if (!pCachedActor || !pCachedActor->baseForm || pCachedActor->baseForm->formID != remoteComponent.CachedBaseId)
+                    {
+                        spdlog::warn("Copy {:X} of server character {:X} is gone; its id now names another actor (base {:X}, the copy's was {:X}). A new copy is made",
+                                     remoteComponent.CachedRefId, remoteComponent.Id, pCachedActor && pCachedActor->baseForm ? pCachedActor->baseForm->formID : 0,
+                                     remoteComponent.CachedBaseId);
+                        remoteComponent.CachedRefId = 0;
+                        remoteComponent.CachedBaseId = 0;
+                        pCached = nullptr;
+                    }
+                }
+
                 auto* pActor = Cast<Actor>(pCached);
                 if (!pActor)
                 {
+                    // Not every frame. A character that cannot be built here (a placed reference whose stand-in copy is
+                    // gone) failed 60 times a second for as long as it stayed in range: 78,769 "could not spawn" lines
+                    // in Emma's session of 2026-10-03 and 51,002 in Seen's, from five stand-ins that vanished five
+                    // seconds after being made, and the mod's own cost went from 0.14 to 0.75 ms a frame meanwhile.
+                    static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextAttempt;
+                    const auto cNow = std::chrono::steady_clock::now();
+                    auto& nextAttempt = s_nextAttempt[remoteComponent.Id];
+                    if (cNow < nextAttempt)
+                        continue;
+                    if (s_nextAttempt.size() > 1024)
+                        s_nextAttempt.clear();
+
                     pActor = CreateCharacterForEntity(entity);
                     if (!pActor)
+                    {
+                        s_nextAttempt[remoteComponent.Id] = cNow + std::chrono::seconds(5);
                         continue;
+                    }
 
                     remoteComponent.CachedRefId = pActor->formID;
+                    remoteComponent.CachedBaseId = s_ownCopies.find(pActor->formID) != s_ownCopies.end() && pActor->baseForm ? pActor->baseForm->formID : 0;
+                    ClaimCopyId(entity, pActor->formID);
                 }
 
                 pActor->MoveTo(PlayerCharacter::Get()->parentCell, interpolationComponent.Position);

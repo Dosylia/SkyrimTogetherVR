@@ -255,6 +255,11 @@ private:
     //! Items lying in the world as the server has told this bot, by the server's id: what `drops` counts and
     //! `pickup any` takes. The server sends one when an item is dropped in range and again on entering its cell.
     std::map<uint32_t, GameId> m_drops;
+    // This bot's own drop: the first new item of the base it last dropped. Items already lying there (a save with drops
+    // of its own) have lower ids or come first, so "the first known item" is not necessarily this bot's.
+    GameId m_pendingDropBase{};
+    uint32_t m_ownDrop = UINT32_MAX;
+    uint32_t DropToHandle() const noexcept { return m_drops.count(m_ownDrop) ? m_ownDrop : m_drops.begin()->first; }
     uint32_t m_dropRemovals{};
     //! Where each of them lies now as far as this bot knows, and where it first heard of it -- what `dropmoved`
     //! measures. The first place outlives a pick-up, so a late re-send can still be measured against it.
@@ -262,6 +267,7 @@ private:
     std::map<uint32_t, glm::vec3> m_dropFirstPlaces;
     //! Moves relayed to this bot by the server, which only sends them to players in range.
     uint32_t m_dropMoves{};
+    uint32_t m_objectMoves{}; //!< world-object moves relayed to this bot
     std::vector<std::pair<uint32_t, std::string>> m_names; // player id -> username
 
     size_t m_pc = 0;

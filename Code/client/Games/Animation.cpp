@@ -68,6 +68,13 @@ void NoteActionRate(uint32_t aActorId, uint32_t aActionId, const char* acpEventN
 // variables. The other players gain nothing from the forty-first restart of the same idle.
 bool IsRepeatOfLastSent(const ActionEvent& acAction) noexcept
 {
+    // Idles only. Movement and attacks are never held back: with every repeated action filtered, the creature-gait
+    // check failed in two runs of five (a copy's legs moving in 42% of samples against 50%), after passing every run
+    // before the filter; the flood itself was an idle.
+    const bool cIdle = acAction.IdleId != 0 || acAction.EventName.rfind("Idle", 0) == 0;
+    if (!cIdle)
+        return false;
+
     struct Last
     {
         uint32_t ActionId = 0;

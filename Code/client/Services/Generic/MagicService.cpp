@@ -41,7 +41,11 @@ namespace
 // VR mods that use a spell or magic effect as a local control: VRIK's settings menu is a lesser power, and its
 // effect replayed on the other player opened the VRIK menu on their screen. Anything these plugins define stays
 // on the machine it was cast on. Real spells from other mods are unaffected.
-constexpr std::array<const char*, 4> kLocalControlPlugins{"vrik.esp", "Arctals VRIK Tweaks.esp", "higgs_vr.esp", "SpellWheelVR.esp"};
+//
+// Conduit is teleport magic whose scripts move the player of the game they run in: on 2026-10-03 at 09:32 Seen cast
+// its spell 3100FB0C, Emma's game replayed the cast on his copy, and 0.95 s later Emma was teleported back into the
+// tower she had come from. A teleport is the caster's own business.
+constexpr std::array<const char*, 5> kLocalControlPlugins{"vrik.esp", "Arctals VRIK Tweaks.esp", "higgs_vr.esp", "SpellWheelVR.esp", "Conduit.esp"};
 
 bool IsLocalControlForm(uint32_t aFormId) noexcept
 {

@@ -37,13 +37,14 @@ wait 3
 # Reviving replaces the copy with a fresh one (Actor::Respawn), which stands at its own full health. A health the
 # owner sends in the same moment lands on the copy that is about to be replaced and is lost -- found here on
 # 2026-10-01 with a bear revived "at 100" that stood at its own 310. In play a revive is to full health on the
-# owner's side as well, so "full" is the right thing to see; the gap is only that nothing sends the owner's number
-# again afterwards.
+# owner's side as well, so "full" was the right thing to see; the gap was only that nothing sent the owner's number
+# again afterwards. Since 2026-10-03 (build 22ae2af) the revived copy is dropped and the server sends the character
+# again 1.5 s later, so the new copy stands at the owner's 100, which is what it should show.
 log -- and is brought back to life
 npclife alive 100
 wait 7
 log CHECK npc alive
-log CHECK npc health full
+log CHECK npc health 100
 wait 3
 
 log done

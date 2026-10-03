@@ -239,6 +239,28 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   connection ends. Not handled: the server's message arriving before the game has the actor loaded again (never
   seen; the log line is `a copy of it stands here too; not handled`).
 
+- **The game grows with every loading screen, in Emma's modlist -- found 2026-10-03, not ours.** Four round trips
+  between Mistwatch and Windhelm's docks by console (`cow Tamriel 34 8` and back) took the game from 8.6 to 10.4 GB
+  of private memory and from 236 to 287 threads; connected or not made no difference (8.6 to 10.3 GB over three
+  trips connected). The threads are DynDOLOD's: `DynDOLOD.DLL` (DynDOLOD DLL NG Alpha-32; MO2 lists Alpha-33) starts
+  twelve per load and never ends them -- 102 to 150 over two round trips, while every other module's count stayed
+  the same (counted from each thread's entry frame with `cdbX64 -pv`, the non-invasive attach). What the memory is
+  was not found. After enough loads the game either freezes or crashes:
+  - Frozen at 12:07 (suite, thirteenth script, its first trip away): every thread waiting, the main thread in
+    `MemoryManager::Allocate` (VR id 66859, entered through our `HookFormAllocate`) -> the game's low-memory path
+    (35201) -> `TES::PurgeBufferedCells` (13159) -> a wait; a worker in the same allocator and the same path, on a
+    `BSReadWriteLock` (66977). The game ran out of its own heap and its clean-up deadlocked. 13.4 GB private, 376
+    threads, 5.6 GB of commit left on the machine. EngineFixesVR's `MemoryManager` (which replaces that allocator)
+    is `false` in the modlist.
+  - Crashed at 12:32 (the next run, eighth script, a trip away): in an AMD driver thread (`amdxx64.dll`), a call to
+    0x7FFC00000028; 11.5 GB private, 265 threads. First time among 106 crash reports.
+  - Also frozen, the same way as far as could be seen: loading Emma's Autosave2 of 2026-10-03 09:32:50 in a fresh
+    game, with this build and the one before. Not looked into further.
+  The rig restarts the game every six scripts since (`run-live.ps1 -Batch`). In play, a long session with many
+  loading screens is where this would show; the modlist is Emma's (see VR_TODO.md, "Needs Emma").
+  To name a frame of our own exe in a debugger, use the linker map (`build/.../SkyrimTogetherVR.map`): the exe has
+  no debug directory, so cdb finds no pdb. Game frames show as `game_seg+X`, which is `SkyrimVR.exe+(X+0x101000)`.
+
 ## 7. Debugging
 - **Who may connect to whom is decided by the protocol id, not the version (2026-10-02).** `BUILD_PROTOCOL` is a
   digest of the contents of `Code/encoding` (every message, struct and opcode), computed by `modules/version.lua`
@@ -295,6 +317,25 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   client says what a temporary actor was when its removal was noticed (`CopyGone: ... removed as local|remote; the
   actor is ...; made by this client: yes|no`): after a teleport the game has already destroyed the copies this
   client made and its own temporary actors alike, unless they were another player's at that moment.
+  Added later on 2026-10-03: `CHECK copy|npc has|equipped|unequipped|lefthand|righthand <hex>` (the game's
+  `IsEquipped` does not count the left hand; use `lefthand`), `CHECK npc infaction|notinfaction <hex>`, `CHECK ref
+  <hex> alive|dead` for a reference of the game's own, `CHECK absent <regex>`, and the bot's own `expect` lines now
+  count in the table ("bot: all N of its own checks"). `log DO papyrus <Script> <Function> <self|copy|npc> [hex ...
+  n:<number>]` calls a game function (the VR console refuses `<id>.kill`; `DO papyrus Actor Kill <id>` works),
+  `log DO pickup own` picks up the player's newest drop, `log DO server restart after console <command>` runs a command
+  while offline. Bot commands: `additem <hex> [count]` (the copy only holds what its owner has), `faction npc <hex>
+  [rank]`, `stay`, and `ref:<hex>` names the actor the server sent for one of the other game's placed references. The
+  driver now follows the copy actually bound to a server character (`New entity remotely managed`), not the first
+  one a spawn made. In Emma's save the Mistwatch bandit `45A63` is already dead; use the bear `860F8` for kills.
+  The save every test starts from (since 2026-10-03 11:35): `STTest_Mistwatch` in the MO2 profile's saves, made from
+  Emma's Save62 with the player moved to the centre of Mistwatch's cell (`cow Tamriel 34 -9`), its file date set back
+  to 09:36:00 so that it is never her most recent save. `headless.ps1 up` loads it when it exists (`-Save <name>` for
+  another), and `log DO load last` loads the save the session started from. Before that the rig loaded the most
+  recent save, which after Emma's session of 2026-10-03 was inside Mistwatch's tower: every bot waited outside for a
+  player who never came. Her Autosave2 of 09:32:50, made outside the tower, hangs the game a frame after loading,
+  with this build and the one before (every thread waiting, none of ours on any stack); not looked into further.
+  `CHECK ref <hex> near <x> <y> <z> <units>` reads a reference's position; the bot's `moveobject <hex> <x> <y> <z>
+  held|rest` moves a world object as a hand would, and `waitfor objectmoves >= <n>` counts the moves it was sent.
 - **Emma's VR Address Library is a combined file (2026-10-01), not a released one.** DevBench needs ids only the
   current library has (0.275.0); the modlist was built on 0.158.0. The released 0.275.0 corrects two addresses
   (100997, 74491) and drops three (63607-63609), and the installed Community Shaders is built for the old value of

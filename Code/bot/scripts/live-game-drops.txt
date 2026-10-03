@@ -36,7 +36,7 @@ log DO server restart after console player.drop 12EB7 1
 log DO sleep 20
 waitfor drops >= 1 40
 expect drops >= 1
-log CHECK logged DroppedItem: the player's dropped-item list holds \d+ item\(s\); announced [1-9]
+log CHECK logged DroppedItem: [1-9]\d* of the \d+ item\(s\) dropped while not connected announced
 wait 3
 log done
 stop

@@ -1,0 +1,44 @@
+# The Whiterun gate: a player who goes inside the walls is in another worldspace, so the other player's game drops
+# their copy, and gets it back when they come out.
+#
+#   python Tools\VR\live-check.py live-whiterun
+#
+# VR_TODO, "Whiterun gate: the copy goes when inside and comes back when out" (a player "vanishing" near the gate,
+# 2026-09-20). The player travels by cell: to the plains outside the gate (Tamriel 5,-3), then
+# inside (WhiterunWorld), where this bot stays behind, and out again. A trip by coordinates sends no cell-change
+# message, so the bot does not follow by itself: it teleports to the same square.
+log live whiterun
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+wait 5
+
+log DO god on
+wait 3
+log -- to the plains outside Whiterun's gate, and this bot with it
+stay
+log DO console cow Tamriel 5 -3
+wait 30
+teleport 22400 -10100
+waitfor known other 30
+log CHECK game inworld
+expect known other
+
+log -- the player goes inside the walls; this bot stays outside
+log DO console cow WhiterunWorld 5 -3
+wait 40
+log CHECK game inworld
+log CHECK logged Grid change
+expect not known other
+
+log -- and comes back out
+log DO console cow Tamriel 5 -3
+wait 40
+log CHECK game inworld
+waitfor known other 20
+expect known other
+log DO god off
+wait 3
+log done
+stop

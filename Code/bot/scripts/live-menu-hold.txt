@@ -1,0 +1,30 @@
+# A player in a menu: does the client keep sending, or are the creatures it owns handed to the other player?
+#
+#   python Tools\VR\live-check.py live-menu-hold
+#
+# The server hands a player's actors to another player in range after 3 s without a movement update ("silent"). The
+# client keeps some menus unpaused while connected (inventory among them); the journal still pauses the game. Each is
+# held open for twelve seconds with this bot next to the player. The client says when it stopped sending ("Silence:
+# sent nothing for N ms; menus [...]"), and this bot logs every actor the server handed it.
+#
+# 2026-10-03: neither stops the client. The inventory does not even pause while connected; the journal does (pause
+# counter 1), and the client still sent movement every frame ("last move sent 15 ms ago"). No actor was handed away.
+log live menu hold
+waitfor connected 45
+collect ownership
+expect known me
+waitfor known other 40
+wait 8
+
+log -- the inventory, twelve seconds
+log DO menu 12 InventoryMenu
+log DO sleep 4
+log CHECK absent Silence: sent nothing
+
+log -- the journal, twelve seconds
+log DO menu 12 Journal Menu
+log DO sleep 4
+log CHECK absent Silence: sent nothing
+wait 3
+log done
+stop

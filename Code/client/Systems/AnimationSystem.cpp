@@ -47,6 +47,18 @@ void AnimationSystem::Update(World& aWorld, Actor* apActor, RemoteAnimationCompo
             // Animation graph not ready, keep the action in queue and try again later
             return;
         }
+        // A dead copy plays nothing more. The owner's actions are replayed 300 ms late, and the last ones recorded while
+        // it was alive kept arriving after it died here: on 2026-10-03 the bandit 45AB9 died on both screens, Seen's
+        // game went on replaying six actions on the corpse in the next seconds, and Seen saw it standing.
+        if (apActor->actorState.IsDead())
+        {
+            aAnimationComponent.LastRanAction = *it;
+            if (aAnimationComponent.ReplayCount > 0)
+                aAnimationComponent.ReplayCount--;
+            actions.pop_front();
+            return;
+        }
+
         if (aAnimationComponent.ReplayCount > 0 && aAnimationComponent.ResetAnimationGraphForReplay)
         {
             apActor->animationGraphHolder.RevertAnimationGraphManager();
@@ -65,11 +77,36 @@ void AnimationSystem::Update(World& aWorld, Actor* apActor, RemoteAnimationCompo
         // ones arriving just after a body died here were recorded while it was still alive, and copying the whole
         // word stood the corpse back up as a living enemy. Once dying or dead, keep that part (death messages own it).
         constexpr uint32_t cLifeStateMask = 0x1E00000;
-        if (apActor->actorState.IsDeadOrDying())
+        // Another player's copy never goes down (ActorValueService keeps it at 25 health, "a copy never goes down"),
+        // so it keeps its own life state and knock state (bits 25-27) whatever the owner's word says, and the owner's
+        // fall is not replayed on it. It used to be: after every death on 2026-10-03 (09:14, twice at 09:21, 09:27) the
+        // copy on the other screen replayed "Ragdoll" and lay on the floor for one to two minutes after its owner had
+        // respawned -- hands at floor height (copy z -17 to 18 against the owner's 55), "we both sit on the floor
+        // for the other side". The "GetUpBegin" replayed after it never stood the copy up.
+        constexpr uint32_t cKnockStateMask = 0xE000000;
+        const bool cPlayerCopy = apActor->GetExtension()->IsRemotePlayer();
+        if (cPlayerCopy)
+            apActor->actorState.flags1 = (first.State1 & ~(cLifeStateMask | cKnockStateMask)) | (apActor->actorState.flags1 & (cLifeStateMask | cKnockStateMask));
+        else if (apActor->actorState.IsDeadOrDying())
             apActor->actorState.flags1 = (first.State1 & ~cLifeStateMask) | (apActor->actorState.flags1 & cLifeStateMask);
         else
             apActor->actorState.flags1 = first.State1;
         apActor->actorState.flags2 = first.State2;
+
+        if (cPlayerCopy && !first.EventName.empty() && _stricmp(first.EventName.c_str(), "Ragdoll") == 0)
+        {
+            static std::chrono::steady_clock::time_point s_nextSaid{};
+            if (std::chrono::steady_clock::now() >= s_nextSaid)
+            {
+                s_nextSaid = std::chrono::steady_clock::now() + 10s;
+                spdlog::info("ReplayDiag: 'Ragdoll' not replayed on player copy {:X}; a copy never goes down", apActor->formID);
+            }
+            aAnimationComponent.LastRanAction = first;
+            if (aAnimationComponent.ReplayCount > 0)
+                aAnimationComponent.ReplayCount--;
+            actions.pop_front();
+            return;
+        }
 
         apActor->LoadAnimationVariables(first.Variables);
 

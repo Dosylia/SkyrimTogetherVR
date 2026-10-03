@@ -28,6 +28,10 @@ waitfor equipped other 12EB7 20
 expect equipped other 12EB7
 
 log -- the player kills a bear of this cell, alive until now
+# Brought next to the player first: bears wander, and in the test save of 2026-10-03 this one is out of the loaded
+# cells, so it was never announced and the bot never heard of it.
+log DO papyrus ObjectReference MoveTo 860F8 14 f:300 f:0 f:0 b:true
+wait 5
 log CHECK ref 860F8 alive
 wait 3
 waitfor known ref:860F8 30

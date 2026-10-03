@@ -895,9 +895,13 @@ bool CharacterService::CanClaimOwnership(Player* apPlayer, const entt::entity aE
     if (!apPlayer->GetCellComponent().IsInRange(cellIdComponent, characterComponent.IsDragon()))
         return reject("the actor is out of range");
 
+    // A dead body goes to whoever is moving it, leader or not: only the owner sends a body's bones, so a body carried
+    // by anyone else did not move on the other screens (2026-10-03 09:28, a bandit Emma had killed, carried by Seen).
+    // The claim still has to come from the same party as the current owner.
     auto& partyService = m_world.GetPartyService();
-    if (!partyService.IsPlayerInParty(apPlayer) || !partyService.IsPlayerLeader(apPlayer))
-        return reject("the player is not the party leader");
+    const bool cDeadBody = characterComponent.IsDead();
+    if (!partyService.IsPlayerInParty(apPlayer) || (!cDeadBody && !partyService.IsPlayerLeader(apPlayer)))
+        return reject(cDeadBody ? "the player is not in a party" : "the player is not the party leader");
 
     PartyService::Party* const pParty = partyService.GetPlayerParty(apPlayer);
     if (!pParty || std::find(pParty->Members.begin(), pParty->Members.end(), pCurrentOwner) == pParty->Members.end())

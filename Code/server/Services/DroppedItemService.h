@@ -12,6 +12,7 @@ struct CellIdComponent;
 struct RequestDroppedItemAdd;
 struct RequestDroppedItemRemove;
 struct RequestDroppedItemMove;
+struct RequestWorldObjectMove;
 struct EnterInteriorCellRequest;
 struct EnterExteriorCellRequest;
 struct ShiftGridCellRequest;
@@ -51,6 +52,7 @@ private:
     void OnAdd(const PacketEvent<RequestDroppedItemAdd>& acMessage) noexcept;
     void OnRemove(const PacketEvent<RequestDroppedItemRemove>& acMessage) noexcept;
     void OnMove(const PacketEvent<RequestDroppedItemMove>& acMessage) noexcept;
+    void OnObjectMove(const PacketEvent<RequestWorldObjectMove>& acMessage) noexcept;
     void OnEnterInteriorCell(const PacketEvent<EnterInteriorCellRequest>& acMessage) const noexcept;
     void OnEnterExteriorCell(const PacketEvent<EnterExteriorCellRequest>& acMessage) const noexcept;
     void OnShiftGridCell(const PacketEvent<ShiftGridCellRequest>& acMessage) const noexcept;
@@ -65,13 +67,26 @@ private:
     void Load() noexcept;
     void Save() const noexcept;
 
+    //! Where a placed world object was last left by somebody's hand, by reference id: sent to anyone who comes near
+    //! later, since every game loads the object from its own save. Not written to disk.
+    struct ObjectPlace
+    {
+        GameId ObjectId{};
+        GameId CellId{};
+        GameId WorldSpaceId{};
+        Vector3_NetQuantize Position{};
+        glm::vec3 Rotation{};
+    };
+
     World& m_world;
     std::map<uint32_t, Item> m_items;
+    std::map<uint64_t, ObjectPlace> m_objects;
     uint32_t m_nextId{1};
 
     entt::scoped_connection m_addConnection;
     entt::scoped_connection m_removeConnection;
     entt::scoped_connection m_moveConnection;
+    entt::scoped_connection m_objectMoveConnection;
     entt::scoped_connection m_interiorConnection;
     entt::scoped_connection m_exteriorConnection;
     entt::scoped_connection m_gridConnection;

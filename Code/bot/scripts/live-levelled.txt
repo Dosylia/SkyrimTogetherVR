@@ -1,0 +1,40 @@
+# Levelled creatures: the same spawn point rolled a different animal on each side. The game conforms to the owner's.
+#
+#   python Tools\VR\live-check.py live-levelled
+#
+# A levelled spawn point picks its creature when its cell loads, separately in each game, so two players can see a
+# bear and a goat at the same spot. The owner's pick travels with the character (LeveledNpcPickId) and the other games
+# conform (CharacterService::ApplyLeveledNpcPick). Here this bot claims the bear's point near Mistwatch (860F8, a bear
+# in Emma's game) as a goat (2EBE2, what point 85F98 rolls) while the player is away, so it is the owner when the
+# player comes back.
+log live levelled
+waitfor connected 45
+collect spawn ownership
+expect known me
+waitfor known other 40
+wait 5
+stay
+
+log DO god on
+wait 3
+log -- the player leaves
+log DO console cow Tamriel 34 8
+wait 40
+
+log -- this bot claims the spawn point, rolled as a goat
+npc 860F8 pick 2EBE2
+waitfor owned >= 1 20
+wait 3
+
+log -- the player comes back
+log DO console cow Tamriel 34 -9
+wait 45
+# The game's GetLeveledActorBase answers with the temporary base it builds (FF...), not the pick, so the client's own
+# account is what is checked: the pick applied, and the actor at that point now a goat.
+log CHECK logged Completed leveled NPC reconciliation for actor 860F8, .* pick: 2EBE2
+log CHECK logged Spawn Actor: 860F8, and NPC Goat
+wait 3
+log DO god off
+wait 3
+log done
+stop

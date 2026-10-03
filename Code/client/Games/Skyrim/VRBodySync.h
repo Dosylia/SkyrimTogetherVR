@@ -22,10 +22,12 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept;
 
 //! The pose of a body that is not the local player: a dead NPC this machine owns, so that the other players see it
 //! lie, slump and get dragged around the way it does here (HIGGS grabs, spell pushes, a foot in the ribs).
-//! Upper-body bones only. Returns false, leaving the pose empty, when the body has not moved since the last send.
+//! Upper body, and the legs when the skeleton has them. Returns false, leaving the pose empty, when the body has not
+//! moved since the last send.
 bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept;
-//! Measurement only: watch a dead body this client does **not** own for signs of being handled here.
-void ObserveRemoteBodyMotion(Actor* apActor) noexcept;
+//! Watch a dead body this client does **not** own for signs of being handled here. True once per grab, when it has
+//! been moving here for a third of a second: the caller then asks for the body, so that this side sends it.
+bool ObserveRemoteBodyMotion(Actor* apActor) noexcept;
 
 //! Weapon touch: a controller pulse when your blade or your hand meets somebody else's weapon.
 //!

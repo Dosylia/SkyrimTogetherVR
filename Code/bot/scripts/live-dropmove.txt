@@ -11,7 +11,7 @@ wait 5
 
 log -- dropping an iron dagger next to the player
 dropitem 12EB7
-waitfor drops == 1 15
+waitfor mydrop 15
 # The game places it and lets it fall. At Mistwatch it then rolls down the hillside for some seconds, and the game
 # sends that roll here, so this bot's idea of where the item lies ends up where it came to rest.
 wait 14

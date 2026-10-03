@@ -1,0 +1,51 @@
+# Factions corrected on return: a creature that changed sides while the player was away comes back on its new side.
+#
+#   python Tools\VR\live-check.py live-factions
+#
+# Faction changes travel to players in range only, so a player who was away missed them; the spawn re-sent on return
+# carries them (CharacterService, "Factions, for the same reason and with more at stake than they look" -- the Burned
+# Spriggan of 2026-09-25 that squared up to Lydia and never swung). Here the bot's bear is put in the player's
+# faction (DB1) while the player is away.
+log live factions
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+wait 5
+stay
+
+log -- a bear of this bot's
+npc temp 23A8A
+waitfor owned == 1 20
+wait 8
+log CHECK npc exists
+log CHECK npc notinfaction DB1
+wait 3
+
+log DO god on
+wait 3
+log -- the player leaves
+log DO console cow Tamriel 34 8
+wait 40
+
+log -- while the player is away, the bear joins the player's faction
+faction npc DB1 0
+wait 5
+
+log -- the player comes back
+log DO console cow Tamriel 34 -9
+wait 40
+log CHECK npc exists
+log CHECK npc infaction DB1
+wait 3
+
+log -- and a change while the player is here arrives too
+faction npc 1BCC0 0
+wait 6
+log CHECK npc infaction 1BCC0
+log CHECK npc notinfaction DB1
+wait 3
+log DO god off
+wait 3
+log done
+stop

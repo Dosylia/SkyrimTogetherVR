@@ -14,6 +14,7 @@ struct ItemPickedUpEvent;
 struct NotifyDroppedItem;
 struct NotifyDroppedItemRemoved;
 struct NotifyDroppedItemMove;
+struct NotifyWorldObjectMove;
 struct UpdateEvent;
 struct TESObjectREFR;
 
@@ -28,8 +29,11 @@ struct TESObjectREFR;
  *    drop, or one this save kept from an earlier session -- and only *placed* if it is missing. Adopting is what stops
  *    the same item turning up twice.
  *  - It passes pick-ups on, so everybody's copy leaves the floor when anybody takes it.
- *  - It passes movement on: an item held, thrown or pushed here is sent where it is ten times a second, and one
+ *  - It passes movement on: an item held, thrown or pushed here is sent where it is thirty times a second, and one
  *    moved over there is held still by this side's physics and put where the other player has it.
+ *  - The same for objects placed in the world (a bottle on a shelf, a cart): every game has them under the same id,
+ *    so they need no record of their own, only their movement passed on, and where they were left for anyone who
+ *    comes later.
  *
  * And once per session and cell it announces the items the player dropped before any of this existed, read from the
  * list the game itself keeps on the player (ExtraDroppedItemList). That list is exact: it is what this player dropped,
@@ -49,6 +53,8 @@ private:
     void OnNotifyDroppedItem(const NotifyDroppedItem&) noexcept;
     void OnNotifyDroppedItemRemoved(const NotifyDroppedItemRemoved&) noexcept;
     void OnNotifyDroppedItemMove(const NotifyDroppedItemMove&) noexcept;
+    void OnNotifyWorldObjectMove(const NotifyWorldObjectMove&) noexcept;
+    void UpdateWorldObjects(std::chrono::steady_clock::time_point aNow) noexcept;
     void OnUpdate(const UpdateEvent&) noexcept;
 
     //! Send a reference that lies on the floor to the server. False when its place cannot be named to the server.
@@ -98,8 +104,18 @@ private:
     };
     std::unordered_map<uint32_t, Motion> m_motion;
 
+    //! Objects placed in the world near the player, by reference id: the ones watched for being moved here, and the
+    //! ones being moved by another player. The list is rebuilt once a second from the player's cell.
+    std::unordered_map<uint32_t, Motion> m_objectMotion;
+    std::vector<uint32_t> m_objectCandidates;
+    std::chrono::steady_clock::time_point m_candidatesAt{};
+
     //! Old drops already announced this session, so a cell change does not send them again.
     std::unordered_set<uint32_t> m_announced;
+    //! What the player dropped while not connected: reference and what it holds, announced once connected. The game's
+    //! own dropped-item list was never found on the player in 74 connections (2026-09-26 to 10-03), even right after a
+    //! drop; this is the list the client keeps itself.
+    std::vector<std::pair<uint32_t, Inventory::Entry>> m_droppedOffline;
     //! Whether this connection has said what it found on the player, so an empty result is reported once, not never.
     bool m_reportedOldDrops{false};
 
@@ -111,5 +127,6 @@ private:
     entt::scoped_connection m_notifyConnection;
     entt::scoped_connection m_removedConnection;
     entt::scoped_connection m_moveConnection;
+    entt::scoped_connection m_objectMoveConnection;
     entt::scoped_connection m_updateConnection;
 };

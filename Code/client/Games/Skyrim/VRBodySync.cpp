@@ -2269,25 +2269,25 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
 // rest in a second or two; a body someone is dragging keeps moving for as long as they drag it. So what gets
 // measured is *sustained* motion within arm's reach -- how long, how far, and how close -- and the numbers decide
 // the threshold rather than the other way round.
-void ObserveRemoteBodyMotion(Actor* apActor) noexcept
+bool ObserveRemoteBodyMotion(Actor* apActor) noexcept
 {
     if (!apActor || !apActor->actorState.IsDead())
-        return;
+        return false;
 
     const PlayerCharacter* pPlayer = PlayerCharacter::Get();
     if (!pPlayer)
-        return;
+        return false;
 
     void* pRoot = apActor->GetNiNode();
     if (!pRoot)
-        return;
+        return false;
 
     const glm::vec3 at = ToGlm(At<NiTransform>(pRoot, kWorldOffset).translate);
     const glm::vec3 playerAt = ToGlm(static_cast<NiPoint3>(pPlayer->position));
     const float toPlayer = glm::distance(at, playerAt);
     // Beyond this nobody is touching it by hand, so it is not worth a thought.
     if (toPlayer > 400.f)
-        return;
+        return false;
 
     struct Watch
     {
@@ -2298,6 +2298,7 @@ void ObserveRemoteBodyMotion(Actor* apActor) noexcept
         std::chrono::steady_clock::time_point NextLog{};
         float Travelled = 0.f;
         std::chrono::steady_clock::time_point TouchedAt{};
+        bool Reported = false; // this grab has been reported to the caller
     };
     static std::unordered_map<uint32_t, Watch> s_watch;
 
@@ -2312,7 +2313,7 @@ void ObserveRemoteBodyMotion(Actor* apActor) noexcept
     {
         watch.Last = at;
         watch.Placed = true;
-        return;
+        return false;
     }
 
     const float step = glm::distance(at, watch.Last);
@@ -2332,16 +2333,28 @@ void ObserveRemoteBodyMotion(Actor* apActor) noexcept
     else if (now - watch.LastMoved > std::chrono::milliseconds(500))
     {
         watch.Travelled = 0.f;
-        return;
+        watch.Reported = false;
+        return false;
     }
 
     const auto movingFor = std::chrono::duration_cast<std::chrono::milliseconds>(now - watch.MovingSince).count();
+
+    // A third of a second of being moved is a hand on it, not a ragdoll settling: the caller asks for the body, so that
+    // this side becomes the one that sends it (see CharacterService::RunRemoteUpdates).
+    bool cGrabbed = false;
+    if (movingFor >= 300 && !watch.Reported)
+    {
+        watch.Reported = true;
+        cGrabbed = true;
+    }
+
     if (movingFor < 1000 || now < watch.NextLog)
-        return;
+        return cGrabbed;
 
     watch.NextLog = now + std::chrono::seconds(5);
     spdlog::info("BodyGrabDiag: remote body {:X} has been moving here for {} ms, {:.0f} units travelled, {:.0f} from the player. Nobody owns it on this side, so nothing of this is being sent.",
                  apActor->formID, movingFor, watch.Travelled, toPlayer);
+    return cGrabbed;
 }
 
 bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
@@ -2371,6 +2384,7 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
         bool Placed = false;
         bool Sent = false;
         bool Boneless = false; // a skeleton this bone search cannot read; the root position is sent on its own
+        bool LegsFound = false;
     };
     static std::unordered_map<uint32_t, BodyCapture> s_bodies;
 
@@ -2389,7 +2403,8 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
     if (!cached)
     {
         BoneNodes nodes;
-        if (!FindBones(pRoot, nodes))
+        bool legsFound = false;
+        if (!FindBones(pRoot, nodes, &legsFound))
         {
             // Not a person. The bone search is by human bone name, so a Dwarven sphere, a spider or a centurion
             // never gets past it -- and until 2026-09-26 that meant nothing at all was sent for one, so dragging
@@ -2407,6 +2422,7 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
             capture.pRoot = pRoot;
             capture.Nodes = nodes;
             capture.Boneless = false;
+            capture.LegsFound = legsFound;
             for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
                 capture.VTables[i] = nodes[i] ? *static_cast<void**>(nodes[i]) : nullptr;
             capture.RefreshAt = now + std::chrono::seconds(5);
@@ -2487,7 +2503,18 @@ bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept
     for (uint32_t i = 0; i < VRPose::kUpperBoneCount; ++i)
         aOutPose.Bones[i] = quantized[i];
 
-    aOutPose.HasLegs = false;
+    // The legs as well, encoded like the upper body. Without them the other screen posed the top half from these
+    // bones and left the legs bent however its own ragdoll had them, only shifted along: "the bodies start deforming
+    // drastically" when Emma carried the bandit 45B51 on 2026-10-03 (09:28), seen from Seen's side.
+    if (capture.LegsFound)
+    {
+        for (uint32_t i = VRPose::kUpperBoneCount; i < VRPose::kBoneCount; ++i)
+        {
+            const glm::mat3 boneWorld = ToGlm(At<NiTransform>(capture.Nodes[i], kWorldOffset).rotate);
+            aOutPose.Bones[i] = glm::normalize(glm::quat_cast(inverseRoot * boneWorld));
+        }
+    }
+    aOutPose.HasLegs = capture.LegsFound;
     aOutPose.HasFingers = false;
     aOutPose.HasScale = false;
 

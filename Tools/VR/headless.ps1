@@ -18,7 +18,7 @@
 
 param(
     [Parameter(Position = 0)][ValidateSet('up', 'down', 'status')][string]$Action = 'status',
-    [string]$Save = '',                 # a save name; empty loads the most recent one
+    [string]$Save = '',                 # a save name; empty loads the test save (below), or the most recent one without it
     [switch]$NoConnect,                 # no server and no waiting for a connection: the game alone, mod loaded
     [int]$LoadTimeout = 180
 )
@@ -30,6 +30,12 @@ $mo2 = 'E:\FUS\ModOrganizer.exe'
 $release = (Resolve-Path (Join-Path $PSScriptRoot '..\..\build\windows\x64\release')).Path
 $clientLog = 'E:\FUS\tools\Skyrim Together VR\logs\tp_client.log'
 $stateFile = Join-Path $env:TEMP 'st-headless-state.json'
+# The save every test starts from: Emma's autosave of 2026-10-03 09:32 outside Mistwatch, copied under a name of its own
+# with its date kept, so that it never becomes her most recent save. The most recent one is wherever she last played
+# (on 2026-10-03, inside the tower), and from there every bot waited outside for a player who never came.
+$testSave = 'STTest_Mistwatch'
+$testSavePath = 'E:\FUS\profiles\FUS RO DAH (Basic + Appearance + Gameplay)\saves\' + $testSave + '.ess'
+if (-not $Save -and (Test-Path -LiteralPath $testSavePath)) { $Save = $testSave }
 $devbench = 'http://127.0.0.1:8921'
 
 function Test-Running([string]$pattern) {
@@ -146,7 +152,7 @@ if (Test-Running '^(vrserver|vrmonitor)$') { throw 'SteamVR is already running. 
 $startedServer = $false
 try {
     Set-NullDriver $true
-    @{ startedServer = $false } | ConvertTo-Json | Set-Content $stateFile
+    @{ startedServer = $false; save = $Save } | ConvertTo-Json | Set-Content $stateFile
 
     Start-Process 'steam://rungameid/250820'
     Wait-Until { Test-Running '^vrserver$' } 90 'SteamVR to start'
@@ -159,7 +165,7 @@ try {
     if (-not $NoConnect -and -not (Test-Running '^SkyrimTogetherServer$')) {
         Start-Process -FilePath (Join-Path $release 'SkyrimTogetherServer.exe') -WorkingDirectory $release -WindowStyle Minimized
         $startedServer = $true
-        @{ startedServer = $true } | ConvertTo-Json | Set-Content $stateFile
+        @{ startedServer = $true; save = $Save } | ConvertTo-Json | Set-Content $stateFile
         Start-Sleep -Seconds 4
     }
 
@@ -181,6 +187,15 @@ try {
     # session's "connected yes" cannot satisfy it.
     $before = @(Get-Content $clientLog).Count
     Wait-Until {
+        # The empty message box the game shows at the end of a load (SkyrimVR.exe+0x168507) is dropped by the client
+        # while the loading screen is up; once it came a few milliseconds after (2026-10-03 11:18, loading
+        # STTest_Mistwatch), paused the game, and nobody was there to click it.
+        try {
+            if ((Invoke-Tool 'menu' @{ action = 'list' }).openMenus -contains 'MessageBoxMenu') {
+                Invoke-Tool 'menu' @{ action = 'close'; name = 'MessageBoxMenu' } | Out-Null
+                Write-Host 'Closed a message box left open after the load.' -ForegroundColor Yellow
+            }
+        } catch { }
         $new = Get-Content $clientLog | Select-Object -Skip $before
         [bool]($new | Select-String -Pattern 'Probe: connected yes' -Quiet)
     } 90 'the client to connect' -NeedsGame

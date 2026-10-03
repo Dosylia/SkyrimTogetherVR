@@ -1,0 +1,54 @@
+# Equipment on a copy: this bot equips, and the game's copy of it holds the item.
+#
+#   python Tools\VR\live-check.py live-equip
+#
+# The equip pair (equip-actor, equip-watcher) proves the server relays it from one bot to another; here the game is the
+# receiver and is asked directly (Actor.IsEquipped on the copy).
+log live equip
+waitfor connected 45
+collect equipment spawn
+expect known me
+waitfor known other 40
+wait 8
+log CHECK copy exists
+
+# A real client's inventory travels with its character; this bot has none until it says so.
+log -- this bot gets an iron sword and an iron dagger
+additem 12EB7 1
+additem 1397E 1
+wait 4
+log CHECK copy has 12EB7
+log CHECK copy has 1397E
+wait 3
+
+log -- the sword in the right hand
+equip 12EB7
+wait 6
+log CHECK copy equipped 12EB7
+log CHECK copy righthand 12EB7
+wait 3
+
+log -- put away again
+unequip 12EB7
+wait 6
+log CHECK copy unequipped 12EB7
+wait 3
+
+log -- the dagger in the right hand
+equip 1397E
+wait 6
+log CHECK copy equipped 1397E
+wait 3
+unequip 1397E
+wait 6
+
+log -- and in the left hand
+equip 1397E left
+wait 6
+# Not "equipped": the game's IsEquipped does not count what is in the left hand (it said false while
+# GetEquippedWeapon said the dagger was there, 2026-10-03).
+log CHECK copy lefthand 1397E
+wait 3
+
+log done
+stop

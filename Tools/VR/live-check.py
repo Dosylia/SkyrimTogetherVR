@@ -14,6 +14,8 @@ Checks:
     player mark | player dropped <n>                                      the local player's health, before and after
     drop exists | drop gone | drop mark | drop moved <dx> <dy> <dz>       the item the game placed for the bot's drop
     player alive                                                          the local player is not dead
+    ref <hex> near <x> <y> <z> <units>                                    a reference of the game's own is that close
+                                                                          to that place
     game alive | game inworld                                             the game still answers | and is in the
                                                                           world with a save loaded, not at a menu
     slide mark | slide below <pct> | slide above <pct>                    the game's own SlideDiag since the mark: the
@@ -36,9 +38,13 @@ Lydia stands, which in Emma's save is under water, and the player drowned there 
 The bot's script does not stop while the driver is busy with that, so its own `wait` lines run out meanwhile:
 `log DO sleep <seconds>` makes the driver itself wait before it reads the next line.
 `log DO server restart after console <command>` runs that command while the server is down (the game offline).
+`log DO menu <seconds> <menu name>` keeps a menu open that long (the driver waits; the bot's script does not).
 `log DO pickup own` has the player pick up the newest item this game dropped itself.
-`log DO papyrus <Script> <Function> <self> [form ...]` calls a native function on a reference (ids in hex; a number as n:<value>).
+`log DO papyrus <Script> <Function> <self> [form ...]` calls a native function on a reference (ids in hex; a number as n:<value>,
+a float as f:<value>, a bool as b:true or b:false).
 
+`log CHECK copy|npc equipped|unequipped <hex>` asks the game whether its copy has that item equipped (not for the left hand: the
+game's IsEquipped does not count it); `lefthand|righthand <hex>` asks which weapon is in that hand; `has <hex>` whether it owns one.
 `log CHECK distinct <most> <regular expression with one group>` passes when the client has logged at least one and
 at most that many different values of the group since the script began.
 `log CHECK absent <regular expression>` passes when the client has written no such line since the script began.
@@ -74,7 +80,7 @@ CAPTURES = 'E:/FUS/overwrite/SKSE/Plugins/devbench/captures'   # where MO2 puts 
 # Lydia" is then two paces that unload nothing (found 2026-10-02, a session that passed for that reason alone).
 ALL = ['live-copy', 'live-npc', 'live-dropmove', 'live-look', 'live-walk', 'live-creatures', 'live-npc-away', 'live-away-seeker',
        'live-temp-remove', 'live-temp-reuse', 'live-copy-abandon', 'live-temp-reconnect', 'live-crime', 'live-netch',
-       'live-sender', 'live-death', 'live-load', 'live-load-dead']
+       'live-sender', 'live-game-drops', 'live-equip', 'live-factions', 'live-menu-hold', 'live-levelled', 'live-whiterun', 'live-time', 'live-hit-npc', 'live-world-object', 'live-death', 'live-load', 'live-load-dead']
 # Not in the list, run by name: live-seeker-copy-remote and live-seeker-copy-local (the two halves that showed the
 # crash of live-copy-abandon needs a copy and its original together).
 
@@ -267,12 +273,33 @@ class Run:
                 found = sorted({m.group(1) for m in (rx.search(l) for l in session_lines()[self.log_start:]) if m})
                 ok = 0 < len(found) <= most
                 detail = '%d: %s' % (len(found), ', '.join(found))
+            elif who == 'ref' and words[2] == 'base':
+                # "ref <hex> base <hex>": the base the game's levelled actor at that reference has now.
+                form = words[1]
+                base = papyrus('Actor', 'GetLeveledActorBase', form)
+                got = base.get('formId', '') if isinstance(base, dict) else str(base)
+                ok = isinstance(base, dict) and int(got, 16) & 0xFFFFFF == int(words[3], 16) & 0xFFFFFF
+                detail = 'reference %s, levelled base %s (%s)' % (form, got, base.get('editorId', '') if isinstance(base, dict) else '')
+            elif who == 'ref' and words[2] == 'near':
+                # "ref <hex> near <x> <y> <z> <units>": a reference of the game's own is that close to that place.
+                form = words[1]
+                at = [papyrus('ObjectReference', 'GetPosition' + axis, form) for axis in 'XYZ']
+                wanted = [float(v) for v in words[3:6]]
+                known = all(isinstance(v, (int, float)) for v in at)
+                ok = known and math.dist(at, wanted) <= float(words[6])
+                detail = 'reference %s at %s, %s units from (%s)' % (form, [round(v) for v in at] if known else at,
+                                                                   round(math.dist(at, wanted)) if known else '?', ', '.join(words[3:6]))
             elif who == 'ref':
                 # "ref <hex> alive|dead": a reference of the game's own, asked directly.
                 form, state = words[1], words[2]
                 dead = papyrus('Actor', 'IsDead', form)
                 ok = isinstance(dead, bool) and dead is (state == 'dead')
                 detail = 'reference %s, IsDead %s' % (form, dead)
+            elif who == 'gamehour':
+                # "gamehour away <hours>": the game clock (global 38) is not at that hour any more.
+                hour = papyrus('GlobalVariable', 'GetValue', '38')
+                ok = isinstance(hour, (int, float)) and abs(float(hour) - float(words[2])) > 0.5
+                detail = 'GameHour %s' % hour
             elif who == 'absent':
                 # "absent <regular expression>": the client has written no such line since the script began.
                 rx = re.compile(' '.join(words[1:]))
@@ -413,12 +440,38 @@ class Run:
                         # 300 ms, so even a healthy one is in the 70s. The broken cases measured 0 and 17.
                         ok = share >= 50.0 if words[2] == 'walking' else share <= 20.0
                         detail = 'actor %s moved in %d samples, %d of them with a speed in its animation graph (%.0f%%, top %.0f)' % (form, moving, legs, share, top)
+                elif what in ('infaction', 'notinfaction'):
+                    # "npc infaction <hex>": the game's copy is in that faction (Actor.IsInFaction).
+                    inside = papyrus('Actor', 'IsInFaction', form, [{'form': '0x' + words[2]}])
+                    ok = isinstance(inside, bool) and inside is (what == 'infaction')
+                    detail = 'actor %s, IsInFaction(%s) %s' % (form, words[2], inside)
+                elif what == 'has':
+                    # "copy has <hex>": the copy's inventory holds at least one.
+                    n = papyrus('ObjectReference', 'GetItemCount', form, [{'form': '0x' + words[2]}])
+                    ok = isinstance(n, int) and n > 0
+                    detail = 'actor %s, GetItemCount(%s) %s' % (form, words[2], n)
+                elif what in ('lefthand', 'righthand'):
+                    # "copy lefthand <hex>": the weapon the game says is in that hand (GetEquippedWeapon).
+                    weapon = papyrus('Actor', 'GetEquippedWeapon', form, [what == 'lefthand'])
+                    got = weapon.get('formId', '') if isinstance(weapon, dict) else str(weapon)
+                    ok = isinstance(weapon, dict) and int(got, 16) & 0xFFFFFF == int(words[2], 16) & 0xFFFFFF
+                    detail = 'actor %s, %s holds %s' % (form, 'left hand' if what == 'lefthand' else 'right hand', got or weapon)
+                elif what in ('equipped', 'unequipped'):
+                    # "copy equipped <hex>": whether the game's copy has that item equipped, asked of the game itself.
+                    held = papyrus('Actor', 'IsEquipped', form, [{'form': '0x' + words[2]}])
+                    ok = isinstance(held, bool) and held is (what == 'equipped')
+                    detail = 'actor %s, IsEquipped(%s) %s' % (form, words[2], held)
                 elif what == 'health':
                     value = papyrus('Actor', 'GetActorValue', form, ['Health'])
                     base = papyrus('Actor', 'GetBaseActorValue', form, ['Health'])
                     # "full" is whatever this game says the actor's own health is, which a script cannot know.
-                    wanted = float(base) if words[2] == 'full' and isinstance(base, (int, float)) else float(words[2] if words[2] != 'full' else 'nan')
-                    ok = isinstance(value, (int, float)) and abs(value - wanted) <= HEALTH_TOLERANCE
+                    # "below <n>": anything under that, for a hit whose exact damage is the game's business.
+                    if words[2] == 'below':
+                        wanted = float(words[3])
+                        ok = isinstance(value, (int, float)) and value < wanted
+                    else:
+                        wanted = float(base) if words[2] == 'full' and isinstance(base, (int, float)) else float(words[2] if words[2] != 'full' else 'nan')
+                        ok = isinstance(value, (int, float)) and abs(value - wanted) <= HEALTH_TOLERANCE
                     detail = 'actor %s, health %s (wanted %.0f; its base health here is %s)' % (
                         form, ('%.1f' % value) if isinstance(value, (int, float)) else value, wanted,
                         ('%.0f' % base) if isinstance(base, (int, float)) else base)
@@ -453,7 +506,7 @@ class Run:
             m = re.search(r'NPC registered as actor ([0-9A-Fa-f]+)', line)
             if m:
                 self.npc_id = m.group(1)
-            m = re.search(r'\[script\] (CHECK .*|DO console .*|DO key .*|DO load last|DO server restart.*|DO sleep \d+|DO papyrus .*|DO pickup own|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
+            m = re.search(r'\[script\] (CHECK .*|DO console .*|DO key .*|DO load last|DO server restart.*|DO sleep \d+|DO papyrus .*|DO pickup own|DO menu .*|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
             if m:
                 text = m.group(1)
                 if text.startswith('CHECK '):
@@ -485,13 +538,38 @@ class Run:
                     # with forms as its arguments (hex ids).
                     words = text.split()
                     # Arguments: a form by its hex id, or a plain number written "n:<value>".
-                    args = [int(w[2:]) if w.startswith('n:') else {'form': '0x' + w} for w in words[5:]]
-                    result = papyrus(words[2], words[3], words[4], args)
+                    def arg(w):
+                        if w.startswith('n:'):
+                            return int(w[2:])
+                        if w.startswith('f:'):
+                            return float(w[2:])
+                        if w in ('b:true', 'b:false'):
+                            return w == 'b:true'
+                        if w in ('copy', 'npc'):
+                            f, _ = self.subject(w)
+                            return {'form': '0x' + (f or '0')}
+                        return {'form': '0x' + w}
+                    args = [arg(w) for w in words[5:]]
+                    target = words[4]
+                    if target in ('copy', 'npc'):
+                        target, _ = self.subject(target)
+                    result = papyrus(words[2], words[3], target, args) if target else 'ERR no %s' % words[4]
                     print('   (papyrus %s.%s on %s: %s)' % (words[2], words[3], words[4], result), flush=True)
                     if isinstance(result, str) and result.startswith('ERR'):
                         self.results.append((False, text.strip(), result))
                 elif text.startswith('DO sleep '):
                     time.sleep(int(text.split()[2]))
+                elif text.startswith('DO menu '):
+                    # "DO menu <seconds> <menu name>": open a menu, keep it open, close it again (DevBench's menu tool).
+                    words = text.split(None, 3)
+                    try:
+                        tool('menu', {'action': 'open', 'name': words[3]})
+                        time.sleep(float(words[2]))
+                        tool('menu', {'action': 'close', 'name': words[3]})
+                        print('   (menu %s open for %s s)' % (words[3], words[2]), flush=True)
+                    except Exception as e:
+                        print('   FAIL  menu %s: %s' % (words[3], e), flush=True)
+                        self.results.append((False, text.strip(), str(e)))
                 elif text.strip() == 'DO pickup own':
                     # The newest item this game dropped itself, picked up by the player through the game's own Activate.
                     refs = [m.group(1) for m in (re.search(r'DroppedItem: dropped \S+ x\d+ as ([0-9A-Fa-f]+)', l) for l in session_lines()) if m]
@@ -511,7 +589,15 @@ class Run:
                         self.results.append((False, 'server restart', str(e)))
                 elif text.strip() == 'DO load last':
                     try:
-                        r = tool('game', {'action': 'loadLast'})
+                        # The save the session started from (headless.ps1 keeps its name), not the most recent one:
+                        # that is wherever Emma last played.
+                        started_from = ''
+                        try:
+                            with io.open(os.path.join(os.environ.get('TEMP', ''), 'st-headless-state.json'), encoding='utf-8-sig') as f:
+                                started_from = json.load(f).get('save') or ''
+                        except Exception:
+                            pass
+                        r = tool('game', {'action': 'load', 'name': started_from}) if started_from else tool('game', {'action': 'loadLast'})
                         print('   (load: %s)' % r.get('name'), flush=True)
                     except Exception as e:
                         print('   FAIL  load last: %s' % type(e).__name__, flush=True)
@@ -576,6 +662,9 @@ class Run:
 
 def main():
     args = sys.argv[1:]
+    if args == ['--list']:
+        print('\n'.join(ALL))
+        return 0
     scripts = ALL if (not args or args == ['--all']) else args
     try:
         state = tool('inspect', {'kind': 'state'})

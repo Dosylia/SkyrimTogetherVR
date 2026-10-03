@@ -56,6 +56,7 @@ enum ClientOpcode : unsigned char
     kRequestDroppedItemAdd,
     kRequestDroppedItemRemove,
     kRequestDroppedItemMove,
+    kRequestWorldObjectMove,
     kClientOpcodeMax
 };
 
@@ -118,5 +119,6 @@ enum ServerOpcode : unsigned char
     kNotifyDroppedItem,
     kNotifyDroppedItemRemoved,
     kNotifyDroppedItemMove,
+    kNotifyWorldObjectMove,
     kServerOpcodeMax
 };

@@ -1,0 +1,23 @@
+# Time applied on VR: while connected the game clock follows the server's, whatever the game does locally.
+#
+#   python Tools\VR\live-check.py live-time
+#
+# CalendarService writes the server's time into the game's GameHour every update while connected. Setting the hour
+# by console should therefore not last: within a few seconds the clock is back on the server's time.
+log live time
+waitfor connected 45
+expect known me
+waitfor known other 40
+wait 5
+log -- the hour set to 3 here; the server says otherwise
+log DO console set gamehour to 3
+log DO sleep 4
+log CHECK gamehour away 3
+wait 3
+log -- and to 21
+log DO console set gamehour to 21
+log DO sleep 4
+log CHECK gamehour away 21
+wait 3
+log done
+stop

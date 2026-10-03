@@ -15,6 +15,8 @@
 #include <Messages/NotifyDroppedItem.h>
 #include <Messages/NotifyDroppedItemRemoved.h>
 #include <Messages/NotifyDroppedItemMove.h>
+#include <Messages/NotifyWorldObjectMove.h>
+#include <Messages/RequestWorldObjectMove.h>
 #include <Messages/RequestDroppedItemMove.h>
 #include <Messages/RequestDroppedItemAdd.h>
 #include <Messages/RequestDroppedItemRemove.h>
@@ -30,6 +32,8 @@
 #include <Messages/RequestDeathStateChange.h>
 #include <Messages/RequestHealthChangeBroadcast.h>
 #include <Messages/RequestEquipmentChanges.h>
+#include <Messages/RequestInventoryChanges.h>
+#include <Messages/RequestFactionsChanges.h>
 #include <Messages/NotifyEquipmentChanges.h>
 #include <Messages/RequestOwnershipTransfer.h>
 #include <Messages/RequestRespawn.h>
@@ -1055,6 +1059,12 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
             spdlog::info("Dropped item {} was sent again, lying {:.0f} units from where this bot last knew it", message.Id,
                          glm::distance(m_dropPlaces[message.Id], cPlace));
         m_dropPlaces[message.Id] = cPlace;
+        if (cNew && m_pendingDropBase != GameId{} && message.Item.BaseId == m_pendingDropBase)
+        {
+            m_ownDrop = message.Id;
+            m_pendingDropBase = GameId{};
+            spdlog::info("Dropped item {} is this bot's own drop", message.Id);
+        }
         if (cNew)
         {
             spdlog::info("Dropped item {} is {:X}:{:X} x{} in cell {:X} at ({:.0f}, {:.0f}, {:.0f})", message.Id, message.Item.BaseId.ModId, message.Item.BaseId.BaseId,
@@ -1072,6 +1082,16 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         m_dropPlaces[message.Id] = cPlace;
         spdlog::info("Dropped item {} moved to ({:.0f}, {:.0f}, {:.0f}){}", message.Id, cPlace.x, cPlace.y, cPlace.z, message.AtRest ? ", at rest" : "");
         Record(Collect::Spawn, fmt::format("drop {} moved{}", message.Id, message.AtRest ? " rest" : ""));
+        return;
+    }
+
+    if (opcode == NotifyWorldObjectMove::Opcode)
+    {
+        const auto& message = static_cast<const NotifyWorldObjectMove&>(acMessage);
+        ++m_objectMoves;
+        const glm::vec3 cPlace(message.Position);
+        spdlog::info("World object {:X}:{:X} moved to ({:.0f}, {:.0f}, {:.0f}){}", message.ObjectId.ModId, message.ObjectId.BaseId, cPlace.x, cPlace.y, cPlace.z,
+                     message.AtRest ? ", at rest" : "");
         return;
     }
 
@@ -1687,12 +1707,90 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         request.WorldSpaceId = m_worldSpace;
         request.Position = m_position;
         SendMsg(request);
+        m_pendingDropBase = request.Item.BaseId;
 
         spdlog::info("[script] dropped {:X} at ({:.0f}, {:.0f}, {:.0f}) in cell {:X}", request.Item.BaseId.BaseId, m_position.x, m_position.y, m_position.z, m_cell.BaseId);
         return true;
     }
 
     // Pick up an item the server has told this bot about.
+    // Set the factions of the first NPC this bot owns: "faction npc <hex faction> [rank]" leaves it in that one faction,
+    // the way an owner reports a creature whose allegiances changed (a bandit turned on, a creature charmed). For
+    // "factions corrected on return": the other player was away when it happened (live-factions, 2026-10-03).
+    if (name == "faction")
+    {
+        uint32_t factionId = 0;
+        if (args.size() < 2 || args[0] != "npc" || !ParseHex(args[1], factionId))
+        {
+            spdlog::error("[script] faction needs 'npc' and a hex faction id, e.g. 'faction npc DB1 0'");
+            return true;
+        }
+        const KnownActor* pNpc = nullptr;
+        for (const auto& actor : m_actors)
+            if (actor.OwnedByUs && !actor.IsPlayer && actor.ServerId != m_serverId)
+            {
+                pNpc = &actor;
+                break;
+            }
+        if (!pNpc)
+        {
+            spdlog::warn("[script] faction: this bot owns no NPC");
+            return true;
+        }
+        Faction faction{};
+        faction.Id = Skyrim(factionId);
+        faction.Rank = static_cast<int8_t>(args.size() > 2 ? std::atoi(args[2].c_str()) : 0);
+        RequestFactionsChanges request{};
+        request.Changes[pNpc->ServerId].ExtraFactions.push_back(faction);
+        SendMsg(request);
+        spdlog::info("[script] NPC {:X} put in faction {:X} at rank {}", pNpc->ServerId, factionId, faction.Rank);
+        return true;
+    }
+
+    // "moveobject <hex reference> <x> <y> <z> held|rest": a world object of Skyrim.esm moved by this bot's hand to that
+    // place, the way a client reports one carried or pushed (cell and worldspace are the bot's own).
+    if (name == "moveobject")
+    {
+        uint32_t refId = 0;
+        float x = 0.f, y = 0.f, z = 0.f;
+        if (args.size() < 5 || !ParseHex(args[0], refId) || !ParseFloat(args[1], x) || !ParseFloat(args[2], y) || !ParseFloat(args[3], z))
+        {
+            spdlog::error("[script] moveobject needs a hex reference, x y z and held|rest");
+            return true;
+        }
+        RequestWorldObjectMove request{};
+        request.ObjectId = Skyrim(refId);
+        request.CellId = m_cell;
+        request.WorldSpaceId = m_worldSpace;
+        request.Position = ToNet(glm::vec3(x, y, z));
+        request.AtRest = args[4] == "rest";
+        SendMsg(request);
+        spdlog::info("[script] world object {:X} moved to ({:.0f}, {:.0f}, {:.0f}){}", refId, x, y, z, request.AtRest ? ", at rest" : "");
+        return true;
+    }
+
+    // Put an item in this bot's own inventory, the way a real client reports one it picked up or bought: the other
+    // players' copies of this character then own it too. Without it an "equip" names an item the copy does not have,
+    // and the game ignores it (live-equip, 2026-10-03: the copy never held the sword it was told to equip).
+    if (name == "additem")
+    {
+        uint32_t baseId = 0;
+        if (args.empty() || !ParseHex(args[0], baseId))
+        {
+            spdlog::error("[script] additem needs a hex base form id, e.g. 'additem 12EB7 1'");
+            return true;
+        }
+        RequestInventoryChanges request{};
+        request.ServerId = m_serverId;
+        request.OwnershipEpoch = m_ownershipEpoch;
+        request.Item.BaseId = Skyrim(baseId);
+        request.Item.Count = args.size() > 1 ? std::atoi(args[1].c_str()) : 1;
+        request.UpdateClients = true;
+        SendMsg(request);
+        spdlog::info("[script] {} of {:X} added to this bot's inventory", request.Item.Count, baseId);
+        return true;
+    }
+
     if (name == "pickup")
     {
         if (m_drops.empty())
@@ -1702,11 +1800,11 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         }
 
         RequestDroppedItemRemove request{};
-        request.Id = m_drops.begin()->first;
+        request.Id = DropToHandle();
         SendMsg(request);
         spdlog::info("[script] picked up dropped item {}", request.Id);
         m_dropPlaces.erase(request.Id);
-        m_drops.erase(m_drops.begin());
+        m_drops.erase(request.Id);
         return true;
     }
 
@@ -1726,7 +1824,7 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
             return true;
         }
 
-        const uint32_t id = m_drops.begin()->first;
+        const uint32_t id = DropToHandle();
         glm::vec3& place = m_dropPlaces[id];
         place += glm::vec3(dx, dy, dz);
 
@@ -1750,6 +1848,26 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
 
         m_acceptOwnership = args[0] == "accept";
         spdlog::info("[script] ownership {}", m_acceptOwnership ? "accept: actors handed to us are kept" : "refuse: actors handed to us go straight back");
+        return true;
+    }
+
+    // "teleport <x> <y>": appear somewhere else in the same worldspace, the way a player crosses the map by fast travel.
+    // A cell change by coordinates sends no cell-change message, so the bot would not follow the host there on its
+    // own (live-whiterun, 2026-10-03: it stayed at Mistwatch while the player stood at Whiterun's gate). The grid it
+    // now stands in is reported on the next tick.
+    if (name == "teleport")
+    {
+        float x = 0.f, y = 0.f;
+        if (args.size() < 2 || !ParseFloat(args[0], x) || !ParseFloat(args[1], y))
+        {
+            spdlog::error("[script] teleport needs x and y, e.g. 'teleport 22528 -10240'");
+            return true;
+        }
+        m_position.x = x;
+        m_position.y = y;
+        m_standaloneCell = true; // no real cell: the grid square is reported instead
+        m_cell = GameId{};
+        spdlog::info("[script] teleported to ({:.0f}, {:.0f})", x, y);
         return true;
     }
 
@@ -1815,6 +1933,15 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         request.CurrentActorData.InitialActorValues.ActorValuesList[kHealth] = 100.f;
         request.CurrentActorData.InitialActorValues.ActorMaxValuesList[kHealth] = 100.f;
         request.CurrentActorData.IsDead = false;
+        // "npc <reference> pick <hex base>": what a levelled spawn point rolled on this side. The other games then
+        // conform their own actor at that point to it (live-levelled, 2026-10-03: a bear's point claimed as a goat).
+        for (size_t i = 1; i + 1 < args.size(); ++i)
+            if (args[i] == "pick")
+            {
+                uint32_t pickId = 0;
+                if (ParseHex(args[i + 1], pickId))
+                    request.LeveledNpcPickId = Skyrim(pickId);
+            }
         SendMsg(request);
         m_npcPosition = m_position;
 
@@ -2338,10 +2465,34 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
         return same;
     }
 
+    if (what == "mydrop")
+    {
+        // mydrop: the server has sent this bot's own drop back.
+        aOutWhy = m_drops.count(m_ownDrop) ? fmt::format("item {} is this bot's drop", m_ownDrop) : fmt::format("{} item(s) known, none of them this bot's", m_drops.size());
+        return m_drops.count(m_ownDrop) != 0;
+    }
+
+    if (what == "objectmoves")
+    {
+        // objectmoves <op> <n>: world-object moves the server relayed to this bot.
+        float wanted = 0.f;
+        if (acArgs.size() < 3 || !ParseFloat(acArgs[2], wanted))
+            return std::nullopt;
+        const float value = static_cast<float>(m_objectMoves);
+        aOutWhy = fmt::format("{} world-object move(s) relayed", m_objectMoves);
+        const std::string& op = acArgs[1];
+        if (op == "==") return value == wanted;
+        if (op == ">=") return value >= wanted;
+        if (op == "<=") return value <= wanted;
+        if (op == ">") return value > wanted;
+        if (op == "<") return value < wanted;
+        return std::nullopt;
+    }
+
     if (what == "dropmoves" || what == "dropmoved")
     {
         // dropmoves <op> <n>: moves the server relayed to this bot.
-        // dropmoved <op> <n>: how far the first known item now lies from where this bot first heard of it.
+        // dropmoved <op> <n>: how far this bot's drop (or else the first known item) now lies from where this bot first heard of it.
         if (acArgs.size() < 3)
             return std::nullopt;
         float wanted = 0.f;
@@ -2350,7 +2501,7 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
         float moved = -1.f;
         if (!m_drops.empty())
         {
-            const uint32_t id = m_drops.begin()->first;
+            const uint32_t id = DropToHandle();
             if (m_dropPlaces.count(id) && m_dropFirstPlaces.count(id))
                 moved = glm::distance(m_dropPlaces.at(id), m_dropFirstPlaces.at(id));
         }
