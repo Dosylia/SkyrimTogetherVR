@@ -72,6 +72,9 @@ struct KnownActor
     uint32_t ServerId{};
     //! The base form the server sent with an NPC's spawn. Empty for players and for NPCs this bot registered itself.
     GameId Base{};
+    //! The placed reference the server sent with an NPC's spawn (a bandit placed in Mistwatch, say). Empty for
+    //! temporary actors. What `ref:<hex>` in a script names.
+    GameId Ref{};
     std::string Name;      // when the server named it
     float Health{};
     bool HealthKnown{};

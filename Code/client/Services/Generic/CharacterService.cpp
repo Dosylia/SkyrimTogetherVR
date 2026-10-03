@@ -10,6 +10,7 @@
 #include <Services/InventoryService.h>
 #include <Services/DiscoveryService.h>
 #include <RecentDeletes.h>
+#include <CrashHandler.h>
 #include <unordered_set>
 #include <CopyRemovalPolicy.h>
 
@@ -89,6 +90,44 @@ namespace
 // this client goes away. Disable is saved with the reference, so a crash while a ghost is disabled leaves that one
 // spawn point disabled in the save made during the session; a small, known cost (2026-09-19).
 TiltedPhoques::Map<uint32_t, uint32_t> s_ghosts;
+
+// Actors this client's own game made (placed by console, a quest spawn, a random encounter) that now belong to
+// another player and are no longer in this client's view: server character id -> the actor it is here.
+//
+// A temporary actor has no id two games agree on, so the server sends it as "a character with no reference of its
+// own" and every client makes a copy for it -- including, when it came back, the client whose game had made it and
+// still had it. That client then announced its own actor to the server as a new character as well. One creature
+// became two for everybody, and a third body on the screen of the player who made it: three Seekers placed, six
+// standing after one walk away and back (2026-10-02). It is also what the three crashes of that night have in
+// common: `live-copy-abandon` crashed five times out of five within a second of travelling away from such a pair,
+// while a copy alone (`live-seeker-copy-remote`, `-local`) and the game's own actors alone travel cleanly. Why the
+// pair crashes is not known -- the game frees both on the way out and its physics then meets a skeleton whose owner
+// is freed memory -- but the pair should not exist in the first place.
+//
+// So the client that made the actor remembers which server character it became, does not announce it a second
+// time, and takes it back as that same actor when the server sends the character again. The record lasts until
+// the server removes the character or the connection ends.
+struct HandedAway
+{
+    uint32_t FormId{};
+    uint32_t BaseFormId{}; // 0 when the actor was already gone from the game when it was let go
+};
+TiltedPhoques::Map<uint32_t, HandedAway> s_handedAway;
+
+// Whether this actor is one that was handed away, and as which server character.
+bool IsHandedAway(const Actor* apActor, uint32_t& aServerId) noexcept
+{
+    for (const auto& [serverId, entry] : s_handedAway)
+    {
+        if (entry.FormId != apActor->formID)
+            continue;
+        if (entry.BaseFormId != 0 && (!apActor->baseForm || apActor->baseForm->formID != entry.BaseFormId))
+            continue;
+        aServerId = serverId;
+        return true;
+    }
+    return false;
+}
 
 // The temporary actors this client made itself -- copies of other players and of their creatures -- by form id.
 //
@@ -274,9 +313,29 @@ struct WaitingCopy
 
 TiltedPhoques::Vector<WaitingCopy> s_waitingCopies;
 
+// The first word at this address, or 0 if it cannot be read: an access violation is caught here instead of asking
+// VirtualQuery first. CrashGuard tells the crash handler that a fault in here is expected.
+uintptr_t ReadFirstWord(const void* apAddress) noexcept
+{
+    __try
+    {
+        return *static_cast<const uintptr_t*>(apAddress);
+    }
+    __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
+    {
+        return 0;
+    }
+}
+
 //! Whether a pointer from a form lookup is still a real game object: readable, and its vtable inside the process
 //! image, where every game vtable lives. Freed memory reused for anything else fails at once -- 2026-09-30's had
-//! 0x3b33e809f967790a where the vtable belongs -- and a live form costs one VirtualQuery and a compare.
+//! 0x3b33e809f967790a where the vtable belongs.
+//!
+//! The read is guarded rather than checked with VirtualQuery first. VirtualQuery was the whole cost of this check: in
+//! a big process it works out how far the region around the address reaches, and the game's heap regions are large
+//! and grow, so one call took about ten milliseconds. RunSpawnUpdates asks this once a frame for every copy still
+//! waiting for its 3D, which made it the slowest part of the frame up to 43 ms on 2026-10-01 to 10-03: 14 ms with
+//! one copy waiting, 24 with two, 36 with four. Placing the copies themselves measured 0.0 ms.
 bool IsLiveGameObject(const TESForm* apForm) noexcept
 {
     if (!apForm)
@@ -290,11 +349,10 @@ bool IsLiveGameObject(const TESForm* apForm) noexcept
         return std::pair<uintptr_t, uintptr_t>{base, base + pNt->OptionalHeader.SizeOfImage};
     }();
 
-    MEMORY_BASIC_INFORMATION info{};
-    if (!VirtualQuery(apForm, &info, sizeof(info)) || info.State != MEM_COMMIT || (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
-        return false;
+    CrashGuard::Enter();
+    const uintptr_t vtable = ReadFirstWord(apForm);
+    CrashGuard::Leave();
 
-    const auto vtable = *reinterpret_cast<const uintptr_t*>(apForm);
     return vtable >= s_image.first && vtable < s_image.second;
 }
 
@@ -747,6 +805,7 @@ void CharacterService::OnDisconnected(const DisconnectedEvent& acDisconnectedEve
     // The players' copies are deleted and every other copy has just been handed to the game: none of them is this
     // client's to disable or delete any more, and their ids will be given out again. See s_ownCopies.
     s_ownCopies.clear();
+    s_handedAway.clear();
 
     m_world.clear<WaitingForAssignmentComponent, LocalComponent, RemoteComponent>();
 
@@ -1057,8 +1116,44 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
 
     std::optional<entt::entity> entity;
 
-    // Custom forms
+    // One of this game's own actors, coming back from the player it was given to. See s_handedAway.
     if (acMessage.FormId == GameId{})
+    {
+        if (const auto handed = s_handedAway.find(acMessage.ServerId); handed != s_handedAway.end())
+        {
+            const uint32_t cOwnId = handed->second.FormId;
+            s_handedAway.erase(handed);
+
+            Actor* pOwn = Cast<Actor>(TESForm::GetById(cOwnId));
+            TESNPC* pSentBase = acMessage.BaseId != GameId{} ? Cast<TESNPC>(TESForm::GetById(m_world.GetModSystem().GetGameId(acMessage.BaseId))) : nullptr;
+            const bool cSameKind = pOwn && pSentBase && pOwn->baseForm == pSentBase;
+
+            const auto view = m_world.view<FormIdComponent>();
+            const auto itor = std::find_if(std::begin(view), std::end(view), [cOwnId, view](entt::entity aOther) { return view.get<FormIdComponent>(aOther).Id == cOwnId; });
+
+            if (pOwn && !pOwn->IsDeleted() && cSameKind)
+            {
+                pActor = pOwn;
+                entity = itor != std::end(view) ? *itor : m_world.create();
+                spdlog::info("HandedAway: server character {:X} is this game's own actor {:X} come back; it is that actor again and no copy is made", acMessage.ServerId, cOwnId);
+            }
+            else
+            {
+                spdlog::info("HandedAway: server character {:X} came back, but the actor it was here ({:X}) is {}; a copy is made", acMessage.ServerId, cOwnId,
+                             !pOwn ? "not loaded" : pOwn->IsDeleted() ? "deleted" : "another creature now");
+                // Whatever carries that id now was held back from the server on the strength of the record.
+                if (pOwn && itor != std::end(view))
+                    ProcessNewEntity(*itor);
+            }
+        }
+    }
+
+    if (pActor)
+    {
+        // Taken back above.
+    }
+    // Custom forms
+    else if (acMessage.FormId == GameId{})
     {
         TESNPC* pNpc = nullptr;
 
@@ -1444,6 +1539,20 @@ void CharacterService::OnOwnershipTransfer(const NotifyOwnershipTransfer& acMess
 
 void CharacterService::OnRemoveCharacter(const NotifyRemoveCharacter& acMessage) const noexcept
 {
+    // Removals go to every player, in range or not, so a record kept for a character nobody has any more ends here.
+    if (const auto handed = s_handedAway.find(acMessage.ServerId); handed != s_handedAway.end())
+    {
+        const uint32_t cOwnId = handed->second.FormId;
+        s_handedAway.erase(handed);
+        spdlog::info("HandedAway: server character {:X} is gone from the server; actor {:X} is an ordinary actor of this game again", acMessage.ServerId, cOwnId);
+
+        // If it stands here unannounced, it is announced now.
+        const auto formView = m_world.view<FormIdComponent>();
+        const auto itor = std::find_if(std::begin(formView), std::end(formView), [cOwnId, formView](entt::entity aOther) { return formView.get<FormIdComponent>(aOther).Id == cOwnId; });
+        if (itor != std::end(formView))
+            ProcessNewEntity(*itor);
+    }
+
     auto view = m_world.view<RemoteComponent>();
 
     const auto itor = std::find_if(std::begin(view), std::end(view), [id = acMessage.ServerId, view](entt::entity entity) { return view.get<RemoteComponent>(entity).Id == id; });
@@ -1892,6 +2001,22 @@ void CharacterService::ProcessNewEntity(entt::entity aEntity) const noexcept
     if (m_world.any_of<RemoteComponent, LocalComponent, WaitingForAssignmentComponent>(aEntity))
         return;
 
+    // One of this game's own actors that another player was given while it was out of view. The server still has it
+    // as that character and sends it when it is in range; announcing it here would make a second one of it for
+    // everybody. See s_handedAway.
+    if (uint32_t serverId = 0; IsHandedAway(pActor, serverId))
+    {
+        const auto remoteView = m_world.view<RemoteComponent>();
+        const bool cCopyStands = std::any_of(std::begin(remoteView), std::end(remoteView), [remoteView, serverId](entt::entity aOther) { return remoteView.get<RemoteComponent>(aOther).Id == serverId; });
+        if (cCopyStands)
+            spdlog::warn("HandedAway: actor {:X} is back in view after the server sent character {:X}, so a copy of it stands here too; not handled, both stay", pActor->formID,
+                         serverId);
+        else
+            spdlog::info("HandedAway: actor {:X} is back in view and is still server character {:X}; not announced as a new one, the server sends it when it is in range",
+                         pActor->formID, serverId);
+        return;
+    }
+
     CacheSystem::Setup(World::Get(), aEntity, pActor);
 
     RequestServerAssignment(aEntity);
@@ -2061,6 +2186,20 @@ void CharacterService::RequestServerAssignment(const entt::entity aEntity) const
 
 void CharacterService::CancelServerAssignment(const entt::entity aEntity, const uint32_t aFormId) const noexcept
 {
+    // TEMPORARY (2026-10-03): what a temporary actor was when its removal was noticed. Three crashes on 2026-10-02
+    // came within a second of a trip that left copies of Seekers behind which this client ran itself, and for those
+    // nothing is logged below: either the game had freed them already, or they were not in the list of copies.
+    const bool cTemporaryId = (aFormId & 0xFF000000) == 0xFF000000;
+    const bool cGameMade = s_ownCopies.find(aFormId) == s_ownCopies.end();
+    if (cTemporaryId)
+    {
+        Actor* pSeen = Cast<Actor>(TESForm::GetById(aFormId));
+        spdlog::info("CopyGone: {:X} removed as {}; the actor is {}; made by this client: {}", aFormId,
+                     m_world.all_of<RemoteComponent>(aEntity) ? "remote" : m_world.all_of<LocalComponent>(aEntity) ? "local" : m_world.all_of<WaitingForAssignmentComponent>(aEntity) ? "waiting" : "untracked",
+                     pSeen ? (pSeen->IsDeleted() ? "still there, marked deleted" : pSeen->GetNiNode() ? "still there, with 3D" : "still there, no 3D") : "gone from the game already",
+                     s_ownCopies.find(aFormId) != s_ownCopies.end() ? "yes" : "no");
+    }
+
     if (m_world.all_of<RemoteComponent>(aEntity))
     {
         Actor* pActor = Cast<Actor>(TESForm::GetById(aFormId));
@@ -2077,6 +2216,11 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
                 RecentDeletes::Record(pActor, aFormId, refWord & 0x3FF, refWord, RecentDeletes::kLeftToGame);
                 if (ActorExtension* pExtension = pActor->GetExtension())
                     pExtension->SetRemote(false);
+
+                const uint32_t cServerId = m_world.get<RemoteComponent>(aEntity).Id;
+                s_handedAway[cServerId] = HandedAway{aFormId, pActor->baseForm ? pActor->baseForm->formID : 0};
+                spdlog::info("HandedAway: actor {:X} is server character {:X}, another player's now; remembered, so that it is the same actor when it comes back", aFormId,
+                             cServerId);
             }
             else if (pActor->IsTemporary() && !IsProcessExiting())
             {
@@ -2241,6 +2385,16 @@ void CharacterService::CancelServerAssignment(const entt::entity aEntity, const 
             request.ServerId, request.OwnershipEpoch, request.WorldSpaceId.BaseId, request.CellId.BaseId, request.Position.x, request.Position.y, request.Position.z);
 
         m_transport.Send(request);
+
+        // One of this game's own temporary actors, given up because its cell unloaded. If another player is there
+        // the server gives it to them, and it is then theirs under this same id. See s_handedAway.
+        if (cTemporaryId && cGameMade && !IsProcessExiting())
+        {
+            const Actor* pOwn = Cast<Actor>(TESForm::GetById(aFormId));
+            s_handedAway[request.ServerId] = HandedAway{aFormId, pOwn && pOwn->baseForm ? pOwn->baseForm->formID : 0};
+            spdlog::info("HandedAway: actor {:X} was server character {:X} and is given up; remembered, in case the server gives it to another player and sends it back", aFormId,
+                         request.ServerId);
+        }
 
         m_world.remove<LocalAnimationComponent, LocalComponent>(aEntity);
     }

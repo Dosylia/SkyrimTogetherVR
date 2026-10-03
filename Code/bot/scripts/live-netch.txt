@@ -1,0 +1,24 @@
+# Which actions does a creature standing still send, and how many of them did not work here?
+#
+#   python Tools\VR\live-check.py live-netch
+#
+# 2026-10-02: a Netch standing still sent IdleSpecialStart 282 times in 12 s. The client says which actions flood
+# ("ActionFlood: ..."), and this bot records the stream the server relays for that creature, with its action names.
+log live netch
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+wait 5
+log -- the game spawns a Netch and a Seeker, and they stand there (combat AI is off)
+log DO console player.placeatme 0202173B 1
+log DO console player.placeatme 0201EEC9 1
+wait 8
+capture base 2173B 12
+wait 3
+capture base 1EEC9 12
+wait 3
+log CHECK game alive
+wait 3
+log done
+stop

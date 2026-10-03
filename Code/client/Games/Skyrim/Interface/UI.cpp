@@ -172,6 +172,14 @@ static void* UI_AddToActiveQueue_Hook(UI* apSelf, IMenu* apMenu, void* apFoundIt
             return UI_AddToActiveQueue(apSelf, apMenu, apFoundItem);
         const BSFixedString* pName = apSelf->LookupMenuNameByInstance(apMenu);
         spdlog::info("Menu queued: {}{} (connected {})", pName ? pName->AsAscii() : "?", apMenu->PausesGame() ? " [pauses]" : "", World::Get().GetTransport().IsConnected() ? "yes" : "no");
+#ifdef SKYRIMVR
+        // The in-headset dashboard is made at the main menu, where a pause costs nothing. Made on the first update in
+        // the world, as before, it stopped the game for 0.9 and 1.5 s in Emma's sessions of 2026-09-30 and 10-01 and
+        // 1.3 to 1.5 s in every session with nobody in the headset ("Mod update took ..., slowest section
+        // OverlayService::OnUpdate"), right after the save had loaded. OnUpdate still makes it if this did not.
+        if (pName && pName->AsAscii() && strcmp(pName->AsAscii(), "Main Menu") == 0)
+            World::Get().GetOverlayService().CreateVR();
+#endif
         if (pName && strcmp(pName->AsAscii(), "MessageBoxMenu") == 0)
         {
             std::string strings;

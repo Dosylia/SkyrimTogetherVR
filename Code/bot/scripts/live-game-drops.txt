@@ -1,0 +1,42 @@
+# Items the game drops and picks up itself, and items dropped while offline, announced on connect.
+#
+#   python Tools\VR\live-check.py live-game-drops
+#
+# The other drop tests have this bot drop and the game watch. Here the player drops an iron sword and picks it up again,
+# and this bot sees it appear and go; then the server goes away, the player drops another while offline, and when both
+# are back the client announces it (DroppedItemService, "announced N not yet shared this session").
+#
+# The first drop goes through the game's own DropObject, the road an inventory drop takes (47 such drops in Emma's
+# session of 2026-09-26). The console's "player.drop" takes another road, RemoveItem, which is not shared as an item on
+# the floor: the first two runs of this script used it and saw nothing.
+log live game drops
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+wait 5
+
+log -- the player drops a sword
+log DO console player.additem 12EB7 2
+wait 2
+log DO papyrus ObjectReference DropObject 14 12EB7 n:1
+waitfor drops >= 1 20
+expect drops >= 1
+wait 3
+
+log -- and picks it up again
+log DO pickup own
+waitfor dropremovals >= 1 20
+expect dropremovals >= 1
+wait 3
+
+# The bot loses the server too; its script carries on once it is back in the world, and it has forgotten every drop.
+log -- the server goes away; the player drops the other sword while offline
+log DO server restart after console player.drop 12EB7 1
+log DO sleep 20
+waitfor drops >= 1 40
+expect drops >= 1
+log CHECK logged DroppedItem: the player's dropped-item list holds \d+ item\(s\); announced [1-9]
+wait 3
+log done
+stop

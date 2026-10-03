@@ -1,0 +1,78 @@
+# A creature this game made, given to the other player while its maker was away, and coming back.
+#
+#   python Tools\VR\live-check.py live-copy-abandon
+#
+# Until 2026-10-03 the creature came back twice: the game still had its own actor, and the server sent the creature
+# back as the other player's, for which the client made a copy. When the other player then left, the client ran the
+# copy itself, next to the original -- and the next trip away crashed the game within a second of arriving, five
+# times out of five (`SkyrimVR.exe+0x3AC1A8`, `+0x2EEF6A` or a cast on garbage: the physics meets a skeleton whose
+# owner is freed memory). A copy on its own does not do that (live-seeker-copy-remote, -local), nor do the game's
+# own actors on their own.
+#
+#   1. the game spawns creatures of its own and the player leaves; the other player stays and is given them;
+#   2. the player comes back, and the server sends the creatures back: they must be the same actors, no copies;
+#   3. the other player goes; the server gives the creatures to the player again;
+#   4. the player leaves again, and comes back.
+#
+# "No copy" is checked through the log rather than by counting Seekers: in the full suite earlier scripts leave
+# Seekers of their own about, and a count of three failed there with nothing wrong (2026-10-03).
+#
+# The travelling is by cell (`cow`), not to Lydia: she follows the player back, and "go to Lydia" is then a step
+# of two paces that leaves nothing behind (the session of 23:28 passed for that reason alone).
+log live copy abandon
+waitfor connected 45
+collect spawn ownership
+expect known me
+waitfor known other 40
+wait 5
+
+# Keep what the server hands over, and do not follow the player out.
+ownership accept
+stay
+
+# Combat AI is off for the whole run (live-check.py sees to it), so the Seekers stand there instead of attacking.
+log -- creatures the game spawns itself, next to the player
+log DO console player.placeatme 0201EEC9 3
+wait 10
+
+log DO god on
+wait 3
+log -- 1. the player leaves; this bot stays and is given the creatures
+log DO console cow Tamriel 34 8
+waitfor owned >= 1 60
+wait 25
+log CHECK game alive
+wait 3
+
+log -- 2. the player comes back and is sent the creatures, which are this bot's now
+log DO console cow Tamriel 34 -9
+wait 45
+log CHECK game alive
+log CHECK logged HandedAway: server character \w+ is this game's own actor
+log CHECK absent HandedAway: .*(a copy of it stands here too|is not loaded; a copy is made)
+wait 3
+
+log -- 3. this bot goes; the player is given the creatures again
+disconnect
+wait 20
+log CHECK logged Gained ownership of actor
+wait 3
+
+log -- 4. the player leaves again
+log DO console cow Tamriel 34 8
+wait 40
+log CHECK game alive
+wait 3
+
+log -- and comes back
+log DO console cow Tamriel 34 -9
+wait 45
+log CHECK game alive
+log CHECK game inworld
+log CHECK absent HandedAway: .*(a copy of it stands here too|is not loaded; a copy is made)
+wait 3
+
+log DO god off
+wait 3
+log done
+stop

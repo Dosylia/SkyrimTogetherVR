@@ -813,6 +813,7 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
             KnownActor& actor = Actor(message.ServerId);
             actor.IsPlayer = false;
             actor.Base = message.BaseId;
+            actor.Ref = message.FormId;
             actor.Health = health != message.InitialActorValues.ActorValuesList.end() ? health->second : 0.f;
             actor.HealthKnown = health != message.InitialActorValues.ActorValuesList.end();
             actor.Dead = message.IsDead;
@@ -2136,6 +2137,21 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
         if (acArgs[aIndex] == "me")
         {
             aOut = m_hasCharacter ? m_serverId : kNoId;
+            return true;
+        }
+
+        // "ref:<hex>" is the actor the server sent for that placed reference, so that a script can name one of the other
+        // game's own NPCs: "dead ref:45A63" is the Mistwatch bandit the game killed (2026-10-03, live-sender).
+        if (acArgs[aIndex].rfind("ref:", 0) == 0)
+        {
+            const uint32_t cWanted = static_cast<uint32_t>(std::strtoul(acArgs[aIndex].c_str() + 4, nullptr, 16)) & 0x00FFFFFF;
+            aOut = kNoId;
+            for (const auto& actor : m_actors)
+                if (!actor.IsPlayer && (actor.Ref.BaseId & 0x00FFFFFF) == cWanted && actor.Ref != GameId{})
+                {
+                    aOut = actor.ServerId;
+                    break;
+                }
             return true;
         }
 

@@ -1,0 +1,61 @@
+# The real game as the sender: what the player does here reaches the other player.
+#
+#   python Tools\VR\live-check.py live-sender
+#
+# Every other live test has the bot do things and the game watch. Here it is the other way round: the player loses
+# health, takes up a sword, kills a bear of this cell, dies and is brought back, and goes elsewhere -- and this bot
+# checks each one arrived. "ref:860F8" is a bear placed near Mistwatch, a reference of the game's own; not the
+# Mistwatch bandit 45A63, who is already dead in Emma's save (the first run "saw" him die 18 ms after the order).
+# Killed through the game's own Actor.Kill: the VR console does not take "860F8.kill" ("Script command not found"),
+# and "prid 860F8" then "kill" did nothing either (2026-10-03).
+log live sender
+waitfor connected 45
+collect health death equipment spawn
+expect known me
+waitfor known other 40
+wait 5
+
+log -- the player loses health
+log DO console player.damageav health 60
+waitfor health other <= 290 20
+expect health other <= 290
+
+log -- the player takes up a sword
+log DO console player.additem 12EB7 1
+wait 2
+log DO console player.equipitem 12EB7
+waitfor equipped other 12EB7 20
+expect equipped other 12EB7
+
+log -- the player kills a bear of this cell, alive until now
+log CHECK ref 860F8 alive
+wait 3
+waitfor known ref:860F8 30
+expect known ref:860F8
+expect alive ref:860F8
+log DO papyrus Actor Kill 860F8
+waitfor dead ref:860F8 20
+expect dead ref:860F8
+log CHECK ref 860F8 dead
+wait 3
+
+log -- the player dies and the mod brings them back
+log DO console player.kill
+waitfor dead other 20
+expect dead other
+waitfor alive other 40
+expect alive other
+
+log -- the player goes elsewhere; this bot follows the player's cell when told
+log DO god on
+wait 3
+log DO console cow Tamriel 34 8
+wait 40
+expect samecell other
+log DO console cow Tamriel 34 -9
+wait 40
+expect samecell other
+log DO god off
+wait 3
+log done
+stop

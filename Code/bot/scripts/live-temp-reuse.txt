@@ -44,18 +44,18 @@ wait 5
 ownership accept
 stay
 
-# Where Lydia stands is under water in Emma's save; without this the player drowns in half a minute.
+# The far cell is by the water at Windhelm's docks; god mode in case the player lands in it.
 log DO god on
 wait 3
 log -- the player leaves; this bot stays and is given the creatures
-log DO console player.moveto A2C94
+log DO console cow Tamriel 34 8
 waitfor owned >= 1 60
 wait 25
 log CHECK game alive
 wait 3
 
 log -- the player comes back
-log DO console player.moveto 45A63
+log DO console cow Tamriel 34 -9
 wait 45
 log CHECK game alive
 log CHECK game inworld

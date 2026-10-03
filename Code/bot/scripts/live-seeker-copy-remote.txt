@@ -1,0 +1,46 @@
+# A copy of a Seeker that belongs to the other player, and the player travelling away from it.
+#
+#   python Tools\VR\live-check.py live-seeker-copy-remote
+#
+# One half of a question (the other half is live-seeker-copy-local): three crashes on 2026-10-02 came within a
+# second of a trip that left behind copies of Seekers which the travelling client ran itself, next to the game's
+# own Seekers they were copies of. Is it the Seeker copy, the fact that the client ran it, or the pair?
+# Here: a Seeker of this bot's, so the game holds a copy it does not run, and no original beside it that is the
+# same creature (the game's own Seeker is there only to show this bot what a Seeker is).
+log live seeker copy remote
+waitfor connected 45
+collect spawn ownership
+expect known me
+waitfor known other 40
+wait 5
+stay
+
+log DO god on
+wait 3
+log -- the game spawns a Seeker; this bot registers one of the same kind, which the game shows as a copy
+log DO console player.placeatme 0201EEC9 1
+wait 6
+capture base 1EEC9 6
+npc captured
+waitfor owned == 1 20
+wait 8
+log CHECK npc exists
+wait 3
+
+log -- the player leaves; the copy stays behind and is still this bot's
+log DO console cow Tamriel 34 8
+wait 40
+log CHECK game alive
+log CHECK logged CopyGone: \w+ removed as remote
+wait 3
+
+log -- the player comes back
+log DO console cow Tamriel 34 -9
+wait 45
+log CHECK game alive
+log CHECK game inworld
+wait 3
+log DO god off
+wait 3
+log done
+stop

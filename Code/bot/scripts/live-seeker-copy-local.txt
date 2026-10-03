@@ -1,0 +1,48 @@
+# A copy of a Seeker that belongs to the other player, and the player travelling away from it.
+#
+#   python Tools\VR\live-check.py live-seeker-copy-local
+#
+# The other half of live-seeker-copy-remote. Here this bot leaves before the player does, so the server gives its
+# Seeker to the player: the game then runs the copy itself, and that is the copy the player travels away from.
+log live seeker copy local
+waitfor connected 45
+collect spawn ownership
+expect known me
+waitfor known other 40
+wait 5
+
+log DO god on
+wait 3
+log -- the game spawns a Seeker; this bot registers one of the same kind, which the game shows as a copy
+log DO console player.placeatme 0201EEC9 1
+wait 6
+capture base 1EEC9 6
+npc captured
+waitfor owned == 1 20
+wait 8
+log CHECK npc exists
+wait 3
+
+log -- this bot goes; the player is given the Seeker and runs the copy itself
+disconnect
+wait 15
+log CHECK logged Gained ownership of actor
+wait 3
+
+log -- the player leaves the copy behind
+log DO console cow Tamriel 34 8
+wait 40
+log CHECK game alive
+log CHECK logged CopyGone: \w+ removed as local.*made by this client: yes
+wait 3
+
+log -- the player comes back
+log DO console cow Tamriel 34 -9
+wait 45
+log CHECK game alive
+log CHECK game inworld
+wait 3
+log DO god off
+wait 3
+log done
+stop

@@ -1,0 +1,37 @@
+# Does the crime alarm guard fire, and does the game survive a crime while connected?
+#
+#   python Tools\VR\live-check.py live-crime
+#
+# The guard on the crime alarm (Actor::StealAlarm, hooked since 2026-09-21 after a fault in it ended four sessions)
+# had never run: nobody committed a crime in a session since. Here the player "steals" a horse at Windhelm's docks,
+# where there are people to see it, through the game's own SendStealAlarm. The hook logs its first three runs
+# ("Crime alarm ran"). The bounty is real in this session and gone with it: nothing is saved.
+log live crime
+waitfor connected 45
+expect known me
+waitfor known other 40
+wait 5
+stay
+
+log DO god on
+wait 3
+log -- to Windhelm's docks, where there are people to see a crime
+log DO console cow Tamriel 34 8
+wait 40
+log CHECK game alive
+
+log -- the player steals a horse, as far as the witnesses are concerned
+log DO papyrus ObjectReference SendStealAlarm 9848C 14
+wait 6
+log CHECK logged Crime alarm ran
+log CHECK game alive
+wait 3
+
+log -- back
+log DO console cow Tamriel 34 -9
+wait 40
+log CHECK game alive
+log DO god off
+wait 3
+log done
+stop

@@ -7,6 +7,8 @@
 #include <Services/PapyrusService.h>
 #include <Events/ActivateEvent.h>
 #include <Events/InventoryChangeEvent.h>
+#include <Events/DroppedItemEvents.h>
+#include <PlayerCharacter.h>
 #include <Events/ScriptAnimationEvent.h>
 #include <Events/LockChangeEvent.h>
 
@@ -1291,6 +1293,14 @@ void TP_MAKE_THISCALL(HookAddInventoryItem, TESObjectREFR, TESBoundObject* apIte
 BSPointerHandle<TESObjectREFR>*
 TP_MAKE_THISCALL(HookRemoveInventoryItem, TESObjectREFR, BSPointerHandle<TESObjectREFR>* apResult, TESBoundObject* apItem, int32_t aCount, ITEM_REMOVE_REASON aReason, ExtraDataList* apExtraList, TESObjectREFR* apMoveToRef, const NiPoint3* apDropLoc, const NiPoint3* apRotate)
 {
+    // The player putting something on the ground. An item dropped from the inventory comes this way, as RemoveItem with
+    // the "dropping" reason, not through Actor::DropObject -- and only DropObject announced drops, so an item dropped
+    // from the menu was never seen by the other players. On 2026-10-03 the console's drop and the game's own
+    // ObjectReference.DropObject both came here ("count -1, drop: false") and nothing was shared; the 47 drops shared
+    // on 2026-09-26 came through DropObject directly (items taken into the hand).
+    const bool cOwnDrop = aReason == ITEM_REMOVE_REASON::kDropping && !ScopedInventoryOverride::IsOverriden() && apThis == PlayerCharacter::Get();
+    Inventory::Entry dropped{};
+
     if (!ScopedInventoryOverride::IsOverriden())
     {
         auto& modSystem = World::Get().GetModSystem();
@@ -1305,6 +1315,7 @@ TP_MAKE_THISCALL(HookRemoveInventoryItem, TESObjectREFR, BSPointerHandle<TESObje
         }
 
         item.Count = -aCount;
+        dropped = item;
 
         QueueReferenceInventoryChange(apThis, InventoryChangeEvent(apThis->formID, std::move(item)), apMoveToRef);
     }
@@ -1313,7 +1324,25 @@ TP_MAKE_THISCALL(HookRemoveInventoryItem, TESObjectREFR, BSPointerHandle<TESObje
 
     ScopedEquipOverride _;
 
-    return TiltedPhoques::ThisCall(RealRemoveInventoryItem, apThis, apResult, apItem, aCount, aReason, apExtraList, apMoveToRef, apDropLoc, apRotate);
+    if (!cOwnDrop)
+        return TiltedPhoques::ThisCall(RealRemoveInventoryItem, apThis, apResult, apItem, aCount, aReason, apExtraList, apMoveToRef, apDropLoc, apRotate);
+
+    // Held while the game does the work: if it goes on through Actor::DropObject, that hook must neither announce the
+    // same drop a second time nor queue the inventory change again.
+    BSPointerHandle<TESObjectREFR>* pResult;
+    {
+        ScopedInventoryOverride __;
+        pResult = TiltedPhoques::ThisCall(RealRemoveInventoryItem, apThis, apResult, apItem, aCount, aReason, apExtraList, apMoveToRef, apDropLoc, apRotate);
+    }
+
+    // The reference exists now; where it lies is what the other players need.
+    if (pResult)
+    {
+        if (TESObjectREFR* pDropped = TESObjectREFR::GetByHandle(pResult->handle.iBits))
+            World::Get().GetRunner().Trigger(ItemDroppedEvent{pDropped->formID, dropped});
+    }
+
+    return pResult;
 }
 
 void TP_MAKE_THISCALL(HookRotateX, TESObjectREFR, float aAngle)

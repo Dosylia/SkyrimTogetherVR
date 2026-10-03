@@ -1,0 +1,48 @@
+# Many copies to make at once: the player arrives where the other player has eight creatures of its own.
+#
+#   python Tools\VR\live-check.py live-spawn-burst
+#
+# VR_TODO, "Spawn bursts on cell change". The client makes every copy that comes into range in the same frame
+# (CharacterService::RunSpawnUpdates); the logs since 2026-09-26 have that section as the slowest part of a frame
+# 86 times, up to 38.6 ms. This makes the burst on purpose and reads the cost from the client's own warnings
+# ("Mod update took ..., slowest section CharacterService::RunSpawnUpdates ...", and since 2026-10-03 "SpawnBurst: ...").
+#
+# One trip only: leaving eight copies behind on a second trip crashes the game when PLANCK is on (see "Crash within a
+# second of travelling away" in VR_TODO.md); that is live-copies-left-3's business, not this script's.
+log live spawn burst
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+wait 5
+stay
+
+log DO god on
+wait 3
+log -- the player leaves
+log DO console cow Tamriel 34 8
+wait 40
+
+log -- this bot brings eight bears where the player was
+npc temp 23A8A
+npc temp 23A8A
+npc temp 23A8A
+npc temp 23A8A
+npc temp 23A8A
+npc temp 23A8A
+npc temp 23A8A
+npc temp 23A8A
+waitfor owned == 8 30
+wait 5
+
+log -- the player comes back to all of them at once
+log DO console cow Tamriel 34 -9
+wait 40
+log CHECK game alive
+log CHECK logged Spawn Actor: \w+, and NPC Bear
+wait 3
+
+log DO god off
+wait 3
+log done
+stop

@@ -14,11 +14,82 @@
 
 #include <World.h>
 
+#include <mutex>
+
 TP_THIS_FUNCTION(TPerformAction, uint8_t, ActorMediator, TESActionData* apAction);
 static TPerformAction* RealPerformAction;
 
 // TODO: make scoped override
 thread_local bool g_forceAnimation = false;
+
+namespace
+{
+// TEMPORARY (2026-10-03): which actions flood the stream, and whether they even work on the actor that sends them.
+// A Netch standing still sent IdleSpecialStart 282 times in 12 s on 2026-10-02 (1521 actions in another 12 s), and
+// an actor once queued 717 Unequip replays on the other side (2026-09-24). Until 2026-10-03 every action this hook
+// saw was sent, including those the game refused here (res 0). Said once per actor and action every ten seconds,
+// when one actor performs the same action more than ten times in a second.
+void NoteActionRate(uint32_t aActorId, uint32_t aActionId, const char* acpEventName, bool aWorked) noexcept
+{
+    struct Rate
+    {
+        std::chrono::steady_clock::time_point WindowStart{};
+        uint32_t Count = 0;
+        uint32_t Failed = 0;
+        std::chrono::steady_clock::time_point NextReport{};
+    };
+    static std::mutex s_lock;
+    static TiltedPhoques::Map<uint64_t, Rate> s_rates;
+
+    const auto now = std::chrono::steady_clock::now();
+    std::scoped_lock _{s_lock};
+    if (s_rates.size() > 512)
+        s_rates.clear();
+    Rate& rate = s_rates[(static_cast<uint64_t>(aActorId) << 32) | aActionId];
+    if (now - rate.WindowStart >= std::chrono::seconds(1))
+    {
+        if (rate.Count > 10 && now >= rate.NextReport)
+        {
+            rate.NextReport = now + std::chrono::seconds(10);
+            spdlog::info("ActionFlood: actor {:X} performed action {:X} ({}) {} times in a second, {} of them refused by the game here and not sent",
+                         aActorId, aActionId, acpEventName ? acpEventName : "?", rate.Count, rate.Failed);
+        }
+        rate.WindowStart = now;
+        rate.Count = 0;
+        rate.Failed = 0;
+    }
+    ++rate.Count;
+    if (!aWorked)
+        ++rate.Failed;
+}
+// Whether this action is the one just sent for this actor, again, within a quarter of a second. A Netch standing still
+// performs IdleSpecialStart about forty times a second and the game accepts every second one: the bot received 489 of
+// them in 12 s (2026-10-03, after refused actions had stopped being sent), each carrying the creature's animation
+// variables. The other players gain nothing from the forty-first restart of the same idle.
+bool IsRepeatOfLastSent(const ActionEvent& acAction) noexcept
+{
+    struct Last
+    {
+        uint32_t ActionId = 0;
+        uint32_t IdleId = 0;
+        uint32_t TargetId = 0;
+        std::chrono::steady_clock::time_point SentAt{};
+    };
+    static std::mutex s_lock;
+    static TiltedPhoques::Map<uint32_t, Last> s_last;
+
+    const auto now = std::chrono::steady_clock::now();
+    std::scoped_lock _{s_lock};
+    if (s_last.size() > 1024)
+        s_last.clear();
+    Last& last = s_last[acAction.ActorId];
+    if (last.ActionId == acAction.ActionId && last.IdleId == acAction.IdleId && last.TargetId == acAction.TargetId &&
+        now - last.SentAt < std::chrono::milliseconds(250))
+        return true;
+    last = Last{acAction.ActionId, acAction.IdleId, acAction.TargetId, now};
+    return false;
+}
+} // namespace
 
 uint8_t TP_MAKE_THISCALL(HookPerformAction, ActorMediator, TESActionData* apAction)
 {
@@ -55,6 +126,19 @@ uint8_t TP_MAKE_THISCALL(HookPerformAction, ActorMediator, TESActionData* apActi
         {
             pExtension->LatestAnimation = action;
         }
+
+        NoteActionRate(action.ActorId, action.ActionId, apAction->eventName.AsAscii(), res != 0);
+
+        // An action the game refused here did not happen here, so it is not sent: the other players would replay
+        // something the owner's actor never did, and a refused action tends to be retried every frame. On
+        // 2026-10-03 one creature standing at Mistwatch tried action 132AF 53 to 62 times a second and was refused
+        // every time, and a Seeker standing still tried IdleSpecialStart 121 times a second, half of them refused;
+        // all of it went out with the creature's movement updates.
+        if (!res)
+            return res;
+
+        if (IsRepeatOfLastSent(action))
+            return res;
 
         World::Get().GetRunner().Trigger(action);
 

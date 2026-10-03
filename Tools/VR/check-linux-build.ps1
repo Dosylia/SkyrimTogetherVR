@@ -55,10 +55,12 @@ $errors = @(Select-String -Path $log -Pattern '\berror:' | Select-Object -First 
 if ($code -eq 0) {
     Write-Host 'Linux build: ok.' -ForegroundColor Green
 
+    # The last three lines, not the last one: the test runner ends with an empty line, and with `tail -1` the
+    # result line was never seen (2026-10-03: "Linux unit tests:" and nothing after it, on a run that passed).
     # The unit tests, under GCC, and the protocol id the Linux server announces. That id has to be the one the Windows
     # build has, or a Windows client cannot join a Linux server: it is a digest of Code/encoding, and the two systems
     # keep those files with different line endings.
-    $tests = & cmd.exe /c 'docker run --rm st-linux-check bash -lc "cd /src/package/bin && ./TPTests 2>&1 | tail -1" 2>&1'
+    $tests = & cmd.exe /c 'docker run --rm st-linux-check bash -lc "cd /src/package/bin && ./TPTests 2>&1 | tail -3" 2>&1'
     Write-Host ('Linux unit tests: ' + ((@($tests | Where-Object { $_ -match 'passed|failed' }) | Select-Object -Last 1) -replace '^\s+', ''))
     if (-not ($tests -match 'All tests passed')) { $code = 3 }
 

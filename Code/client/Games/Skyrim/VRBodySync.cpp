@@ -88,11 +88,54 @@ void* AsNode(void* apObject) noexcept
     return static_cast<TAsNode>(ppVTable[kVTableAsNodeSlot])(apObject);
 }
 
+// Regions VirtualQuery has already found readable, kept while a ReadableRegionScope is open on this thread.
+//
+// VirtualQuery is a system call, and a slow one in a big process: it works out how far the region around the address
+// reaches, and the game's heap regions only grow. GetBoneArray asks it about every entry of a skeleton's bone list
+// for each candidate count, a few hundred calls for one answer, and that one step was the whole cost of a local
+// skeleton search: 44 ms one minute into a session, 49 ms after ten, 178 ms after twenty (2026-10-03, with the
+// bone search itself at 0.0 ms over 135 nodes), and 210 to 284 ms in the three sessions of the night before that
+// reached the ten-minute re-search. Almost every entry lies in a region an earlier call has just described.
+//
+// Only for the length of one scope: a region can be released at any time, and an answer older than the work that
+// asked for it is not one to trust.
+struct ReadableRegion
+{
+    uintptr_t Begin = 0;
+    uintptr_t End = 0;
+};
+thread_local std::array<ReadableRegion, 16>* t_pReadableRegions = nullptr;
+thread_local size_t t_nextReadableRegion = 0;
+
+struct ReadableRegionScope
+{
+    std::array<ReadableRegion, 16> Regions{};
+    std::array<ReadableRegion, 16>* pOuter = nullptr;
+
+    ReadableRegionScope() noexcept
+        : pOuter(t_pReadableRegions)
+    {
+        if (!pOuter)
+            t_pReadableRegions = &Regions;
+    }
+    ~ReadableRegionScope()
+    {
+        if (!pOuter)
+            t_pReadableRegions = nullptr;
+    }
+};
+
 // Only used while resolving a skeleton, never per frame: VirtualQuery is a system call.
 bool IsReadable(const void* apPointer, size_t aSize) noexcept
 {
     if (!apPointer)
         return false;
+
+    const auto cBegin = reinterpret_cast<uintptr_t>(apPointer);
+    if (t_pReadableRegions)
+        for (const ReadableRegion& region : *t_pReadableRegions)
+            if (cBegin >= region.Begin && cBegin + aSize <= region.End)
+                return true;
 
     MEMORY_BASIC_INFORMATION info{};
     if (!VirtualQuery(apPointer, &info, sizeof(info)) || info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD))
@@ -101,6 +144,12 @@ bool IsReadable(const void* apPointer, size_t aSize) noexcept
     constexpr DWORD cReadable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
     if (!(info.Protect & cReadable))
         return false;
+
+    if (t_pReadableRegions)
+    {
+        const auto cRegionBegin = reinterpret_cast<uintptr_t>(info.BaseAddress);
+        (*t_pReadableRegions)[t_nextReadableRegion++ % t_pReadableRegions->size()] = ReadableRegion{cRegionBegin, cRegionBegin + info.RegionSize};
+    }
 
     return reinterpret_cast<uintptr_t>(apPointer) + aSize <= reinterpret_cast<uintptr_t>(info.BaseAddress) + info.RegionSize;
 }
@@ -137,6 +186,60 @@ void* FindShallowest(void* apStart, const char* acpName) noexcept
                 queue.push_back(pChildren[i]);
     }
     return nullptr;
+}
+
+// How many objects hang under this one, counting itself, up to aCap. The same walk as FindShallowest.
+size_t CountNodes(void* apStart, const size_t aCap) noexcept
+{
+    if (!apStart)
+        return 0;
+
+    TiltedPhoques::Vector<void*> queue;
+    queue.push_back(apStart);
+    size_t head = 0;
+    for (; head < queue.size() && head < aCap; ++head)
+    {
+        void* pNode = AsNode(queue[head]);
+        if (!pNode)
+            continue;
+
+        void** pChildren = At<void**>(pNode, kChildrenOffset + 0x8);
+        const uint16_t capacity = At<uint16_t>(pNode, kChildrenOffset + 0x10);
+        for (uint16_t i = 0; pChildren && i < capacity; ++i)
+            if (pChildren[i])
+                queue.push_back(pChildren[i]);
+    }
+    return head;
+}
+
+// TEMPORARY (2026-10-03): what makes a search slow. The ten-minute re-search cost 210, 284 and 239 ms in the three
+// sessions that reached it on 2026-10-02/03, where searches early in a session cost 6 to 23 ms: something keeps
+// adding to the player's 3D. Called only after a slow search.
+void DescribeBigTree(void* apRoot, const double aBonesMs, const double aArrayMs, const double aTotalMs) noexcept
+{
+    struct Branch
+    {
+        const char* pName;
+        size_t Count;
+    };
+    TiltedPhoques::Vector<Branch> branches;
+    if (void* pNode = AsNode(apRoot))
+    {
+        void** pChildren = At<void**>(pNode, kChildrenOffset + 0x8);
+        const uint16_t capacity = At<uint16_t>(pNode, kChildrenOffset + 0x10);
+        for (uint16_t i = 0; pChildren && i < capacity; ++i)
+            if (pChildren[i])
+                branches.push_back(Branch{GetName(pChildren[i]), CountNodes(pChildren[i], 400000)});
+    }
+    std::sort(branches.begin(), branches.end(), [](const Branch& a, const Branch& b) { return a.Count > b.Count; });
+
+    std::string biggest;
+    for (size_t i = 0; i < branches.size() && i < 4; ++i)
+        biggest += fmt::format("{}{} ({})", i ? ", " : "", branches[i].pName ? branches[i].pName : "?", branches[i].Count);
+    void* pSkeletonRoot = FindShallowest(apRoot, "NPC Root [Root]");
+    spdlog::info("VRBodySync: slow skeleton search, {:.1f} ms ({:.1f} ms finding the bones, {:.1f} ms checking the flattened bone list): {} objects under "
+                 "the body's root, {} under NPC Root; {} branches at the top, the biggest {}",
+                 aTotalMs, aBonesMs, aArrayMs, CountNodes(apRoot, 400000), CountNodes(pSkeletonRoot, 400000), branches.size(), biggest);
 }
 
 void* FindByRtti(void* apStart, const char* acpRttiName, uint32_t aDepth = 0) noexcept
@@ -548,6 +651,7 @@ std::unordered_map<uint32_t, Rig> s_rigs; // frame end only
 
 uint8_t* GetBoneArray(void* apTree, uint32_t& aOutCount) noexcept
 {
+    ReadableRegionScope regions; // a few hundred readability questions, almost all about the same few regions
     aOutCount = 0;
     if (!apTree || !IsReadable(static_cast<uint8_t*>(apTree) + kTreeBoneArray, sizeof(void*)))
         return nullptr;
@@ -1771,6 +1875,10 @@ float HeadsetAngleTo(const NiPoint3& acPosition) noexcept
 
 std::string DescribeBody(Actor* apActor) noexcept
 {
+    // Every step up the parents and every bone is checked with IsReadable; within one description the answers are
+    // reused. Unshared, this was the 10 to 18 ms "RunRemotePlayerDiag" warning each time a player copy appeared
+    // (2026-10-03), up to 80 ms in older logs. See IsReadable.
+    ReadableRegionScope regions;
     void* pRoot = apActor ? apActor->GetNiNode() : nullptr;
     if (!pRoot)
         return "no 3D";
@@ -1985,11 +2093,14 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
             s_local.pRoot = nullptr;
             return false;
         }
+        const double cBonesMs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - cSearchStarted).count() / 1000.0;
         s_local.pRoot = pRoot;
         s_local.Nodes = nodes;
         s_local.LegsFound = legsFound;
         s_local.pSkeletonRoot = FindSkeletonRoot(pRoot);
+        const auto cArrayStarted = std::chrono::steady_clock::now();
         const BoneArrayInfo arrayInfo = ResolveBoneArray(pRoot, nodes, false);
+        const double cArrayMs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - cArrayStarted).count() / 1000.0;
         const uint8_t* pLeftHand = FindEntry(arrayInfo.pArray, arrayInfo.Count, nodes[VRPose::kLeftHand]);
         const uint8_t* pRightHand = FindEntry(arrayInfo.pArray, arrayInfo.Count, nodes[VRPose::kRightHand]);
         s_local.FingersFound[0] = FindFingers(arrayInfo, pLeftHand, s_local.Fingers[0]);
@@ -2010,6 +2121,8 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
 
         // Measured, so the next session says whether this was the 50 ms hitch.
         const auto cTookMs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - cSearchStarted).count() / 1000.0;
+        if (cTookMs >= 40.0)
+            DescribeBigTree(pRoot, cBonesMs, cArrayMs, cTookMs);
         static std::chrono::steady_clock::time_point s_nextSearchLog{};
         static uint32_t s_searches = 0;
         static double s_worstMs = 0.0;

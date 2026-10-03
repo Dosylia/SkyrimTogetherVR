@@ -205,6 +205,40 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
     pointer), PapyrusTweaks (loaded on both machines). Whether co-op makes it more frequent is open: Emma's came 0.44 s
     after spawning a batch of the other player's actors.
 
+- **Crash within a second of travelling away from copies this client made -- open.** `SkyrimVR.exe+0x3AC1A8`
+  (`FOCollisionListener`, a virtual call on freed memory), `+0x2EEF6A` (`HasKeyword` on a freed object) or
+  `VCRUNTIME140.dll+0x504F` (a cast on the value 1), 0.5 to 0.9 s after arriving through a loading screen. In each the
+  physics is handling a contact between something at the destination and a body of a creature skeleton (`NPC COM
+  [COM ]` under `skeleton.nif`) whose owner is no longer an actor; in the one dump read, the freed actor's last
+  position was where the copies had stood, seventeen cells away. Emma's Crash Logger has `+0x3AC1A8` once before:
+  2026-09-26 18:34, in Apocrypha, an arm bone.
+  - What the crashing trips share: three or more copies this client had made (`Actor::Create`) left behind, which the
+    game destroys during the load -- by the time the client notices, they are gone from the game already (`CopyGone`
+    lines). Three Seeker copies next to the game's own Seekers: five crashes in five (`live-copy-abandon` before the
+    fix below). Eight bear copies and the bot's character, nothing else: crashed on the first trip that left them
+    (`live-spawn-burst`, 2026-10-03 02:25). One or two copies left behind (a Seeker, a bear, the bot's character, in
+    either owner's hands): clean in about fifteen trips. So it is the number of copies, not the kind, and not who
+    runs them: `live-copies-left-3` crashes in a fresh session, `live-copies-left-2` does not.
+  - **PLANCK is part of it.** The same `live-copies-left-3` run with PLANCK switched off passed (2026-10-03 03:00;
+    `modlist.txt` backed up as `modlist.txt.bak-20261003-planck` and restored). PLANCK gives creature bones physics
+    bodies (`activeragdoll.dll`); what the crash meets is a body of a creature skeleton whose owner is gone.
+  - Tried from our side, none of it a fix: disposing of copies this client runs when their cell unloads (it never ran:
+    after a teleport the game has already destroyed them when the client notices); taking our own creatures back
+    instead of copying them (right for its own reasons, see the next entry; it only removed the copies from one
+    test); disabling every copy of ours the moment a loading screen is queued (the game then crashed during the
+    load, in `BSExtraDataList::GetExtraData` on garbage). PLANCK's own settings only exclude by race.
+  - The first explanation, a creature and its copy side by side, was wrong: the identity fix below removed the copies
+    from `live-copy-abandon`, and that is all it did for the crash.
+- **A creature this game made came back twice -- fixed 2026-10-03.** A temporary actor (placed by console, a quest
+  spawn, a random encounter) has no id two games agree on. When its maker walked away the server gave it to the other
+  player; when the maker came back the server sent it as "a character with no reference of its own", the maker's
+  client made a copy of it next to the game's own actor, and also announced its own actor as a new character. Three
+  Seekers placed, six standing. Now the client remembers which server character its own actor became
+  (`s_handedAway` in `CharacterService.cpp`), does not announce it again when it is back in view, and takes it back
+  as the same actor when the server sends it; the record ends when the server removes the character or the
+  connection ends. Not handled: the server's message arriving before the game has the actor loaded again (never
+  seen; the log line is `a copy of it stands here too; not handled`).
+
 ## 7. Debugging
 - **Who may connect to whom is decided by the protocol id, not the version (2026-10-02).** `BUILD_PROTOCOL` is a
   digest of the contents of `Code/encoding` (every message, struct and opcode), computed by `modules/version.lua`
@@ -253,6 +287,14 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   waits at the world origin), and a script that reaches no check is reported as not run, not as passed.
   `Tools/VR/leaver-check.py` needs no game: a fresh server and three bots, for what a player who leaves without a
   character does to the others.
+  Since 2026-10-03 the "away" scripts travel by cell, `cow Tamriel 34 8` and back with `cow Tamriel 34 -9`
+  (Mistwatch's cell), not to Lydia: she follows the player back, the next "go to Lydia" is two paces, nothing
+  unloads, and the test passes without having tested anything. `CHECK logged <regex>` passes when the client has
+  written such a line since the script began, and `CHECK distinct <most> <regex with one group>` when it has logged
+  at least one and at most that many different values (`Spawn Actor: (\w+), and NPC Seeker` counts Seekers). The
+  client says what a temporary actor was when its removal was noticed (`CopyGone: ... removed as local|remote; the
+  actor is ...; made by this client: yes|no`): after a teleport the game has already destroyed the copies this
+  client made and its own temporary actors alike, unless they were another player's at that moment.
 - **Emma's VR Address Library is a combined file (2026-10-01), not a released one.** DevBench needs ids only the
   current library has (0.275.0); the modlist was built on 0.158.0. The released 0.275.0 corrects two addresses
   (100997, 74491) and drops three (63607-63609), and the installed Community Shaders is built for the old value of

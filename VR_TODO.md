@@ -124,6 +124,27 @@ A longer write-up goes in the section the item belongs to further down; this lis
   though their version strings differ: only `Code/encoding` has to be the same.
   **Seen has to rebuild his server from that commit**, not only take the exe: one of the two fixes of the evening
   is in the server (a player who left before having a character took the first player's character with them).
+  Committed as `f3636117`. **A second commit is waiting** (2026-10-03): a creature this game made no longer comes
+  back twice (`CharacterService.cpp`), the skeleton search no longer slows down through a session
+  (`VRBodySync.cpp`), and the tests for both. It is not a fix for the crash on travelling away, which is open again.
+- **EngineFixesVR, both machines (asked 2026-10-03):** in `mods\Engine Fixes VR\skse\plugins\EngineFixesVR.ini` set
+  `FormCaching = false` and `TreeLODReferenceCaching = false`, then play as usual. It is the only test that can say
+  whether form caching is behind the script-engine crash on freed forms (`SkyrimVR.exe+0x93CE17`); your say, since it
+  is your modlist and Seen's.
+- **PLANCK and the travel crash (2026-10-03):** the game crashes within a second of arriving through a loading
+  screen when three or more of our copies (the other player's character, summons, spawned creatures) were left
+  behind -- and only with PLANCK on: with PLANCK off the same test passes. Your choice: (1) keep PLANCK and live with
+  the risk (fast travel or a door away from the other player's creatures); (2) switch PLANCK off for co-op sessions;
+  (3) let me keep at it from our side -- the next step is reading how PLANCK tracks the actors it ragdolls, to make
+  our copies leave in a way it notices.
+- **How late remote movement is shown (2026-10-03):** everything the other player does is played back 300 ms after it
+  happened, to always have a point to move towards. In your session with Seen of 2026-09-30 the newest point was
+  always 206 to 313 ms ahead (worst 128 ms), so the delay could follow the connection instead: about 200 ms on a good
+  link, back up to 300 when it gets worse. Less lag in fights, a little more risk of a stutter on a bad connection.
+  Yes or no?
+- **Did you close the game window at about 00:35 on 2026-10-03?** The game ended by itself thirty seconds after a
+  green test run: no crash report, no Windows error event, and our log stops in mid-flow. Seen once; the next
+  session ran twenty-two minutes of the same tests and closed normally.
 - **A two-minute test in the headset (2026-10-02):** connected, with the bow in hand, let yourself be killed; then
   load a save from the menu **either while you are down or within ten seconds of standing up again**. Does the game
   crash? With nobody in the headset it does, every time (three of three), in `skyrimvrtools.dll`; a load forty
@@ -143,35 +164,40 @@ A longer write-up goes in the section the item belongs to further down; this lis
 ### Crashes and stability
 
 - [x] Death while connected: `live-death`, killed twice by console, back in the world after 5 s both times, alive at 335, still connected, never at the main menu (7 of 7 checks).
-- [!] Loading a save after dying: crashes in the no-headset rig when the load falls inside our death sequence (3 of 3), not 40 s later (2 of 2) and never without our respawn (4 of 4). Needs Emma's headset test, above.
+- [!] Loading a save after dying: crashes in the no-headset rig when the load falls inside our death sequence (3 of 3), not 40 s later (2 of 2) and never without our respawn (4 of 4). Needs Emma's headset test, above. Since then a load with no death at all crashed the same way (2026-10-03 01:41:59, `skyrimvrtools.dll+0x71B5`, the first load of `live-load`, 25 minutes into a session; the same script passed early in other sessions), so in the rig the trigger may be the fake controllers' state rather than our death sequence. The headset test is still the only way to know.
 - [-] Wrist menu crash: not reproducible here. Tween then inventory opened 20 times through DevBench, 170 ms and 20 ms apart, while connected: no crash, nothing left open. The crash had controller input reaching a menu mid-start and no frame of ours; DevBench opens menus without a controller.
 - [-] Seen's stuck journal: not reproducible here. Journal opened and closed 25 times while connected (10 with a second open, 15 closed 50 ms after opening), game window unfocused throughout: it closed every time. If it happens to Seen again, his log's `Menu queued` and `Probe` lines around it are what to send.
-- [ ] Quit crash: a larger batch of quits; close the item if clean. (Eleven clean quits by `qqq` on 2026-10-01/02, no crash report from any; close at twenty.)
-- [x] The other places that delete temporary actors: none of the three crashes on a game-spawned creature by itself (`live-temp-remove` 3 of 3, `live-temp-reconnect` 5 of 5), but all three left the deleted copy's id in the client's "my copies" list and the game hands ids out again. `live-temp-reuse`: a Seeker given a deleted copy's id was taken for a copy and the game crashed at `SkyrimVR.exe+0x714EB2`, the crash of 2026-10-01 again; with the ids taken out, the same Seeker is left to the game (2 of 2 at the time of writing).
+- [x] Quit crash: twenty quits by `qqq` since 2026-10-01 18:00 (the last on 2026-10-03 01:08), no crash report and no dump from any of them. Every crash report in that time is a mid-session crash with its own entry.
+- [x] The other places that delete temporary actors: none of the three crashes on a game-spawned creature by itself (`live-temp-remove` 3 of 3, `live-temp-reconnect` 5 of 5), but all three left the deleted copy's id in the client's "my copies" list and the game hands ids out again. `live-temp-reuse`: a Seeker given a deleted copy's id was taken for a copy and the game crashed at `SkyrimVR.exe+0x714EB2`, the crash of 2026-10-01 again; with the ids taken out, the same Seeker is left to the game (3 of 3).
+- [!] **Crash within a second of travelling away: PLANCK and three or more of our copies.** `SkyrimVR.exe+0x3AC1A8`, `+0x2EEF6A` or a cast on garbage, 0.5 to 0.9 s after arriving through a loading screen (Emma's 2026-09-26 Apocrypha crash has the first address). It needs three or more copies this client made left behind, which the game destroys during the load (`live-copies-left-3` crashes in a fresh session; `live-copies-left-2` does not), **and PLANCK**: with PLANCK switched off the same red test passes (2026-10-03 03:00, one run, mod list restored afterwards). PLANCK gives creature bones physics bodies; it looks like it keeps those of copies the load destroyed. Three tries from our side did not fix it (disposing of copies we run at unload, which never ran; the identity fix, which only took the copies out of one test; disabling our copies as the loading screen starts, which crashed during the load instead). Question for Emma above.
+- [x] A creature the game made and its copy side by side (one creature twice, for everybody): the client takes its own actor back instead of making a copy (`s_handedAway`). `live-copy-abandon` green three times; in the full suite every returning Seeker came back as the same actor.
+- [!] The game ended by itself once, thirty seconds after a green run (2026-10-03 00:35): no crash report, no Windows error event, the log stops in mid-flow. Question for Emma above.
 - [x] Found on the way, in the server: a player who left before having a character had the first player's character removed instead (`value_or(entity 0)` in the disconnect clean-up). The host became invisible to every newcomer and the server logged `Entity is invalid: 0` four times a second. `Tools/VR/leaver-check.py` (three bots, no game): red once, green twice.
-- [ ] Script-engine crash on freed forms: soak runs with form caching on and off.
-- [ ] Overlay calls that can run before the in-headset menu exists: audit.
-- [ ] The two havok crash guards from the other VR port: port if any of our crash reports match.
+- [!] Script-engine crash on freed forms: a soak here cannot settle it. The crash comes about once in months in single-player (ten times since 2024-12) and twice in one co-op evening; an hour each way with a bot would show nothing either way. The test is the one in KNOWN_ISSUES.md: both players switch the two settings off and play as usual. Action for Emma above.
+- [x] Overlay calls that can run before the in-headset menu exists: every `OverlayService` handler, `PartyService`, `VRDashboard` and `OverlayClient` path checks for the overlay first. One hole, closed: the window-message hook (`InputService::WndProc` and the four `Process*` functions) used the service pointer without checking it, and the hook outlives the service at both ends.
+- [-] The two havok crash guards from the other VR port: none of the 95 crash reports on this machine has either address (`+0AB1ABA`, `+03AD7B1`). Not ported; the pointer stays in "TiltedEvolutionVR `29f99ed`" below.
 - [x] "Not a crime faction": already fixed (found by load index); five deaths on 2026-10-02 logged `Solstheim crime faction found at 2018279` and no error.
-- [ ] Crime alarm guard: trigger a crime by console and confirm it fires.
+- [x] Crime alarm guard: fires and the game carries on. `live-crime` steals a horse at Windhelm's docks while connected (`SendStealAlarm`): `Crime alarm ran (1): offender 14, witness 9848C`, no null actor skipped, game alive after (4 of 4).
 
 ### Performance
 
-- [ ] Benchmark, same save and spot: mod off, on but not connected, connected alone, connected with a bot.
-- [ ] Spawn bursts on cell change: measure, spread over frames, measure again.
-- [ ] Remote movement shown 300 ms late: follow measured ping; measure lag before and after with a walking bot.
-- [ ] The once-a-second naked-NPC check: measure, limit to a few actors per tick.
-- [ ] The once-a-second equipment snapshot: rebuild only when something was equipped.
+- [-] Benchmark, same save and spot, mod off against on: not measurable in the rig. Frames there are held at 60 per second whatever runs, and with the mod off nothing reports frame times at all. What the rig does measure is the mod's own cost, in every session's `Perf last 30 s` line: 0.15 to 0.26 ms a frame on average in the sessions of 2026-10-03.
+- [x] A freeze that grew through a session: the local skeleton search spent its time asking Windows whether the bone list was readable (`VirtualQuery`, which slows as the game's memory grows), a few hundred times per search. Comparable sessions on 2026-10-03, at the start / 10 / 20 minutes: 44 / 49 / 178 ms before, 7 / 15 / 31 ms after (answers reused within one search). The night before, the ten-minute re-search had cost 210 to 284 ms. Still growing a little; the remaining calls are a dozen per search.
+- [x] Spawn bursts: the cost was not making the copies (first placement measured 0.0 ms) but asking Windows, once a frame for every copy still waiting for its 3D, whether it was a live object (`VirtualQuery` in `IsLiveGameObject`, about 10 ms a call in a big process). Now a guarded read. `live-spawn-burst`, nine copies arriving together: before, the spawn update was the slowest part of the frame at 14 ms with one copy waiting, 24 with two, 36 with four, and the frame peaked at 121 ms; after, it never shows in a slow-frame warning and the worst frame was 11.5 ms (the copy diagnostic).
+- [!] Remote movement shown 300 ms late: a feel trade-off, so Emma's call (question above). The data: in the co-op session of 2026-09-30 the newest movement update was 206 to 313 ms ahead of playback (`InterpDiag`, Emma's side, Seen's updates), worst 128, so about 100 ms could go without ever running out of points; a bot on this machine cannot stand in for Seen's connection.
+- [-] The once-a-second naked-NPC check: not worth changing. It was never the slowest part of a slow frame in any log kept (about 4,500 slow-frame warnings since 2026-09-26), and it already gives up on an actor after three tries.
+- [-] The once-a-second equipment snapshot: not worth changing. Every 30-second report since it was measured says 0.00 ms per frame (1,043 reports, real sessions with Seen included).
 - [x] Skeleton search on every menu: the player's 3D root changes when a menu opens and closes, and each change cost a search of 6 to 23 ms. Fifty menu opens: 68 searches and 51 slow updates before, 2 searches and 1 slow update with two roots remembered. The safety re-search is every ten minutes, not every minute.
-- [ ] Other per-frame costs: linear searches over all entities, form lookups inside loops.
-- [ ] The dashboard overlay is created on the game thread right after the first load and stops the game: 0.9 and 1.5 s in Emma's sessions of 2026-09-30 and 10-01, 0.2 to 8.6 s with no headset (`OverlayService::OnUpdate`, at "dashboard overlay created").
-- [ ] Frame-rate drop after kills (reported 2026-09-30): kill creatures by console and watch what gets slow.
-- [ ] The unequip loop: add the planned logging, run a session with NPCs around. (Same shape, seen 2026-10-02: a Netch standing still sent `IdleSpecialStart` 282 times in 12 s, and 1521 actions in another 12 s. `capture` in the bot names the actions of any actor; start there.)
+- [x] Other per-frame costs: the mod costs 0.15 to 0.3 ms a frame on average (every `Perf last 30 s` line of 2026-10-03); linear searches and lookups do not show. The slow frames were three `VirtualQuery` callers: the skeleton search and the spawn update (both fixed above), and the copy diagnostic when a player copy appears, 10 to 18 ms before and 8 to 12 ms after sharing the answers within one description.
+- [x] The dashboard overlay stopped the game right after the first load: 0.9 and 1.5 s in Emma's sessions of 2026-09-30 and 10-01, 1.3 to 1.5 s in every session with no headset. Its browser is now started when the main menu appears (the page paints two seconds later, while nobody plays); what is left after the load is the SteamVR overlay itself: 77 ms (2026-10-03 04:06), page ready and "enterGame" sent as before, `live-copy` 20 of 20.
+- [x] Frame-rate drop after kills (reported 2026-09-30): the session's own reports explain it. From 19:30 on, 197 slow frames all name `RunLocalUpdates`, on an exact five-second period, 27 to 58 ms and growing as the session went on, and "frames over 50 ms" went from 0-1 to 5-10 per half minute: the local skeleton search with its old five-second safety net, which slowed as the game's memory grew. The net became 60 s on 2026-10-01 and ten minutes on 10-02, and the search itself 7 to 31 ms instead of 44 to 284 on 10-03. The kills only coincided with it.
+- [x] The action flood (the "unequip loop" family): an `ActionFlood` log line now names any actor repeating one action more than ten times a second. It showed creatures retrying actions every frame that the game refused (one at Mistwatch: action `132AF` 53 to 62 times a second, all refused), all of it sent; and a Netch standing still performing `IdleSpecialStart` about 40 times a second, half accepted. Refused actions are no longer sent, nor an identical action repeated within a quarter second. The bot's capture of the Netch: 545 actions in 12 s (489 `IdleSpecialStart`) before, 59 (50) and 48 (47) after. Full live suite 87 of 87 after the first change; after the second, gait checks pass in two runs of three (the third: one Seeker copy at 42% against 50%, run-to-run variation). The re-equip check suspected in 2026-09 is capped at three tries since 09-24.
 
 ### Sync: verify in the real game, fix what fails
 
-- [ ] A creature the game made (placed, a quest spawn) that was handed to the other player while its maker was away comes back twice: the maker's game still has its own, and the server sends it back as a copy as well (2026-10-02 22:32, three Seekers placed, six standing after the walk: `FF001164..66` and copies `FF0011BD`, `FF0011E4`, `FF0011E7`). Count them in a test, then decide which one goes.
-- [ ] The real game as sender: health, death, equipment, kills of its own NPCs and cell changes reach the bot.
+- [-] After a burst of copies, a returning player copy "bound to another actor": the test, not the mod. Standing at the Mistwatch cell centre (where the burst test leaves the player), the bot's "far away" spot is still in range, so its character keeps being sent; the first copy, placed at the edge of the loaded cells, is gone a tenth of a second later and the client makes another one for it (`Spawned character for entity`), which is right -- health 55 where it should be. The driver only read spawn lines and kept asking about the first. It now follows the binding (`New entity remotely managed`): the same pair 22 of 22.
+- [x] A creature the game made (placed, a quest spawn) that was handed to the other player while its maker was away came back twice (three Seekers placed, six standing): fixed, see the identity line under "Crashes and stability"; `live-copy-abandon` finds no copy after the round trip.
+- [x] The real game as sender: `live-sender` (2026-10-03), the player loses health, equips a sword, kills a bear of the cell, dies and is brought back, goes elsewhere and back; the bot sees each one (18 of 18: health 275, sword held, the bear dead 0.3 s after the kill, the player dead then alive, same cell both ways), and the game confirms the bear alive before and dead after. Two traps found on the way: the Mistwatch bandit 45A63 is already dead in Emma's save, and the VR console refuses `860F8.kill` (`DO papyrus Actor Kill 860F8` works).
 - [ ] Dropping and picking up from the game's side (console drop, bot sees it; pick up, bot sees it go).
 - [ ] Old dropped items announced on connect.
 - [ ] Equipment on a copy: the bot equips, the real copy holds it.
@@ -189,6 +215,7 @@ A longer write-up goes in the section the item belongs to further down; this lis
 
 ### Sync: things to build
 
+- [ ] The other order of "a creature this game made comes back": the server sends the creature before the game has its own actor loaded again. A copy is then made as before and the pair is back; the log says `HandedAway: ... a copy of it stands here too; not handled`. Never seen (the actor was loaded first in every run); build it the day that line appears.
 - [ ] Objects already in the world moved by hand (a cup on a table): positions in `ObjectService`, as for drops.
 - [ ] Removals for the viewer who walked away (the asymmetric range path).
 - [ ] A newer ownership number accepted by the six receiving handlers instead of exact equality.
@@ -1360,8 +1387,8 @@ the task is to find the cause rather than guess at one.
 
 ### 5. Smaller, known, unglamorous
 
-- [ ] **The crime alarm guard is installed but has never fired.** Address confirmed at `0x1405e5dc0`; no crime has
-      been committed since it landed. Needs one session of actual crime.
+- [x] **The crime alarm guard is installed but has never fired.** It has now (2026-10-03, `live-crime`): it ran, the
+      game carried on, and no null actor was skipped.
 - [ ] **Superseded: `This isn't a crime faction! 4018279`.** Every multiplayer death calls `PayCrimeGoldToAllFactions` with a
       hard-coded faction id that depends on load order, and it failed on both deaths logged. Clearing bounties on
       every co-op death is also a gameplay decision nobody asked for. Small fix, worth a decision first.

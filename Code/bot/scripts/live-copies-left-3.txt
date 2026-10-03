@@ -1,0 +1,38 @@
+# Copies this client made, left behind on a trip: is it their number that crashes the game?
+#
+#   python Tools\VR\live-check.py live-copies-left-3
+#
+# Every crash on travelling away on 2026-10-02/03 left three or more copies behind (three Seekers; eight bears and
+# the bot's character); one or two were clean. Here: 3 bears of this bot's, so the game holds 3 copies, and the bot
+# follows the player out, so its own character is not one of those left behind.
+log live copies left 3
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+wait 5
+
+log -- 3 bears of this bot's next to the player
+npc temp 23A8A
+npc temp 23A8A
+npc temp 23A8A
+waitfor owned == 3 30
+wait 8
+log CHECK npc exists
+
+log DO god on
+wait 3
+log -- the player leaves; the copies stay behind
+log DO console cow Tamriel 34 8
+wait 40
+log CHECK game alive
+log CHECK logged CopyGone: \w+ removed as remote
+wait 3
+log -- back
+log DO console cow Tamriel 34 -9
+wait 40
+log CHECK game alive
+log DO god off
+wait 3
+log done
+stop
