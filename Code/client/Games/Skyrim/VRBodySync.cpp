@@ -71,6 +71,16 @@ constexpr std::array<const char*, VRPose::kBoneCount> kBoneNames{
 // Parent bone index for each entry of kBoneNames (-1: searched under "NPC Root [Root]").
 constexpr std::array<int8_t, VRPose::kBoneCount> kBoneParents{-1, 0, 1, 2, 1, 4, 5, 6, 1, 8, 9, 10, -1, 12, 13, 14, 12, 16, 17};
 
+// Where a weapon hangs, left then right (VRPose::HasWeapons). Both are found below the forearm: the shield node hangs
+// off its twist bone rather than the hand.
+constexpr std::array<const char*, 2> kAttachNames{"SHIELD", "WEAPON"};
+constexpr std::array<const char*, 2> kHandNames{"NPC L Hand [LHnd]", "NPC R Hand [RHnd]"};
+
+// PlayerCharacter's first-person hands, left then right: VR_NODE_DATA::NPCLHnd and NPCRHnd in CommonLibVR-NG, in the
+// same block as the headset node below. Not measured here, and that library is not kept up to date, so each is
+// checked by name before anything is read through it (FirstPersonHand).
+constexpr std::array<uint32_t, 2> kFirstPersonHandOffsets{0x590, 0x598};
+
 using BoneNodes = std::array<void*, VRPose::kBoneCount>;
 
 template <class T> T& At(void* apObject, uint32_t aOffset) noexcept
@@ -540,6 +550,12 @@ struct RemotePose
     // hands there, and the hand measurement compares against them.
     bool HasHandCheck = false;
     glm::vec3 HandOffsets[2]{};
+    // Where the owner's weapons are held relative to its hands, left then right (see VRPose::HasWeapons). Kept from
+    // the last update that carried them: PlaceWeapons puts the copy's weapons there.
+    bool HasWeapons = false;
+    std::array<bool, 2> WeaponHeld{};
+    std::array<glm::quat, 2> WeaponRotation{};
+    std::array<glm::vec3, 2> WeaponOffset{};
 };
 
 std::shared_mutex s_posesLock;
@@ -638,6 +654,13 @@ struct Rig
     std::array<RigBone, VRPose::kBoneCount> Bones{};
     // Everything below each posed bone (nodes and flattened bones), the posed bones further down the chain included.
     std::array<std::vector<RigBone>, VRPose::kBoneCount> Descendants{};
+    // The whole skeleton -- its root, every node below it and every flattened bone, each once -- for the whole-body
+    // offset (see PoseActor). Empty when the skeleton root was not found.
+    std::vector<RigBone> Body;
+    // The weapon attach nodes below each hand ("SHIELD" left, "WEAPON" right) and everything hanging off them, for
+    // PlaceWeapons. Empty when the hand has none.
+    std::array<RigBone, 2> Attach{};
+    std::array<std::vector<RigBone>, 2> AttachBelow{};
     // Finger entries below each hand (left, right); found only when the flattened array is usable.
     std::array<FingerEntries, 2> Fingers{};
     std::array<bool, 2> FingersFound{};
@@ -782,6 +805,42 @@ bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
         }
     }
 
+    // The whole skeleton, for the whole-body offset. The posed bones and what hangs below them are not all of it:
+    // NPC COM and NPC Spine [Spn0] sit between the root and Spine1, and the waist is skinned to Spn0.
+    if (void* pSkeleton = aRig.SkeletonRoot.pNode)
+    {
+        std::unordered_set<const uint8_t*> bodyEntries;
+        std::vector<void*> bodyNodes{pSkeleton};
+        CollectNodeDescendants(pSkeleton, bodyNodes);
+        for (void* pNode : bodyNodes)
+        {
+            uint8_t* pEntry = entryFor(pNode);
+            aRig.Body.push_back(MakeRigBone(pNode, pEntry));
+            if (pEntry)
+                bodyEntries.insert(pEntry);
+        }
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            uint8_t* pEntry = pArray + i * kBoneEntrySize;
+            if (!bodyEntries.count(pEntry))
+                aRig.Body.push_back(MakeRigBone(nullptr, pEntry));
+        }
+    }
+
+    // The weapon attach nodes, by name below each forearm: "SHIELD" hangs off the forearm's twist bone, not the hand.
+    for (size_t side = 0; side < 2; ++side)
+    {
+        void* pForearm = nodes[side == 0 ? VRPose::kLeftForearm : VRPose::kRightForearm];
+        void* pAttach = pForearm ? FindShallowest(pForearm, kAttachNames[side]) : nullptr;
+        if (!pAttach || !AsNode(pAttach))
+            continue;
+        aRig.Attach[side] = MakeRigBone(pAttach, entryFor(pAttach));
+        std::vector<void*> below;
+        CollectNodeDescendants(pAttach, below);
+        for (void* pNode : below)
+            aRig.AttachBelow[side].push_back(MakeRigBone(pNode, entryFor(pNode)));
+    }
+
     aRig.FingersFound[0] = FindFingers(arrayInfo, aRig.Bones[VRPose::kLeftHand].pEntry, aRig.Fingers[0]);
     aRig.FingersFound[1] = FindFingers(arrayInfo, aRig.Bones[VRPose::kRightHand].pEntry, aRig.Fingers[1]);
     if (aLog && (!aRig.FingersFound[0] || !aRig.FingersFound[1]))
@@ -789,9 +848,10 @@ bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
     aRig.Valid = true;
     // Quiet when this is only picking up a node that was attached below a bone, which happens on every equip.
     if (aLog)
-        spdlog::info("VRBodySync: resolved skeleton under root {}: {} flattened bones, {} carried by the spine, {} by the head, {} by the left hand, {} by the right hand", apRoot, count,
-                     aRig.Descendants[VRPose::kSpine1].size(), aRig.Descendants[VRPose::kHead].size(), aRig.Descendants[VRPose::kLeftHand].size(),
-                     aRig.Descendants[VRPose::kRightHand].size());
+        spdlog::info("VRBodySync: resolved skeleton under root {}: {} flattened bones, {} carried by the spine, {} by the head, {} by the left hand, {} by the right hand, {} in the "
+                     "whole body; weapon nodes {} left, {} right",
+                     apRoot, count, aRig.Descendants[VRPose::kSpine1].size(), aRig.Descendants[VRPose::kHead].size(), aRig.Descendants[VRPose::kLeftHand].size(),
+                     aRig.Descendants[VRPose::kRightHand].size(), aRig.Body.size(), aRig.Attach[0].pNode ? "found" : "not found", aRig.Attach[1].pNode ? "found" : "not found");
     return true;
 }
 
@@ -806,6 +866,17 @@ bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
         for (const auto& bone : descendants)
             if (!bone.IsIntact())
                 return false;
+    for (const auto& bone : acRig.Body)
+        if (!bone.IsIntact())
+            return false;
+    for (size_t side = 0; side < 2; ++side)
+    {
+        if (!acRig.Attach[side].IsIntact())
+            return false;
+        for (const auto& bone : acRig.AttachBelow[side])
+            if (!bone.IsIntact())
+                return false;
+    }
     return true;
 }
 
@@ -823,6 +894,8 @@ bool ResolveRig(void* apRoot, Rig& aRig, bool aLog = true) noexcept
         for (const auto& bone : descendants)
             if (!bone.ChildrenUnchanged())
                 return false;
+    // Not Rig::Body: anything attached anywhere on the body (an arrow, an effect) would cost a whole new search, up to
+    // 50 ms, and all a node missing from it misses is the whole-body offset.
     return true;
 }
 
@@ -1000,7 +1073,29 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose, const glm::vec3& acWo
     // hand. A 50-unit shift put the copy's hands 269 units behind it (the rig, 2026-10-04), and a dragged corpse came
     // out stretched along the drag ("the bodies deform drastically", Seen watching Emma carry one, 2026-10-03).
     // Nodes and flattened entries are counted separately: a bone can be listed under several parents, by either.
-    if (cHasOffset)
+    //
+    // It has to be the whole skeleton, not only the posed bones and what hangs below them. NPC Spine [Spn0], between
+    // NPC COM and Spine1, is neither, and the waist is skinned to it: from the day the hips moved the body by 30 to 40
+    // units, every copy's belly was pulled back towards where the body had been ("belly position of both of us is
+    // buggy", 2026-10-04 15:58). Rig::Body is all of it, each node and entry once; the posed bones are the fallback
+    // when the root was not found.
+    if (cHasOffset && !acRig.Body.empty())
+    {
+        for (const RigBone& bone : acRig.Body)
+        {
+            if (bone.pNode)
+            {
+                NiTransform& world = At<NiTransform>(bone.pNode, kWorldOffset);
+                world.translate = FromGlm(ToGlm(world.translate) + acWorldOffset);
+            }
+            if (bone.pEntry)
+            {
+                NiTransform& world = *reinterpret_cast<NiTransform*>(bone.pEntry + kBoneEntryWorld);
+                world.translate = FromGlm(ToGlm(world.translate) + acWorldOffset);
+            }
+        }
+    }
+    else if (cHasOffset)
     {
         std::unordered_set<const void*> movedNodes;
         std::unordered_set<const void*> movedEntries;
@@ -1123,6 +1218,71 @@ glm::mat3 RotationBetween(const glm::vec3& acFrom, const glm::vec3& acTo) noexce
     if (sine < 1e-5f)
         return glm::mat3(1.f); // already aligned, or exactly opposite (an arm never needs a half turn in one frame)
     return glm::mat3_cast(glm::angleAxis(std::atan2(sine, cosine), axis / sine));
+}
+
+// How far a rotation turns, in degrees.
+float DegreesOf(const glm::mat3& acRotation) noexcept
+{
+    const float cosine = glm::clamp((acRotation[0][0] + acRotation[1][1] + acRotation[2][2] - 1.f) * 0.5f, -1.f, 1.f);
+    return glm::degrees(std::acos(cosine));
+}
+
+// The copy's weapons where its owner holds them (VRPose::HasWeapons). The hands are already where the owner's are;
+// this turns and moves each attach node, and the weapon hanging off it, to the grip the owner's first-person hand has
+// relative to its body's hand. A grip more than 30 units from where this skeleton hangs the weapon is not a grip --
+// an arm VRIK could not stretch to the controller -- and is left alone.
+void PlaceWeapons(const Rig& acRig, const RemotePose& acPose, const uint32_t aFormId, const std::chrono::steady_clock::time_point aNow) noexcept
+{
+    if (!acPose.HasWeapons)
+        return;
+
+    static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> s_nextLog;
+    for (size_t side = 0; side < 2; ++side)
+    {
+        const RigBone& attach = acRig.Attach[side];
+        const RigBone& hand = acRig.Bones[side == 0 ? VRPose::kLeftHand : VRPose::kRightHand];
+        if (!acPose.WeaponHeld[side] || !attach.pNode || (!hand.pNode && !hand.pEntry))
+            continue;
+
+        const NiTransform handWorld = hand.World();
+        const glm::mat3 handRotation = ToGlm(handWorld.rotate);
+        const glm::mat3 wantedRotation = handRotation * glm::mat3_cast(acPose.WeaponRotation[side]);
+        const glm::vec3 wantedAt = ToGlm(handWorld.translate) + handRotation * (acPose.WeaponOffset[side] * handWorld.scale);
+        const NiTransform current = attach.World();
+        const glm::vec3 pivot = ToGlm(current.translate);
+        const glm::mat3 delta = wantedRotation * glm::transpose(ToGlm(current.rotate));
+        const float moved = glm::distance(wantedAt, pivot);
+        if (!std::isfinite(moved) || !std::isfinite(wantedRotation[0][0]))
+            continue;
+
+        auto& nextLog = s_nextLog[(static_cast<uint64_t>(aFormId) << 1) | side];
+        const bool cLog = aNow >= nextLog;
+        if (cLog)
+            nextLog = aNow + std::chrono::seconds(10);
+
+        if (moved > 30.f)
+        {
+            if (cLog)
+                spdlog::info("VRBodySync: actor {:X} {} weapon left where its skeleton hangs it: its owner holds it {:.1f} units from there", aFormId, side ? "right" : "left", moved);
+            continue;
+        }
+
+        NiTransform placed = current;
+        placed.rotate = FromGlm(wantedRotation);
+        placed.translate = FromGlm(wantedAt);
+        attach.WriteWorld(placed);
+        for (const RigBone& below : acRig.AttachBelow[side])
+        {
+            NiTransform world = below.World();
+            world.rotate = FromGlm(delta * ToGlm(world.rotate));
+            world.translate = FromGlm(wantedAt + delta * (ToGlm(world.translate) - pivot));
+            below.WriteWorld(world);
+        }
+
+        if (cLog)
+            spdlog::info("VRBodySync: actor {:X} {} weapon placed where its owner holds it: turned {:.0f} degrees and moved {:.1f} units from where its skeleton hangs it", aFormId,
+                         side ? "right" : "left", DegreesOf(delta), moved);
+    }
 }
 
 // The copy's hands where the owner's are. The pose is joint rotations, and the same rotations on a different body
@@ -2064,6 +2224,7 @@ void OnFrameEnd() noexcept
 
         PoseActor(rig, pose, worldOffset);
         ReachHands(rig, pose);
+        PlaceWeapons(rig, pose, formId, now);
         ++tally["posed"];
 
         // Hands, measured after posing so it reports what is actually being shown, and against the owner's own
@@ -2236,6 +2397,151 @@ std::string DescribeBody(Actor* apActor) noexcept
                        pRoot, fingerprint & 0xFFFF, fingerprint >> 16, rootWorld.scale, rootWorld.translate.x, rootWorld.translate.y, rootWorld.translate.z,
                        pSkeletonRoot == pRoot ? "missing" : "found", skeletonWorld.scale, depth, pTopName, pSharesScene, spineScale, spineRowLength, headScale, renderWords, playerWords,
                        describeReach(pRoot, pSkeletonRoot == pRoot ? nullptr : pSkeletonRoot), describeReach(pPlayerRoot, pPlayerRoot ? FindSkeletonRoot(pPlayerRoot) : nullptr));
+}
+
+// The local player's first-person hand, left (0) or right (1), or null when this build's PlayerCharacter does not
+// carry it where we look. Checked by name the first time, like the headset node; after that, one plain read a frame
+// says it is still the same node (a node's name is one pooled string, so the same node keeps the same pointer).
+void* FirstPersonHand(PlayerCharacter* apPlayer, const size_t aSide) noexcept
+{
+    static std::array<int, 2> s_state{}; // 0 unchecked, 1 the hand, -1 not the hand on this build
+    static std::array<const char*, 2> s_name{};
+    if (!apPlayer || s_state[aSide] < 0)
+        return nullptr;
+
+    void* pHand = At<void*>(apPlayer, kFirstPersonHandOffsets[aSide]);
+    if (!pHand)
+        return nullptr;
+
+    if (s_state[aSide] == 0)
+    {
+        const char* pName = IsReadable(pHand, kNiAVObjectSize) ? GetName(pHand) : nullptr;
+        const bool cReadable = pName && IsReadable(pName, 8);
+        s_state[aSide] = cReadable && std::strcmp(pName, kHandNames[aSide]) == 0 ? 1 : -1;
+        s_name[aSide] = pName;
+        if (s_state[aSide] < 0)
+        {
+            spdlog::warn("VRBodySync: PlayerCharacter+0x{:X} is not the first-person {} hand (it is {}); where this player holds weapons is not sent", kFirstPersonHandOffsets[aSide],
+                         aSide ? "right" : "left", cReadable ? pName : "unreadable");
+            return nullptr;
+        }
+        spdlog::info("VRBodySync: first-person {} hand found at PlayerCharacter+0x{:X}", aSide ? "right" : "left", kFirstPersonHandOffsets[aSide]);
+    }
+
+    return GetName(pHand) == s_name[aSide] ? pHand : nullptr;
+}
+
+// Where this player's weapons are held, relative to the third-person hands the rest of the pose is read from
+// (VRPose::HasWeapons). In VR the weapon the player sees and swings hangs off the first-person hand, at the angle VR
+// holds it; the third-person body's own attach node holds it the skeleton's way, and that is what the copy on the
+// other screen showed. The attach nodes are searched twice a second, as ResolveHolding does, and read in between.
+void CaptureWeapons(PlayerCharacter* apPlayer, void* apRoot, const BoneNodes& acNodes, VRPose& aOutPose, const std::chrono::steady_clock::time_point aNow) noexcept
+{
+    struct Side
+    {
+        void* pAttach = nullptr; // first person: the one that is seen and swung
+        void* pAttachVTable = nullptr;
+        void* pBody = nullptr; // third person: where the copy would hang it, for the measurement
+        void* pBodyVTable = nullptr;
+    };
+    static std::array<Side, 2> s_sides{};
+    static std::chrono::steady_clock::time_point s_searchAt{};
+    static void* s_searchedRoot = nullptr;
+
+    if (aNow >= s_searchAt || s_searchedRoot != apRoot)
+    {
+        s_searchAt = aNow + std::chrono::milliseconds(500);
+        s_searchedRoot = apRoot;
+        for (size_t side = 0; side < 2; ++side)
+        {
+            Side& found = s_sides[side];
+            found = Side{};
+            // Below the forearm, the hand's parent: the shield node hangs off the forearm's twist bone.
+            if (void* pHand = FirstPersonHand(apPlayer, side))
+            {
+                void* pForearm = At<void*>(pHand, kParentOffset);
+                void* pAttach = FindShallowest(pForearm ? pForearm : pHand, kAttachNames[side]);
+                if (pAttach && AsNode(pAttach))
+                {
+                    found.pAttach = pAttach;
+                    found.pAttachVTable = *static_cast<void**>(pAttach);
+                }
+            }
+            if (void* pForearm = acNodes[side == 0 ? VRPose::kLeftForearm : VRPose::kRightForearm])
+            {
+                if (void* pBody = FindShallowest(pForearm, kAttachNames[side]))
+                {
+                    found.pBody = pBody;
+                    found.pBodyVTable = *static_cast<void**>(pBody);
+                }
+            }
+        }
+    }
+
+    std::array<bool, 2> held{};
+    std::array<Quaternion_NetQuantize, 2> rotation{};
+    std::array<glm::vec3, 2> offset{};
+    static std::array<std::chrono::steady_clock::time_point, 2> s_nextLog{};
+    for (size_t side = 0; side < 2; ++side)
+    {
+        const Side& found = s_sides[side];
+        void* pHand = acNodes[side == 0 ? VRPose::kLeftHand : VRPose::kRightHand];
+        // Nothing hanging off the attach node: nothing held in that hand.
+        if (!pHand || !StillTheSame(found.pAttach, found.pAttachVTable) || (ChildFingerprintOf(found.pAttach) & 0xFFFF) == 0)
+            continue;
+
+        const NiTransform& hand = At<NiTransform>(pHand, kWorldOffset);
+        const NiTransform& grip = At<NiTransform>(found.pAttach, kWorldOffset);
+        const glm::mat3 inverseHand = glm::transpose(ToGlm(hand.rotate));
+        const glm::vec3 at = inverseHand * (ToGlm(grip.translate) - ToGlm(hand.translate)) / std::max(hand.scale, 0.05f);
+        const bool cLog = aNow >= s_nextLog[side];
+        if (cLog)
+            s_nextLog[side] = aNow + std::chrono::seconds(10);
+        // The first-person hand is the controller; the body's hand is where VRIK got the arm to. Past a hand's length
+        // apart, the arm did not reach and the grip means nothing for the copy.
+        if (!std::isfinite(at.x) || !std::isfinite(at.y) || !std::isfinite(at.z) || glm::length(at) > 40.f)
+        {
+            if (cLog)
+                spdlog::info("VRBodySync: local {} weapon is {:.1f} units from the body's hand; where it is held is not sent", side ? "right" : "left", glm::length(at));
+            continue;
+        }
+
+        held[side] = true;
+        rotation[side] = glm::normalize(glm::quat_cast(inverseHand * ToGlm(grip.rotate)));
+        offset[side] = at;
+
+        // The measurement: how far the copy's weapon was from this one before it was sent.
+        if (cLog && StillTheSame(found.pBody, found.pBodyVTable))
+        {
+            const NiTransform& body = At<NiTransform>(found.pBody, kWorldOffset);
+            spdlog::info("VRBodySync: local {} weapon held {:.0f} degrees and {:.1f} units from where the body's own {} node has it; sent", side ? "right" : "left",
+                         DegreesOf(ToGlm(grip.rotate) * glm::transpose(ToGlm(body.rotate))), glm::distance(ToGlm(grip.translate), ToGlm(body.translate)), kAttachNames[side]);
+        }
+    }
+
+    // Sent when the grip changes or once a second, like the fingers; the receiver keeps the last.
+    static std::array<bool, 2> s_lastHeld{};
+    static std::array<Quaternion_NetQuantize, 2> s_lastRotation{};
+    static std::array<glm::vec3, 2> s_lastOffset{};
+    static std::chrono::steady_clock::time_point s_lastSentAt{};
+    bool changed = held != s_lastHeld;
+    for (size_t side = 0; side < 2 && !changed; ++side)
+        changed = held[side] && (rotation[side] != s_lastRotation[side] || glm::distance(offset[side], s_lastOffset[side]) > 0.05f);
+
+    aOutPose.HasWeapons = false;
+    if (!changed && aNow - s_lastSentAt < std::chrono::seconds(1))
+        return;
+
+    s_lastHeld = held;
+    s_lastRotation = rotation;
+    s_lastOffset = offset;
+    s_lastSentAt = aNow;
+    aOutPose.HasWeapons = true;
+    aOutPose.WeaponHeld = held;
+    aOutPose.WeaponRotation = rotation;
+    for (size_t side = 0; side < 2; ++side)
+        for (int axis = 0; axis < 3; ++axis)
+            aOutPose.WeaponOffset[side][axis] = offset[side][axis];
 }
 
 bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
@@ -2439,6 +2745,8 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
             }
         }
     }
+
+    CaptureWeapons(apPlayer, pRoot, nodes, aOutPose, now);
 
     // Fingers: only when both hands' bones are known, and only when they changed since the last send or a second has
     // passed (so a player who arrives later still gets them).
@@ -2849,6 +3157,17 @@ void SetRemotePose(Actor* apActor, const VRPose& acPose) noexcept
     {
         pose.HandOffsets[0] = glm::vec3{acPose.LeftHandOffset[0], acPose.LeftHandOffset[1], acPose.LeftHandOffset[2]};
         pose.HandOffsets[1] = glm::vec3{acPose.RightHandOffset[0], acPose.RightHandOffset[1], acPose.RightHandOffset[2]};
+    }
+
+    if (acPose.HasWeapons)
+    {
+        pose.HasWeapons = true;
+        for (size_t side = 0; side < 2; ++side)
+        {
+            pose.WeaponHeld[side] = acPose.WeaponHeld[side];
+            pose.WeaponRotation[side] = acPose.WeaponRotation[side];
+            pose.WeaponOffset[side] = glm::vec3{acPose.WeaponOffset[side][0], acPose.WeaponOffset[side][1], acPose.WeaponOffset[side][2]};
+        }
     }
 }
 

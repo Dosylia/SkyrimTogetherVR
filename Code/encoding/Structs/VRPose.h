@@ -112,4 +112,15 @@ struct VRPose
     bool HasHandCheck{false};
     float LeftHandOffset[3]{};
     float RightHandOffset[3]{};
+
+    //! Where the sender's weapons are held, left then right (HasWeapons): the attach node of its first-person body
+    //! ("SHIELD" in the left hand, "WEAPON" in the right) in the space of its third-person hand bone -- the hand the
+    //! receiver's copy poses. In VR the weapon the player sees and swings hangs off the first-person hand at the
+    //! angle VR holds it, while the copy hung its own off its third-person hand at the skeleton's angle: the hands
+    //! met and the blades did not ("the hands are perfectly synced but not the swords", 2026-10-04). Sent when it
+    //! changes or once a second; the receiver keeps the last. Nothing is placed on a side whose WeaponHeld is false.
+    bool HasWeapons{false};
+    std::array<bool, 2> WeaponHeld{};
+    std::array<Quaternion_NetQuantize, 2> WeaponRotation{};
+    float WeaponOffset[2][3]{};
 };

@@ -31,6 +31,19 @@ bool VRPose::operator==(const VRPose& acRhs) const noexcept
         return false;
     if (HasRootPosition && !std::equal(std::begin(RootPosition), std::end(RootPosition), std::begin(acRhs.RootPosition)))
         return false;
+    if (HasWeapons != acRhs.HasWeapons)
+        return false;
+    if (HasWeapons)
+    {
+        for (size_t side = 0; side < 2; ++side)
+        {
+            if (WeaponHeld[side] != acRhs.WeaponHeld[side])
+                return false;
+            if (WeaponHeld[side] && (WeaponRotation[side] != acRhs.WeaponRotation[side] ||
+                                     !std::equal(std::begin(WeaponOffset[side]), std::end(WeaponOffset[side]), std::begin(acRhs.WeaponOffset[side]))))
+                return false;
+        }
+    }
     if (NoBones)
         return true;
 
@@ -110,6 +123,24 @@ void VRPose::Serialize(TiltedPhoques::Buffer::Writer& aWriter) const noexcept
             uint32_t bits = 0;
             std::memcpy(&bits, &value, sizeof(bits));
             aWriter.WriteBits(bits, 32);
+        }
+    }
+    aWriter.WriteBits(HasWeapons ? 1 : 0, 1);
+    if (HasWeapons)
+    {
+        for (size_t side = 0; side < 2; ++side)
+        {
+            aWriter.WriteBits(WeaponHeld[side] ? 1 : 0, 1);
+            if (!WeaponHeld[side])
+                continue;
+            WeaponRotation[side].Serialize(aWriter);
+            // Raw, like the hips: a few units from the hand, and a step here is a step the blade sits off by.
+            for (const float value : WeaponOffset[side])
+            {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &value, sizeof(bits));
+                aWriter.WriteBits(bits, 32);
+            }
         }
     }
 }
@@ -195,6 +226,29 @@ void VRPose::Deserialize(TiltedPhoques::Buffer::Reader& aReader) noexcept
             aReader.ReadBits(bits, 32);
             const uint32_t raw = static_cast<uint32_t>(bits);
             std::memcpy(&value, &raw, sizeof(value));
+        }
+    }
+    uint64_t hasWeapons = 0;
+    aReader.ReadBits(hasWeapons, 1);
+    HasWeapons = hasWeapons != 0;
+    WeaponHeld = {};
+    if (HasWeapons)
+    {
+        for (size_t side = 0; side < 2; ++side)
+        {
+            uint64_t held = 0;
+            aReader.ReadBits(held, 1);
+            WeaponHeld[side] = held != 0;
+            if (!WeaponHeld[side])
+                continue;
+            WeaponRotation[side].Deserialize(aReader);
+            for (float& value : WeaponOffset[side])
+            {
+                uint64_t bits = 0;
+                aReader.ReadBits(bits, 32);
+                const uint32_t raw = static_cast<uint32_t>(bits);
+                std::memcpy(&value, &raw, sizeof(value));
+            }
         }
     }
 }

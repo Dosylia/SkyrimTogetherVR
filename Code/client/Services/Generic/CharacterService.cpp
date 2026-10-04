@@ -236,6 +236,29 @@ void MarkForeignGraph(World& aWorld, const entt::entity aEntity, Actor* apActor,
         pInterpolation->ForeignGraph = true;
 }
 
+// The base a copy of the owner's temporary actor is made from. The owner's resolved leveled pick is preferred over the
+// lossy template base -- when the pick is the same character under another record. A named NPC that takes its stats
+// from a levelled list has that list's pick as its "pick" too: Boethiah Cultist B0E87, stats from Bandit Marauder
+// 39D25, was made here as the marauder, and Seen saw a bandit where Emma fought a cultist (2026-10-04 16:00). A base
+// with a name of its own that differs from the pick's is the character; the pick is only where its stats come from.
+TESNPC* BaseForCopy(World& aWorld, const CharacterSpawnRequest& acMessage) noexcept
+{
+    TESNPC* pBase = Cast<TESNPC>(TESForm::GetById(aWorld.GetModSystem().GetGameId(acMessage.BaseId)));
+    if (acMessage.LeveledNpcPickId == GameId{})
+        return pBase;
+
+    TESNPC* pPick = Cast<TESNPC>(TESForm::GetById(aWorld.GetModSystem().GetGameId(acMessage.LeveledNpcPickId)));
+    const char* pBaseName = pBase ? pBase->fullName.value.AsAscii() : nullptr;
+    const char* pPickName = pPick ? pPick->fullName.value.AsAscii() : nullptr;
+    if (pPick && pBase && pPick != pBase && pBaseName && *pBaseName && std::strcmp(pBaseName, pPickName ? pPickName : "") != 0)
+    {
+        spdlog::info("Copy for server id {:X} made from its own base {:X} ({}), not the levelled pick {:X} ({}) it takes its stats from", acMessage.ServerId, pBase->formID, pBaseName,
+                     pPick->formID, pPickName ? pPickName : "?");
+        return pBase;
+    }
+    return pPick ? pPick : pBase;
+}
+
 // Spawns the owner's creature and turns the local one into a ghost. Null when no copy could be made; the caller then
 // adopts the local creature as before.
 Actor* StandInForForeignCreature(Actor* apLocal, TESNPC* apOwnerBase) noexcept
@@ -252,11 +275,20 @@ Actor* StandInForForeignCreature(Actor* apLocal, TESNPC* apOwnerBase) noexcept
         pLocalBase = pLocalBase->GetTemplateBase();
 
     s_ghosts[apLocal->formID] = pCopy->formID;
-    apLocal->Disable();
 
-    spdlog::info("Ghost: reference {:X} rolled as {} ({:X}) here but the owner has {} ({:X}); copy {:X} stands in for it and the local one is disabled", apLocal->formID,
+    // Only a creature this game has loaded is disabled now. The server names references the owner sees, and this game
+    // can hold one in memory without its 3D -- Troll 85FAD at the corner of the grid, never loaded here, the owner's
+    // Bear 15700 units away. The game was disposing of it, and disabling it in the middle of that crashed in its
+    // movement code 32 ms later (SkyrimVR.exe+0x714EB2, the troll in R15 with its form id gone, 2026-10-04 16:26:41).
+    // One that is not loaded goes dark once it loads, like a stand-in for a reference that was not here at all
+    // (ProcessNewEntity).
+    const bool cLoaded = apLocal->GetNiNode() != nullptr && !apLocal->IsDeleted();
+    if (cLoaded)
+        apLocal->Disable();
+
+    spdlog::info("Ghost: reference {:X} rolled as {} ({:X}) here but the owner has {} ({:X}); copy {:X} stands in for it and the local one is {}", apLocal->formID,
                  pLocalBase ? pLocalBase->fullName.value.AsAscii() : "?", pLocalBase ? pLocalBase->formID : 0, apOwnerBase->fullName.value.AsAscii(), apOwnerBase->formID,
-                 pCopy->formID);
+                 pCopy->formID, cLoaded ? "disabled" : "not loaded here (disabled once it loads)");
     return pCopy;
 }
 
@@ -1273,12 +1305,7 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
 
         if (acMessage.BaseId != GameId{})
         {
-            // Prefer the owner's resolved leveled pick over the lossy template base
-            if (acMessage.LeveledNpcPickId != GameId{})
-                pNpc = Cast<TESNPC>(TESForm::GetById(m_world.GetModSystem().GetGameId(acMessage.LeveledNpcPickId)));
-
-            if (!pNpc)
-                pNpc = Cast<TESNPC>(TESForm::GetById(m_world.GetModSystem().GetGameId(acMessage.BaseId)));
+            pNpc = BaseForCopy(m_world, acMessage);
 
             if (!pNpc)
             {
@@ -1394,7 +1421,11 @@ void CharacterService::OnCharacterSpawn(const CharacterSpawnRequest& acMessage) 
         m_world.emplace_or_replace<PlayerComponent>(*entity, acMessage.PlayerId);
     }
 
-    if (pActor->IsDead() != acMessage.IsDead)
+    // A body that is to be dead is killed once it has its 3D, by the WaitingFor3D step every spawn goes through
+    // (below). Killed before, it is dead with nothing played, and that step then finds it dead already and does
+    // nothing: a Flame Atronach that had burst on its owner's screen came back here as a fresh copy and stood for
+    // good (2026-10-04 16:03, server id 5000B1).
+    if (pActor->IsDead() != acMessage.IsDead && (!acMessage.IsDead || pActor->GetNiNode()))
         acMessage.IsDead ? pActor->Kill() : pActor->Respawn();
 
     spdlog::info("Spawn Request Is summon {}", acMessage.IsPlayerSummon);
@@ -2580,12 +2611,7 @@ Actor* CharacterService::CreateCharacterForEntity(entt::entity aEntity) const no
 
         if (acMessage.BaseId != GameId{})
         {
-            // Prefer the owner's resolved leveled pick over the lossy template base
-            if (acMessage.LeveledNpcPickId != GameId{})
-                pNpc = Cast<TESNPC>(TESForm::GetById(m_world.GetModSystem().GetGameId(acMessage.LeveledNpcPickId)));
-
-            if (!pNpc)
-                pNpc = Cast<TESNPC>(TESForm::GetById(m_world.GetModSystem().GetGameId(acMessage.BaseId)));
+            pNpc = BaseForCopy(m_world, acMessage);
 
             if (!pNpc)
             {
@@ -3312,7 +3338,11 @@ void CharacterService::RunRemoteUpdates() noexcept
         m_weaponDrawUpdates[pActor->formID] = {waitingFor3D.SpawnRequest.IsWeaponDrawn};
 
         if (pActor->IsDead() != waitingFor3D.SpawnRequest.IsDead)
+        {
+            if (waitingFor3D.SpawnRequest.IsDead)
+                spdlog::info("Character {:X} ({:X}) came dead; killed now that it has its 3D", waitingFor3D.SpawnRequest.ServerId, pActor->formID);
             waitingFor3D.SpawnRequest.IsDead ? pActor->Kill() : pActor->Respawn();
+        }
 
         if (pActor->IsVampireLord())
             pActor->FixVampireLordModel();

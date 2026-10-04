@@ -128,6 +128,7 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     vrPose.HasFingers = false;
     vrPose.HasScale = false;
     vrPose.HasRootPosition = false;
+    vrPose.HasWeapons = false;
     {
         const InterpolationComponent::TimePoint* pBefore = nullptr;
         const InterpolationComponent::TimePoint* pAfter = nullptr;
@@ -241,6 +242,17 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
                     std::copy(std::begin(handSource.LeftHandOffset), std::end(handSource.LeftHandOffset), std::begin(vrPose.LeftHandOffset));
                     std::copy(std::begin(handSource.RightHandOffset), std::end(handSource.RightHandOffset), std::begin(vrPose.RightHandOffset));
                 }
+            }
+
+            // Where the weapons are held: sent when the grip changes, so like the fingers the newest set around the
+            // pose tick is passed on and the body sync keeps the last one. No blending: a grip is a step.
+            const VRPose& weaponSource = pAfter->VRPoseData.HasWeapons ? pAfter->VRPoseData : pBefore->VRPoseData;
+            if (weaponSource.HasWeapons)
+            {
+                vrPose.HasWeapons = true;
+                vrPose.WeaponHeld = weaponSource.WeaponHeld;
+                vrPose.WeaponRotation = weaponSource.WeaponRotation;
+                std::copy(&weaponSource.WeaponOffset[0][0], &weaponSource.WeaponOffset[0][0] + 6, &vrPose.WeaponOffset[0][0]);
             }
         }
     }

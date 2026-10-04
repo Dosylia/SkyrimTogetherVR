@@ -1,0 +1,45 @@
+# The copy holds its weapon where the owner does.
+#
+#   python Tools\VR\live-check.py live-weapon-grip
+#
+# "The hands are perfectly synced but not the swords" (2026-10-04). In VR the weapon the player sees and swings hangs
+# off the first-person hand, at the angle VR holds it; the copy on the other screen hung its own off its third-person
+# hand, the skeleton's way. The sender now reads the first-person attach node relative to its body's hand and sends it
+# (VRPose::HasWeapons), and the receiver puts the copy's weapon there (VRBodySync::PlaceWeapons).
+#
+# The first-person hands are read at PlayerCharacter+0x590/0x598, offsets taken from CommonLibVR-NG and not measured
+# here: the first check is that the node there is the hand. The player then draws an iron sword, the bot records the
+# player's stream and plays it back as its own character, and the game places the bot's copy's weapon from it.
+log live weapon grip
+waitfor connected 45
+expect known me
+waitfor known other 40
+wait 3
+
+log DO console player.additem 12EB7 1
+log DO console player.equipitem 12EB7
+wait 2
+log DO papyrus Actor DrawWeapon 14
+wait 4
+
+# In view of the headset (see live-hands), or the copy is not posed at all.
+log DO papyrus ObjectReference MoveTo 14 copy f:50 f:0 f:0 b:false
+wait 3
+log -- recording the player's stream for 12 s
+capture other 12
+wait 1
+handtargets -15 15 70 15 20 80
+replay me 3
+wait 3
+
+# "first-person right hand found at PlayerCharacter+0x598" is written once, at the first pose after connecting --
+# before this script begins -- so it is not a check here; without the hand there is no "weapon held" line at all.
+log CHECK logged local right weapon held \d+ degrees
+log CHECK logged weapon placed where its owner holds it
+log CHECK hands within 80
+log SHOT grip of copy
+wait 4
+log CHECK game alive
+wait 3
+log done
+stop

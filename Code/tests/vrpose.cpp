@@ -74,6 +74,14 @@ VRPose MakeFullPose()
     pose.RightHandOffset[1] = -21.25f;
     pose.RightHandOffset[2] = 22.125f;
 
+    // A sword in the right hand and nothing in the left: the shape a held weapon takes.
+    pose.HasWeapons = true;
+    pose.WeaponHeld = {false, true};
+    pose.WeaponRotation[1] = MakeQuat(77.f);
+    pose.WeaponOffset[1][0] = 1.25f;
+    pose.WeaponOffset[1][1] = -3.5f;
+    pose.WeaponOffset[1][2] = 7.75f;
+
     return pose;
 }
 } // namespace
@@ -99,6 +107,9 @@ TEST_CASE("a full pose survives the wire", "[vrpose]")
     REQUIRE(back.HasRootPosition);
     REQUIRE(back.HasHips);
     REQUIRE(back.HasHandCheck);
+    REQUIRE(back.HasWeapons);
+    REQUIRE_FALSE(back.WeaponHeld[0]);
+    REQUIRE(back.WeaponHeld[1]);
 }
 
 TEST_CASE("the positional fields are exact, not quantised", "[vrpose]")
@@ -118,13 +129,15 @@ TEST_CASE("the positional fields are exact, not quantised", "[vrpose]")
     REQUIRE(back.HipOffset[1] == Approx(-2.25f).epsilon(0.0));
     REQUIRE(back.LeftHandOffset[2] == Approx(-12.125f).epsilon(0.0));
     REQUIRE(back.RightHandOffset[0] == Approx(20.5f).epsilon(0.0));
+    REQUIRE(back.WeaponOffset[1][1] == Approx(-3.5f).epsilon(0.0));
+    REQUIRE(back.WeaponOffset[1][2] == Approx(7.75f).epsilon(0.0));
 }
 
 TEST_CASE("every combination of the optional fields survives", "[vrpose]")
 {
-    // Six independent flags, so 64 shapes. Each one is a wire layout of its own, because the serialiser writes
+    // Eight independent flags, so 256 shapes. Each one is a wire layout of its own, because the serialiser writes
     // a field only when its flag is set -- which is exactly where a hand-edited format goes wrong.
-    for (uint32_t mask = 0; mask < 64; ++mask)
+    for (uint32_t mask = 0; mask < 256; ++mask)
     {
         VRPose pose = MakeFullPose();
         pose.NoBones = (mask & 1) != 0;
@@ -133,6 +146,8 @@ TEST_CASE("every combination of the optional fields survives", "[vrpose]")
         pose.HasScale = (mask & 8) != 0;
         pose.HasRootPosition = (mask & 16) != 0;
         pose.HasHips = (mask & 32) != 0;
+        pose.HasWeapons = (mask & 64) != 0;
+        pose.WeaponHeld[0] = (mask & 128) != 0;
 
         const VRPose back = RoundTrip(pose);
 
@@ -143,6 +158,12 @@ TEST_CASE("every combination of the optional fields survives", "[vrpose]")
         REQUIRE(back.HasRootPosition == pose.HasRootPosition);
         REQUIRE(back.HasHips == pose.HasHips);
         REQUIRE(back.HasHandCheck == pose.HasHandCheck);
+        REQUIRE(back.HasWeapons == pose.HasWeapons);
+        if (pose.HasWeapons)
+        {
+            REQUIRE(back.WeaponHeld[0] == pose.WeaponHeld[0]);
+            REQUIRE(back.WeaponHeld[1] == pose.WeaponHeld[1]);
+        }
 
         // A boneless pose carries no bones at all, so its leg flag means nothing on arrival.
         if (!pose.NoBones)
@@ -211,4 +232,8 @@ TEST_CASE("two poses that differ in one field are not equal", "[vrpose]")
     REQUIRE(differsBy([](VRPose& p) { p.NoBones = !p.NoBones; }));
     REQUIRE(differsBy([](VRPose& p) { p.HasFingers = !p.HasFingers; }));
     REQUIRE(differsBy([](VRPose& p) { p.Bones[VRPose::kHead] = MakeQuat(99.f); }));
+    REQUIRE(differsBy([](VRPose& p) { p.HasWeapons = false; }));
+    REQUIRE(differsBy([](VRPose& p) { p.WeaponHeld[1] = false; }));
+    REQUIRE(differsBy([](VRPose& p) { p.WeaponRotation[1] = MakeQuat(5.f); }));
+    REQUIRE(differsBy([](VRPose& p) { p.WeaponOffset[1][2] += 1.f; }));
 }
