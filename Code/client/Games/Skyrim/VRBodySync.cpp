@@ -18,6 +18,7 @@
 #include <tlhelp32.h>
 #include <cwctype>
 #include <unordered_map>
+#include <unordered_set>
 #include <map>
 #include <vector>
 
@@ -993,6 +994,37 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose, const glm::vec3& acWo
     const glm::mat3 rootRotation = ToGlm(At<NiTransform>(acRig.pRoot, kWorldOffset).rotate);
     const bool cHasOffset = glm::dot(acWorldOffset, acWorldOffset) > 0.0001f;
 
+    // The whole-body offset (a corpse being dragged, where the owner's body stands), applied once to every bone and to
+    // everything hanging off them, before any rotation. It used to be added at each posed bone on top of what its
+    // parent had already carried down to it -- spine, chest, collarbone, upper arm, forearm, hand: six times at the
+    // hand. A 50-unit shift put the copy's hands 269 units behind it (the rig, 2026-10-04), and a dragged corpse came
+    // out stretched along the drag ("the bodies deform drastically", Seen watching Emma carry one, 2026-10-03).
+    // Nodes and flattened entries are counted separately: a bone can be listed under several parents, by either.
+    if (cHasOffset)
+    {
+        std::unordered_set<const void*> movedNodes;
+        std::unordered_set<const void*> movedEntries;
+        const auto shift = [&](const RigBone& acBone)
+        {
+            if (acBone.pNode && movedNodes.insert(acBone.pNode).second)
+            {
+                NiTransform& world = At<NiTransform>(acBone.pNode, kWorldOffset);
+                world.translate = FromGlm(ToGlm(world.translate) + acWorldOffset);
+            }
+            if (acBone.pEntry && movedEntries.insert(acBone.pEntry).second)
+            {
+                NiTransform& world = *reinterpret_cast<NiTransform*>(acBone.pEntry + kBoneEntryWorld);
+                world.translate = FromGlm(ToGlm(world.translate) + acWorldOffset);
+            }
+        };
+        for (uint32_t i = 0; i < VRPose::kBoneCount; ++i)
+        {
+            shift(acRig.Bones[i]);
+            for (const RigBone& below : acRig.Descendants[i])
+                shift(below);
+        }
+    }
+
     // Parents first. Each bone is turned about its own position, and that rigid motion is carried to everything below
     // it, posed children included, so a child's transform already holds its parents' motion when its own rotation is
     // solved. World transforms are written directly because nothing recomputes them from locals between the end of the
@@ -1001,32 +1033,9 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose, const glm::vec3& acWo
     {
         const RigBone& bone = acRig.Bones[i];
         // Legs only when the sender's trackers drive them; otherwise the walk animation keeps them.
+        // (A body being dragged is still dragged from the waist down: the offset above reached the legs too.)
         if (i >= VRPose::kUpperBoneCount && !acPose.HasLegs)
-        {
-            // ...but a body being dragged is still being dragged from the waist down. A corpse never carries legs
-            // (HasLegs is false for one), so the offset below reached the spine and the arms and stopped there:
-            // the top half went with the hands and the bottom half stayed on the floor, which is the body
-            // stretching into a long thing that Seen watched on 2026-09-26 at 09:43.
-            //
-            // Only the pelvis is shifted, with everything under it -- the thighs, calves and feet are its
-            // descendants, so shifting them again by their own index would move them twice.
-            if (cHasOffset && i == VRPose::kPelvis && (bone.pNode || bone.pEntry))
-            {
-                NiTransform pelvisWorld = bone.World();
-                pelvisWorld.translate = FromGlm(ToGlm(pelvisWorld.translate) + acWorldOffset);
-                bone.WriteWorld(pelvisWorld);
-
-                for (const RigBone& below : acRig.Descendants[i])
-                {
-                    if (!below.pNode && !below.pEntry)
-                        continue;
-                    NiTransform world = below.World();
-                    world.translate = FromGlm(ToGlm(world.translate) + acWorldOffset);
-                    below.WriteWorld(world);
-                }
-            }
             continue;
-        }
         if (!bone.pNode && !bone.pEntry)
             continue;
         const NiTransform current = bone.World();
@@ -1037,7 +1046,6 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose, const glm::vec3& acWo
 
         NiTransform wanted = current;
         wanted.rotate = FromGlm(wantedRotation);
-        wanted.translate = FromGlm(ToGlm(wanted.translate) + acWorldOffset);
         bone.WriteWorld(wanted);
 
         // The local rotation is computed from scratch every frame: the parent's world rotation, inverted, times the
@@ -1061,7 +1069,7 @@ void PoseActor(const Rig& acRig, const RemotePose& acPose, const glm::vec3& acWo
         {
             NiTransform world = child.World();
             world.rotate = FromGlm(delta * ToGlm(world.rotate));
-            world.translate = FromGlm(pivot + delta * (ToGlm(world.translate) - pivot) + acWorldOffset);
+            world.translate = FromGlm(pivot + delta * (ToGlm(world.translate) - pivot));
             child.WriteWorld(world);
         }
     }
@@ -1151,6 +1159,25 @@ void ReachHands(const Rig& acRig, const RemotePose& acPose) noexcept
         const glm::vec3 shoulder = ToGlm(upper.World().translate);
         const glm::vec3 elbow = ToGlm(fore.World().translate);
         const glm::vec3 wrist = ToGlm(hand.World().translate);
+
+        // Fine-tuning only. The owner's rotations already give the arm its shape; what is left after the body is
+        // placed is arm length, a few units. A bigger gap means the two disagree about where the body is, and pulling
+        // the hand all the way folds the arm: Seen held his arms straight out and his copy had them crossed on its
+        // chest (2026-10-04, 30 units pulled). Then the arm keeps the owner's pose untouched.
+        constexpr float cMaxCorrection = 15.f;
+        const float cGap = glm::distance(target, wrist);
+        if (!std::isfinite(cGap) || cGap > cMaxCorrection)
+        {
+            static std::chrono::steady_clock::time_point s_nextFar{};
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= s_nextFar)
+            {
+                s_nextFar = now + std::chrono::seconds(10);
+                spdlog::info("VRBodySync: a hand of the copy is {:.0f} units from where its owner's is; more than the {:.0f} fine-tuning, so the arm keeps the owner's pose", cGap,
+                             cMaxCorrection);
+            }
+            continue;
+        }
         const float upperLength = glm::distance(shoulder, elbow);
         const float foreLength = glm::distance(elbow, wrist);
         const glm::vec3 toTarget = target - shoulder;
@@ -1996,7 +2023,26 @@ void OnFrameEnd() noexcept
             {
                 const NiTransform& rootWorld = At<NiTransform>(pRoot, kWorldOffset);
                 const glm::vec3 wanted = ToGlm(rootWorld.translate) + ToGlm(rootWorld.rotate) * pose.HipOffset;
-                const glm::vec3 delta = wanted - ToGlm(pelvis.World().translate);
+                glm::vec3 delta = wanted - ToGlm(pelvis.World().translate);
+                // Without leg trackers, where the body stands but not how high: the legs are this copy's walk
+                // animation, and lowering it to the owner's crouch would sink the feet. Measured in play on both
+                // screens (2026-10-04, 327 samples): the copy's body stood a median 22-28 units in front of where the
+                // owner's VRIK body was, and every hand 20-25 units too far forward with it. The real body stands
+                // behind its root in the owner's game too, so this is also where it is to be hit.
+                if (!pose.HasLegs)
+                {
+                    const glm::mat3 rootRotation = ToGlm(rootWorld.rotate);
+                    glm::vec3 local = glm::transpose(rootRotation) * delta;
+                    static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextBodyGap;
+                    auto& nextGap = s_nextBodyGap[formId];
+                    if (now >= nextGap)
+                    {
+                        nextGap = now + std::chrono::seconds(10);
+                        spdlog::info("VRBodySync: actor {:X} body stands ({:.1f}, {:.1f}) from where its owner's does (right, forward); moved there", formId, local.x, local.y);
+                    }
+                    local.z = 0.f;
+                    delta = rootRotation * local;
+                }
                 // A hip a body-length away from where this copy has it is a bad read, not a crouch.
                 if (std::isfinite(delta.x) && std::isfinite(delta.y) && std::isfinite(delta.z) && glm::dot(delta, delta) < 256.f * 256.f)
                 {
@@ -2363,8 +2409,11 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
         }
     }
 
+    // Sent always, not only with leg trackers (2026-10-04): VRIK stands the body some way back from the headset, the
+    // copy's animation stands it over its feet, and the receiver uses the horizontal part to stand the copy where the
+    // owner's body is (see ApplyRemotePoses). The height is applied only while the legs are tracked.
     aOutPose.HasHips = false;
-    if (cLegs && nodes[VRPose::kPelvis])
+    if (nodes[VRPose::kPelvis])
     {
         const NiTransform& rootWorld = At<NiTransform>(pRoot, kWorldOffset);
         const glm::vec3 pelvis = ToGlm(At<NiTransform>(nodes[VRPose::kPelvis], kWorldOffset).translate);
