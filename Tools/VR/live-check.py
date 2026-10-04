@@ -305,6 +305,12 @@ class Run:
                 hour = papyrus('GlobalVariable', 'GetValue', '38')
                 ok = isinstance(hour, (int, float)) and abs(float(hour) - float(words[2])) > 0.5
                 detail = 'GameHour %s' % hour
+            elif who == 'fewer':
+                # "fewer <n> <regular expression>": the client has written fewer than n such lines since the script began.
+                rx = re.compile(' '.join(words[2:]))
+                hits = [l for l in session_lines()[self.log_start:] if rx.search(l)]
+                ok = len(hits) < int(words[1])
+                detail = '%d lines' % len(hits)
             elif who == 'absent':
                 # "absent <regular expression>": the client has written no such line since the script began.
                 rx = re.compile(' '.join(words[1:]))

@@ -1,0 +1,43 @@
+# The player's own follower, handed to the other player while this one is away, comes back without a fight.
+#
+#   python Tools\VR\live-check.py live-follower
+#
+# 2026-10-03 15:09 and 2026-10-04 09:33: Emma went through a door, the server gave Lydia (still inside, near Seen)
+# to Seen, and Lydia followed Emma out anyway. The two games then pulled her back and forth -- 85 appearances in 12 s
+# -- and Seen's game dressed her in the outfit she has in his own save, which Emma's game applied. Now the player's
+# game keeps its follower's gear and asks for her back at once.
+#
+# Here: Lydia (A2C94, Emma's follower in her save) is put next to the player; the player travels away while this bot
+# stays and accepts what is left, so the server hands Lydia to the bot; then she is brought back next to the player,
+# the way a follower catches up.
+log live follower
+waitfor connected 45
+expect known me
+waitfor known other 40
+ownership accept
+stay
+wait 5
+
+log DO god on
+log -- Lydia next to the player
+log DO papyrus ObjectReference MoveTo A2C94 14 f:100 f:0 f:0 b:false
+wait 10
+
+log -- the player leaves; Lydia stays with this bot and is given to it
+log DO console cow Tamriel 34 8
+wait 30
+log CHECK logged Actor \w+ is now owned by player
+log CHECK logged Follower A2C94 \(server id \w+\) was given to player \w+; not near this player
+
+log -- Lydia catches up with the player
+log DO papyrus ObjectReference MoveTo A2C94 14 f:100 f:0 f:0 b:false
+wait 20
+log CHECK fewer 6 Spawn Actor: A2C94
+log CHECK fewer 3 Follower A2C94 .* was given to player
+log CHECK logged Gained ownership of actor
+wait 3
+log CHECK game alive
+log DO god off
+wait 3
+log done
+stop

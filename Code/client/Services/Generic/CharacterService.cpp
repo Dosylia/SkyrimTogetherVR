@@ -45,6 +45,7 @@
 #include <Events/PartyJoinedEvent.h>
 
 #include <Structs/ActionEvent.h>
+#include <Messages/RequestInventoryChanges.h>
 #include <Messages/AssignCharacterRequest.h>
 #include <Messages/AssignCharacterResponse.h>
 #include <Messages/ServerReferencesMoveRequest.h>
@@ -578,6 +579,58 @@ void CharacterService::ReconcileActorData(
         m_weaponDrawUpdates[apActor->formID] = {acActorData.IsWeaponDrawn};
 }
 
+// The server's copy of an actor's inventory brought in line with this game's: for each kind of item (same base, same
+// extra data), the difference in count goes up as an ordinary inventory change, which the server applies to its copy
+// and relays to the other players. For a follower whose gear another game overwrote on the server while it owned her.
+void CharacterService::SendInventoryDifference(Actor* apActor, const uint32_t aServerId, const uint32_t aOwnershipEpoch, const Inventory& acServerInventory) const noexcept
+{
+    if (!apActor || !m_transport.IsConnected())
+        return;
+
+    const Inventory mine = apActor->GetActorInventory();
+    const auto countIn = [](const Inventory& acInventory, const Inventory::Entry& acKind)
+    {
+        int32_t count = 0;
+        for (const auto& entry : acInventory.Entries)
+            if (entry.CanBeMerged(acKind))
+                count += entry.Count;
+        return count;
+    };
+
+    TiltedPhoques::Vector<Inventory::Entry> done;
+    const auto alreadyDone = [&done](const Inventory::Entry& acKind)
+    { return std::any_of(done.begin(), done.end(), [&acKind](const Inventory::Entry& acDone) { return acDone.CanBeMerged(acKind); }); };
+
+    int32_t added = 0, removed = 0;
+    for (const Inventory* pSide : {&mine, &acServerInventory})
+    {
+        for (const auto& kind : pSide->Entries)
+        {
+            if (alreadyDone(kind))
+                continue;
+            done.push_back(kind);
+            const int32_t difference = countIn(mine, kind) - countIn(acServerInventory, kind);
+            if (difference == 0)
+                continue;
+
+            RequestInventoryChanges request;
+            request.ServerId = aServerId;
+            request.OwnershipEpoch = aOwnershipEpoch;
+            request.Item = kind;
+            request.Item.Count = difference;
+            request.Drop = false;
+            request.UpdateClients = true;
+            m_transport.Send(request);
+            if (difference > 0)
+                ++added;
+            else
+                ++removed;
+        }
+    }
+
+    spdlog::info("Follower {:X}: the server's copy of her inventory put right ({} kinds of item added there, {} taken away)", apActor->formID, added, removed);
+}
+
 bool CharacterService::RequestOwnership(const uint32_t aFormId, const uint32_t aServerId, const entt::entity aEntity) const noexcept
 {
     Actor* pActor = Cast<Actor>(TESForm::GetById(aFormId));
@@ -934,7 +987,12 @@ void CharacterService::OnAssignCharacter(const AssignCharacterResponse& acMessag
         spdlog::debug("Received local actor, form id: {:X}", pActor->formID);
 
         pActor->GetExtension()->SetRemote(true);
-        ReconcileActorData(cEntity, pActor, acMessage.OwnershipEpoch, actorData, true, true);
+        // This player's follower coming back: her gear here is the truth, and the server's copy is put right
+        // instead (see the remote branch below for what goes wrong otherwise).
+        const bool cMyFollower = pActor->IsPlayerTeammate() && !pActor->IsTemporary();
+        ReconcileActorData(cEntity, pActor, acMessage.OwnershipEpoch, actorData, !cMyFollower, true);
+        if (cMyFollower)
+            SendInventoryDifference(pActor, acMessage.ServerId, acMessage.OwnershipEpoch, acMessage.CurrentInventory);
 
         auto& localAnimationComponent = m_world.emplace_or_replace<LocalAnimationComponent>(cEntity);
 
@@ -1002,11 +1060,35 @@ void CharacterService::OnAssignCharacter(const AssignCharacterResponse& acMessag
         m_world.emplace_or_replace<ReplayedActionsDebugComponent>(cEntity, acMessage.ActionsToReplay);
 #endif
 
-        ReconcileActorData(cEntity, pActor, acMessage.OwnershipEpoch, actorData, true, false);
+        // This player's own follower, owned by another player. It happens on a loading screen: this game sends
+        // nothing for ten seconds, the server gives her to whoever is still near where she was, and this game then
+        // brings her through the door anyway. Twice (2026-10-03 15:09, 2026-10-04 09:33) the two games then pulled
+        // her back and forth -- each "is owned over there" moved her to the other player, out of the loaded cells,
+        // and her follower AI brought her straight back: 85 appearances in 12 s. And the other game, where she is
+        // not anyone's follower, dressed her in the outfit she has in that player's own save and sent it; this game
+        // applied it, so she came out wearing that and Emma's Orcish armour at once. Her gear here is the truth:
+        // nothing of the server's or the other game's is applied to her, she is not moved away, and she is asked
+        // for at once.
+        const bool cMyFollower = pActor->IsPlayerTeammate() && !pActor->IsTemporary();
+
+        ReconcileActorData(cEntity, pActor, acMessage.OwnershipEpoch, actorData, !cMyFollower, false);
         if (pActor->GetExtension()->IsRemotePlayer())
             InventoryService::ApplyHandEquipment(pActor, acMessage.CurrentInventory, true);
 
-        MoveActor(pActor, acMessage.WorldSpaceId, acMessage.CellId, acMessage.Position);
+        if (cMyFollower)
+        {
+            static TiltedPhoques::Map<uint32_t, std::chrono::steady_clock::time_point> s_nextFollowerClaim;
+            const auto now = std::chrono::steady_clock::now();
+            auto& next = s_nextFollowerClaim[pActor->formID];
+            if (now >= next)
+            {
+                next = now + std::chrono::seconds(1);
+                spdlog::info("Follower {:X} (server id {:X}) came back as another player's; kept as she is here and asked for", pActor->formID, acMessage.ServerId);
+                RequestOwnership(pActor->formID, acMessage.ServerId, cEntity);
+            }
+        }
+        else
+            MoveActor(pActor, acMessage.WorldSpaceId, acMessage.CellId, acMessage.Position);
 
         // The owner's leveled pick rides the assignment response for actors we discovered ourselves
         ApplyLeveledNpcPick(pActor, acMessage.LeveledNpcPickId);
@@ -1540,7 +1622,9 @@ void CharacterService::OnOwnershipTransfer(const NotifyOwnershipTransfer& acMess
         m_world.remove<LocalAnimationComponent, LocalComponent>(cEntity);
         m_world.emplace_or_replace<RemoteComponent>(cEntity, acMessage.ServerId, pFormIdComponent->Id, acMessage.OwnershipEpoch);
 
-        ReconcileActorData(cEntity, pActor, acMessage.OwnershipEpoch, acMessage.CurrentActorData, true, true);
+        // This player's own follower coming back: her gear here is the truth (see OnAssignCharacter).
+        const bool cMyFollower = pActor->IsPlayerTeammate() && !pActor->IsTemporary();
+        ReconcileActorData(cEntity, pActor, acMessage.OwnershipEpoch, acMessage.CurrentActorData, !cMyFollower, true);
         ApplyLeveledNpcPick(pActor, acMessage.LeveledNpcPickId);
 
         DeleteRemoteEntityComponents(cEntity);
@@ -1553,6 +1637,8 @@ void CharacterService::OnOwnershipTransfer(const NotifyOwnershipTransfer& acMess
         // LocalComponent is installed only after canonical reconciliation is complete.
         pActor->GetExtension()->SetRemote(false);
         spdlog::info("Gained ownership of actor {:X} at epoch {}", acMessage.ServerId, acMessage.OwnershipEpoch);
+        if (cMyFollower)
+            SendInventoryDifference(pActor, acMessage.ServerId, acMessage.OwnershipEpoch, acMessage.CurrentActorData.InitialInventory);
         return;
     }
 
@@ -1575,11 +1661,28 @@ void CharacterService::OnOwnershipTransfer(const NotifyOwnershipTransfer& acMess
         pRemoteComponent->OwnershipEpoch = acMessage.OwnershipEpoch;
     }
 
-    ReconcileActorData(cEntity, pActor, acMessage.OwnershipEpoch, acMessage.CurrentActorData, pActor && pActor->GetNiNode(), false);
+    // This player's own follower given to somebody else -- the server does that while this game is on a loading
+    // screen and silent (2026-10-04 09:33, 2026-10-03 15:09). Her gear here is kept, and she is asked for back at once
+    // rather than after the twelve seconds of being pulled between the two games (see OnAssignCharacter).
+    const bool cMyFollower = pActor && pActor->IsPlayerTeammate() && !pActor->IsTemporary();
+    ReconcileActorData(cEntity, pActor, acMessage.OwnershipEpoch, acMessage.CurrentActorData, pActor && pActor->GetNiNode() && !cMyFollower, false);
     if (pActor)
         ApplyLeveledNpcPick(pActor, acMessage.LeveledNpcPickId);
 
     spdlog::info("Actor {:X} is now owned by player {:X} at epoch {}", acMessage.ServerId, acMessage.OwnerPlayerId, acMessage.OwnershipEpoch);
+    // Asked for back only while she is here, loaded and near the player. One left behind (the player went on, she
+    // has not caught up yet) cannot be run by this game, which would hand her straight back: in the rig the server
+    // and this game passed her to and fro every four seconds (2026-10-04 10:51). When she does catch up, she arrives
+    // as another player's and is asked for then (OnAssignCharacter).
+    if (cMyFollower)
+    {
+        const auto* pPlayer = PlayerCharacter::Get();
+        const bool cHere = pActor->GetNiNode() && pPlayer && glm::distance(glm::vec3(pActor->position), glm::vec3(pPlayer->position)) < 2048.f;
+        spdlog::info("Follower {:X} (server id {:X}) was given to player {:X}; {}", pActor->formID, acMessage.ServerId, acMessage.OwnerPlayerId,
+                     cHere ? "asked for back" : "not near this player, asked for once she is");
+        if (cHere)
+            RequestOwnership(pActor->formID, acMessage.ServerId, cEntity);
+    }
 }
 
 void CharacterService::OnRemoveCharacter(const NotifyRemoveCharacter& acMessage) const noexcept

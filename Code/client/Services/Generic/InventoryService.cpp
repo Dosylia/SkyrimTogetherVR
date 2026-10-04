@@ -159,6 +159,26 @@ void InventoryService::OnEquipmentChangeEvent(const EquipmentChangeEvent& acEven
     spdlog::info("Sending equipment request, item: {:X}, count: {}, target object: {:X}", acEvent.ItemId, acEvent.Count, acEvent.ActorId);
 }
 
+namespace
+{
+// This player's own follower: her gear is what this game has. Another game, where she is nobody's follower, dresses
+// her in the outfit she has in that player's own save and sends it as if she had been re-equipped (2026-10-03 15:09,
+// 2026-10-04 09:33: Lydia came out wearing that outfit and Emma's Orcish armour at once).
+bool IsMyFollower(const Actor* apActor, const uint32_t aServerId, const char* apWhat) noexcept
+{
+    if (!apActor || !apActor->IsPlayerTeammate() || apActor->IsTemporary())
+        return false;
+    static std::chrono::steady_clock::time_point s_nextNote{};
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= s_nextNote)
+    {
+        s_nextNote = now + std::chrono::seconds(10);
+        spdlog::info("Follower {:X} (server id {:X}): {} from another player not applied; she keeps her gear here", apActor->formID, aServerId, apWhat);
+    }
+    return true;
+}
+} // namespace
+
 void InventoryService::OnNotifyInventoryChanges(const NotifyInventoryChanges& acMessage) noexcept
 {
     if (acMessage.OwnershipEpoch != 0)
@@ -202,6 +222,8 @@ void InventoryService::OnNotifyInventoryChanges(const NotifyInventoryChanges& ac
             spdlog::debug("Discarded an inventory update for actor {:X} because epoch {} is no longer current", acMessage.ServerId, acMessage.OwnershipEpoch);
             return;
         }
+        if (IsMyFollower(pActor, acMessage.ServerId, "an inventory change"))
+            return;
 
         ScopedInventoryOverride _;
 
@@ -242,6 +264,8 @@ void InventoryService::OnNotifyEquipmentChanges(const NotifyEquipmentChanges& ac
 
     Actor* pActor = Cast<Actor>(TESForm::GetById(view.get<FormIdComponent>(*it).Id));
     if (!pActor)
+        return;
+    if (IsMyFollower(pActor, acMessage.ServerId, "an equipment change"))
         return;
 
     // No item: an equipment snapshot (see RunEquipmentSnapshotUpdates).

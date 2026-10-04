@@ -57,6 +57,8 @@ struct CharacterService
     static void DeleteTempActor(const uint32_t aFormId) noexcept;
 
     bool RequestOwnership(uint32_t aFormId, uint32_t aServerId, entt::entity aEntity) const noexcept;
+    // Brings the server's copy of an actor's inventory in line with this game's, one entry at a time.
+    void SendInventoryDifference(Actor* apActor, uint32_t aServerId, uint32_t aOwnershipEpoch, const Inventory& acServerInventory) const noexcept;
 
     void OnActorAdded(const ActorAddedEvent& acEvent) noexcept;
     void OnActorRemoved(const ActorRemovedEvent& acEvent) noexcept;

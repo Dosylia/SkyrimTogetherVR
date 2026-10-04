@@ -161,7 +161,12 @@ void CharacterService::HandOffAbandonedActors() const noexcept
 
     // static: a lambda may use it without capturing it. MSVC lets a plain local constexpr through as well; GCC does not
     // ("'cSilence' is not captured", Seen's Linux build of 2026-10-01).
-    static constexpr auto cSilence = 3s;
+    // Fifteen seconds, not three: a loading screen is silent too, and Emma's take 8 to 10 s. At three seconds every
+    // door handed all her actors to Seen, her follower Lydia included, who then came out through the door with her
+    // anyway -- owned by Seen, pulled back and forth between the two games, and re-dressed by his (2026-10-03 15:09,
+    // 2026-10-04 09:33). Actors really left behind still go to whoever is near them once the owner arrives somewhere
+    // else and they are out of its range.
+    static constexpr auto cSilence = 15s;
     const auto isSilent = [now](const Player* apPlayer)
     { return apPlayer->GetLastMovementAt() != std::chrono::steady_clock::time_point{} && now - apPlayer->GetLastMovementAt() > cSilence; };
 
@@ -892,7 +897,10 @@ bool CharacterService::CanClaimOwnership(Player* apPlayer, const entt::entity aE
     if (characterComponent.IsMount() || characterComponent.IsPlayer())
         return reject("the actor cannot be claimed");
 
-    if (!apPlayer->GetCellComponent().IsInRange(cellIdComponent, characterComponent.IsDragon()))
+    // Not for the leader's claim: its game claims only actors it has loaded, which are next to it, while where the
+    // server has the actor is what the current owner last reported -- for a follower that owner was left behind, the
+    // follower came along, and the claim failed as "out of range" (the rig, 2026-10-04).
+    if (aReason != OwnershipTransferReason::LeaderClaim && !apPlayer->GetCellComponent().IsInRange(cellIdComponent, characterComponent.IsDragon()))
         return reject("the actor is out of range");
 
     // A dead body goes to whoever is moving it, leader or not: only the owner sends a body's bones, so a body carried
@@ -950,6 +958,13 @@ bool CharacterService::TransferOwnership(Player* apPlayer, const entt::entity aE
     // The former owner may already be out of range, so notify it directly as well.
     if (pOldOwner)
         pOldOwner->Send(notify);
+
+    // And the new owner, wherever the server has the actor. A leader's claim is not range-checked -- its game has the
+    // actor beside it while the server still has where the former owner left it -- and an owner never told it owns
+    // the actor never sends for it, so the actor stayed where it was and was handed away again: the follower test in
+    // the rig, every four seconds (2026-10-04 11:00).
+    if (apPlayer != pOldOwner && !apPlayer->GetCellComponent().IsInRange(view.get<CellIdComponent>(*it), view.get<CharacterComponent>(*it).IsDragon()))
+        apPlayer->Send(notify);
 
     spdlog::info(
         "Transferred ownership of actor {:X} from player {:X} to player {:X} for {} (epoch {} to {})",

@@ -279,6 +279,8 @@ struct Actor : TESObjectREFR
     }
 
     bool IsCommandedActor() const noexcept { return flags2 & ActorFlags::IS_COMMANDED_ACTOR; }
+    //! This game's player's follower (Actor::boolBits kPlayerTeammate, bit 26; flags1 is boolBits).
+    bool IsPlayerTeammate() const noexcept { return (flags1 & (1u << 26)) != 0; }
 
 public:
     enum ChangeFlags : uint32_t
