@@ -49,6 +49,27 @@ extern void* RipAllocateN(size_t blockLength);
 #include <filesystem>
 #include <fstream>
 
+// A hook goes in only when its game address resolved. TiltedReverse's FunctionHookManager::Add hands any target to
+// MinHook, a null one included, and MinHook then reads code at address 0 and takes the game down at start -- which an
+// address id missing from the VR table does. Each hook is checked here first: one that did not resolve is named in the
+// log and skipped, and only what it backs does not work. (This check lived in a TiltedReverse commit that never left
+// one machine; the submodule follows upstream, so it lives here, and nothing null reaches the hook manager at all.)
+template <class T, class U> void AddHookIfResolved(T** appSystemFunction, U* apHookFunction, const bool aDelayed, const char* acpName) noexcept
+{
+    if (*appSystemFunction == nullptr)
+    {
+        spdlog::error("Hook {} not installed: its game address did not resolve", acpName);
+        return;
+    }
+
+    TiltedPhoques::FunctionHookManager::GetInstance().Add(appSystemFunction, apHookFunction, aDelayed);
+}
+
+#undef TP_HOOK
+#undef TP_HOOK_IMMEDIATE
+#define TP_HOOK(systemFunction, hookFunction) AddHookIfResolved(systemFunction, hookFunction, true, #hookFunction)
+#define TP_HOOK_IMMEDIATE(systemFunction, hookFunction) AddHookIfResolved(systemFunction, hookFunction, false, #hookFunction)
+
 #include <BuildInfo.h>
 #include <Games/Primitives.h>
 

@@ -68,9 +68,21 @@ stronger evidence; the AE path was left untouched.
   4. Neighbouring ids with matching function sizes.
 
   Then check the target in the disassembly.
-- **Fixed in `Libraries/TiltedReverse` (`FunctionHook.cpp`):** skipping a hook with a null target
-  used to call `MH_DisableHook(nullptr)`, which disables *every* hook, including the launcher's
-  stubs.
+- **A hook whose address did not resolve is skipped, and named in the log** ("Hook X not
+  installed: its game address did not resolve"). The check is `AddHookIfResolved` in
+  `Code/client/TiltedOnlinePCH.h`, which `TP_HOOK` and `TP_HOOK_IMMEDIATE` go through. It
+  matters because MinHook crashes on a null target. Passing it null also had a second trap:
+  `MH_DisableHook(nullptr)` disables *every* hook, including the launcher's stubs.
+  - This check used to be patched into `Libraries/TiltedReverse` itself (commit `d3ac591`,
+    plus an uncommitted destructor guard). That commit was never pushed anywhere: the submodule
+    remote is upstream TiltedPhoques. So the repo's submodule pointer stays on upstream
+    `55ee3f29`, and nothing goes in the submodule.
+  - VR skips three hooks on every start (2026-10-04), none of which loses anything:
+    - `HookMainLoop` and `HookVMDestructor` (ids 36564 and 40412): empty placeholders.
+    - `HookRegisterPapyrusFunction` (id 104788): already installed from the VM's vtable
+      instead (`BSScript.cpp`).
+
+    Without the check, any one of them crashes the game at start.
 
 ## 3. Struct layouts and virtual tables
 
