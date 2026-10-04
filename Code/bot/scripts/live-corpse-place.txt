@@ -1,0 +1,36 @@
+# A corpse lies where its owner's corpse lies.
+#
+#   python Tools\VR\live-check.py live-corpse-place
+#
+# Each game drops a dead body with its own ragdoll, so the two can land apart ("death position not synced", Seen,
+# 2026-10-03 20:50). The receiving game moves its corpse to where the owner has it when the two are more than 64
+# units apart (InterpolationSystem). The bot kills its bear and then reports it 300 units away, the way an owner's
+# corpse that fell elsewhere would be reported; the game's bear must be drawn there.
+log live corpse place
+waitfor connected 45
+collect spawn health death ownership
+expect known me
+waitfor known other 40
+wait 5
+
+log -- a bear of this bot's, killed
+npc temp 23A8A
+waitfor owned == 1 20
+wait 8
+npclife dead 0
+wait 8
+log CHECK npc dead
+log SHOT before of npc
+wait 4
+
+log -- its owner's corpse lies 300 units further north
+npcmove 0 300 0
+wait 3
+npcmove 0 0 0
+wait 6
+log SHOT after of npc
+wait 4
+log CHECK game alive
+wait 3
+log done
+stop

@@ -1,0 +1,38 @@
+# The copy's hands are where the owner's are.
+#
+#   python Tools\VR\live-check.py live-hands
+#
+# Measured on 2026-10-03, both screens: a copy's hands sat a median 27-32 units (about 40 cm) from where their owner
+# held them, mostly too far forward -- hands that touched in life were most of a metre apart on screen, and so was
+# whatever they held or dragged. The pose is joint rotations, and the same rotations on another body put the hands
+# elsewhere. Since 2026-10-04 the owner's hand positions travel with every pose and the copy's arms are bent to put
+# the hands there (VRBodySync::ReachHands).
+#
+# The bot records the game player's own stream (movement and VR pose) and plays it back as its own character, with
+# the hands put at the waist (the rig's headset has no controllers, so the recording has them on the floor, beyond
+# any arm's reach); the game poses the bot's copy and logs, every 5 s, where the hands should be against where they are.
+log live hands
+waitfor connected 45
+expect known me
+waitfor known other 40
+wait 5
+
+# A copy outside the headset's view is not posed at all (and not measured), and the rig's headset does not turn with
+# the player ("out of view" in every frame, 2026-10-04). Anything within 100 units of the headset counts as in view,
+# so the player is put 50 units from the copy.
+log DO papyrus ObjectReference MoveTo 14 copy f:50 f:0 f:0 b:false
+wait 3
+log -- recording the player's stream for 12 s
+capture other 12
+wait 1
+log -- this bot plays it back as its own character, hands at the waist the way real logs have them
+handtargets -15 15 70 15 20 80
+replay me 3
+wait 3
+log CHECK hands within 6
+log SHOT hands of copy
+wait 4
+log CHECK game alive
+wait 3
+log done
+stop

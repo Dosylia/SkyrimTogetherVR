@@ -15,6 +15,8 @@ Checks:
     drop exists | drop gone | drop mark | drop moved <dx> <dy> <dz>       the item the game placed for the bot's drop
     player alive                                                          the local player is not dead
     player has <hex>                                                      the local player carries that item
+    hands within <units>                                                  copies' hands are where their owners have
+                                                                          them (median of the game's measurements)
     player in <worldspace>                                                outdoors in that worldspace (Tamriel), not
                                                                           in an interior
     ref <hex> near <x> <y> <z> <units>                                    a reference of the game's own is that close
@@ -83,7 +85,7 @@ CAPTURES = 'E:/FUS/overwrite/SKSE/Plugins/devbench/captures'   # where MO2 puts 
 # Lydia" is then two paces that unload nothing (found 2026-10-02, a session that passed for that reason alone).
 ALL = ['live-copy', 'live-npc', 'live-dropmove', 'live-look', 'live-walk', 'live-creatures', 'live-npc-away', 'live-away-seeker',
        'live-temp-remove', 'live-temp-reuse', 'live-copy-abandon', 'live-temp-reconnect', 'live-crime', 'live-netch',
-       'live-sender', 'live-game-drops', 'live-equip', 'live-factions', 'live-menu-hold', 'live-levelled', 'live-whiterun', 'live-time', 'live-hit-npc', 'live-world-object', 'live-door-echo', 'live-death', 'live-load', 'live-load-dead']
+       'live-sender', 'live-game-drops', 'live-equip', 'live-factions', 'live-menu-hold', 'live-levelled', 'live-whiterun', 'live-time', 'live-hit-npc', 'live-world-object', 'live-door-echo', 'live-body-owner', 'live-hands', 'live-death', 'live-load', 'live-load-dead']
 # Not in the list, run by name: live-seeker-copy-remote and live-seeker-copy-local (the two halves that showed the
 # crash of live-copy-abandon needs a copy and its original together).
 
@@ -331,6 +333,21 @@ class Run:
                 # suite, 2026-10-03) it did not happen to reuse one. The run then tests nothing, and says so.
                 ok = True
                 detail = ('reused: %s' % ', '.join(sorted(set(reused)))) if reused else 'SKIPPED: none of the %d deleted ids came back, so this run tests nothing' % len(deleted)
+            elif who == 'hands' and what == 'within':
+                # "hands within <units>": the copies' hands against the owners' own numbers, from the game's
+                # "VRBodySync: actor X hands -- owner L(..) R(..); copy L(..) R(..)" lines since the script began
+                # (one every 5 s per copy). Passes when the median distance, both hands, is within that many units.
+                rx = re.compile(r'hands -- owner L\(([-\d.]+), ([-\d.]+), ([-\d.]+)\) R\(([-\d.]+), ([-\d.]+), ([-\d.]+)\); copy L\(([-\d.]+), ([-\d.]+), ([-\d.]+)\) R\(([-\d.]+), ([-\d.]+), ([-\d.]+)\)')
+                gaps = []
+                for l in session_lines()[self.log_start:]:
+                    m = rx.search(l)
+                    if m:
+                        v = [float(x) for x in m.groups()]
+                        gaps += [math.dist(v[0:3], v[6:9]), math.dist(v[3:6], v[9:12])]
+                gaps.sort()
+                median = gaps[len(gaps) // 2] if gaps else None
+                ok = median is not None and median <= float(words[2])
+                detail = ('%d hand(s) measured, median %.1f units, worst %.1f' % (len(gaps), median, gaps[-1])) if gaps else 'no hand measurement logged'
             elif who == 'player' and what == 'has':
                 # "player has <hex>": the local player carries at least one of that item.
                 count = papyrus('ObjectReference', 'GetItemCount', '14', [{'form': '0x' + words[2]}])
@@ -521,7 +538,7 @@ class Run:
             m = re.search(r'NPC registered as actor ([0-9A-Fa-f]+)', line)
             if m:
                 self.npc_id = m.group(1)
-            m = re.search(r'\[script\] (CHECK .*|DO console .*|DO key .*|DO load last|DO server restart.*|DO sleep \d+|DO papyrus .*|DO pickup own|DO menu .*|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
+            m = re.search(r'\[script\] (CHECK .*|DO face .*|DO console .*|DO key .*|DO load last|DO server restart.*|DO sleep \d+|DO papyrus .*|DO pickup own|DO menu .*|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
             if m:
                 text = m.group(1)
                 if text.startswith('CHECK '):
@@ -572,6 +589,22 @@ class Run:
                     print('   (papyrus %s.%s on %s: %s)' % (words[2], words[3], words[4], result), flush=True)
                     if isinstance(result, str) and result.startswith('ERR'):
                         self.results.append((False, text.strip(), result))
+                elif text.strip() in ('DO face copy', 'DO face npc'):
+                    # "DO face copy|npc": turn the player towards that actor. A copy outside the headset's view is
+                    # not posed (VRBodySync), and the rig's headset looks wherever the player faces.
+                    who = text.split()[2]
+                    form, _ = self.subject(who)
+                    try:
+                        mine = position('14')
+                        theirs = position(form) if form else None
+                        if not mine or not theirs:
+                            raise RuntimeError('no position for the player or the %s' % who)
+                        angle = math.degrees(math.atan2(theirs[0] - mine[0], theirs[1] - mine[1])) % 360.0
+                        tool('console', {'action': 'exec', 'command': 'player.setangle z %.1f' % angle})
+                        print('   (player turned to %.0f degrees, towards %s %s)' % (angle, who, form), flush=True)
+                    except Exception as e:
+                        print('   FAIL  face %s: %s' % (who, e), flush=True)
+                        self.results.append((False, text.strip(), str(e)))
                 elif text.startswith('DO sleep '):
                     time.sleep(int(text.split()[2]))
                 elif text.startswith('DO menu '):

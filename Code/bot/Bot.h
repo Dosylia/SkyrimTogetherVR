@@ -294,6 +294,10 @@ private:
     int m_replayRound{};
     bool m_replaying{false};
     glm::vec3 m_replayBase{};
+    //! `handtargets`: hand positions (root space, left then right) written into every replayed VR pose instead of the
+    //! recorded ones -- the rig's headset has no real controllers, so a recorded pose has the hands on the floor.
+    bool m_hasHandTargets{false};
+    glm::vec3 m_handTargets[2]{};
     //! Where the NPC this bot registered stands, which is where a replay for it starts from.
     glm::vec3 m_npcPosition{};
     //! The base form of the last character captured, as the server names it: what "npc captured" registers a

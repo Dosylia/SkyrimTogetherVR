@@ -223,14 +223,27 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
                 std::copy(std::begin(pAfter->VRPoseData.HipOffset), std::end(pAfter->VRPoseData.HipOffset), std::begin(vrPose.HipOffset));
             }
 
-            // The hand measurement: newest wins, no blending. It is the owner's own reading at a moment in time
-            // and averaging two of them would make it agree with nothing.
-            const VRPose& handSource = pAfter->VRPoseData.HasHandCheck ? pAfter->VRPoseData : pBefore->VRPoseData;
-            if (handSource.HasHandCheck)
+            // The hands: the copy's are put where these say (VRBodySync::ReachHands), so they are blended like the
+            // bones when both ends have them; otherwise the newest wins (a sender from before 2026-10-04 sends them
+            // once a second only).
+            if (pBefore->VRPoseData.HasHandCheck && pAfter->VRPoseData.HasHandCheck)
             {
                 vrPose.HasHandCheck = true;
-                std::copy(std::begin(handSource.LeftHandOffset), std::end(handSource.LeftHandOffset), std::begin(vrPose.LeftHandOffset));
-                std::copy(std::begin(handSource.RightHandOffset), std::end(handSource.RightHandOffset), std::begin(vrPose.RightHandOffset));
+                for (size_t i = 0; i < 3; ++i)
+                {
+                    vrPose.LeftHandOffset[i] = TiltedPhoques::Lerp(pBefore->VRPoseData.LeftHandOffset[i], pAfter->VRPoseData.LeftHandOffset[i], poseDelta);
+                    vrPose.RightHandOffset[i] = TiltedPhoques::Lerp(pBefore->VRPoseData.RightHandOffset[i], pAfter->VRPoseData.RightHandOffset[i], poseDelta);
+                }
+            }
+            else
+            {
+                const VRPose& handSource = pAfter->VRPoseData.HasHandCheck ? pAfter->VRPoseData : pBefore->VRPoseData;
+                if (handSource.HasHandCheck)
+                {
+                    vrPose.HasHandCheck = true;
+                    std::copy(std::begin(handSource.LeftHandOffset), std::end(handSource.LeftHandOffset), std::begin(vrPose.LeftHandOffset));
+                    std::copy(std::begin(handSource.RightHandOffset), std::end(handSource.RightHandOffset), std::begin(vrPose.RightHandOffset));
+                }
             }
         }
     }
@@ -251,10 +264,27 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
 
     if (apActor->actorState.IsDead())
     {
+        // KNOWN NOT TO WORK (2026-10-04): ForcePosition moves the reference, but a corpse is drawn from its ragdoll,
+        // which stays where this game dropped it -- the bot reported its dead bear 300 units away and the game's
+        // bear was not there (live-corpse-place). MoveTo did not move it either, nor did papyrus MoveTo/SetPosition
+        // or the console's moveto on a corpse in the rig. This is "the death position is not synced" (Seen,
+        // 2026-10-03 20:50); open in VR_TODO.md. The gap is logged, once every 30 s per body, so play sessions say how
+        // far apart the two corpses really are.
         constexpr float cCorpseSnapDistance = 64.f;
         const glm::vec3 current{apActor->position.x, apActor->position.y, apActor->position.z};
-        if (glm::distance(current, position) > cCorpseSnapDistance)
+        const float cApart = glm::distance(current, position);
+        if (cApart > cCorpseSnapDistance)
+        {
             apActor->ForcePosition(position);
+            static TiltedPhoques::Map<uint32_t, std::chrono::steady_clock::time_point> s_nextCorpseNote;
+            const auto now = std::chrono::steady_clock::now();
+            auto& next = s_nextCorpseNote[apActor->formID];
+            if (now >= next)
+            {
+                next = now + std::chrono::seconds(30);
+                spdlog::info("CorpseDiag: {:X} lies {:.0f} units from where its owner's corpse is", apActor->formID, cApart);
+            }
+        }
         return;
     }
 

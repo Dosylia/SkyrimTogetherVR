@@ -1414,7 +1414,7 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
             return false;
 
         m_capturing = false;
-        size_t withVariables = 0, actions = 0, withPose = 0;
+        size_t withVariables = 0, actions = 0, withPose = 0, withHands = 0, withBones = 0;
         float travelled = 0.f;
         for (size_t i = 0; i < m_capture.size(); ++i)
         {
@@ -1425,11 +1425,15 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
             actions += update.ActionEvents.size();
             if (update.UpdatedVRPose != VRPose{})
                 ++withPose;
+            if (update.UpdatedVRPose.HasHandCheck)
+                ++withHands;
+            if (update.UpdatedVRPose.HasData && !update.UpdatedVRPose.NoBones)
+                ++withBones;
             if (i > 0)
                 travelled += glm::distance(FromNet(update.UpdatedMovement.Position), FromNet(m_capture[i - 1].Update.UpdatedMovement.Position));
         }
-        spdlog::info("Captured {} updates of {:X}: {} with animation variables, {} actions, {} with a VR pose, {:.0f} units travelled", m_capture.size(), m_captureId, withVariables,
-                     actions, withPose, travelled);
+        spdlog::info("Captured {} updates of {:X}: {} with animation variables, {} actions, {} with a VR pose ({} with bones, {} with hand positions), {:.0f} units travelled",
+                     m_capture.size(), m_captureId, withVariables, actions, withPose, withBones, withHands, travelled);
 
         // Which actions, by name. One actor repeating one event hundreds of times is what fills a stream and starves
         // everything behind it (the "Unequip loop" of 2026-09-24); a Netch sent 1521 actions in twelve seconds on
@@ -1505,6 +1509,15 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
             message.Tick = GetClock().GetCurrentTick();
             ReferenceUpdate& update = message.Updates[m_replayTarget];
             update = captured.Update;
+            if (m_hasHandTargets && update.UpdatedVRPose.HasData)
+            {
+                update.UpdatedVRPose.HasHandCheck = true;
+                for (int i = 0; i < 3; ++i)
+                {
+                    update.UpdatedVRPose.LeftHandOffset[i] = m_handTargets[0][i];
+                    update.UpdatedVRPose.RightHandOffset[i] = m_handTargets[1][i];
+                }
+            }
             const glm::vec3 place = m_replayBase + (FromNet(captured.Update.UpdatedMovement.Position) - origin);
             update.UpdatedMovement.Position = ToNet(place);
             update.UpdatedMovement.CellId = m_cell;
@@ -1757,6 +1770,25 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         request.Changes[pNpc->ServerId].ExtraFactions.push_back(faction);
         SendMsg(request);
         spdlog::info("[script] NPC {:X} put in faction {:X} at rank {}", pNpc->ServerId, factionId, faction.Rank);
+        return true;
+    }
+
+    // "handtargets <lx> <ly> <lz> <rx> <ry> <rz>": where a replayed VR pose says the hands are, relative to the body's
+    // root (x right, y forward, z up), instead of where the recording had them. For the hands test: the rig's headset
+    // has no controllers, so a pose recorded from it has both hands on the floor, out of any arm's reach.
+    if (name == "handtargets")
+    {
+        float v[6]{};
+        for (int i = 0; i < 6; ++i)
+            if (args.size() < 6 || !ParseFloat(args[i], v[i]))
+            {
+                spdlog::error("[script] handtargets needs six numbers: left x y z, right x y z");
+                return true;
+            }
+        m_handTargets[0] = glm::vec3(v[0], v[1], v[2]);
+        m_handTargets[1] = glm::vec3(v[3], v[4], v[5]);
+        m_hasHandTargets = true;
+        spdlog::info("[script] replayed hands at L({}, {}, {}) R({}, {}, {})", v[0], v[1], v[2], v[3], v[4], v[5]);
         return true;
     }
 
