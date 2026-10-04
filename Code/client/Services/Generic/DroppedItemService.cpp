@@ -163,8 +163,8 @@ void DroppedItemService::Map(const uint32_t aId, const uint32_t aRefFormId) noex
     m_refById[aId] = aRefFormId;
     m_idByRef[aRefFormId] = aId;
 
-    // Just dropped or just placed, it is still falling: each side lets its own item settle, and only movement after
-    // that -- somebody picking it up in a hand, kicking it -- is sent.
+    // A placed item or an old item adopted from a save needs time to settle. A new drop's owner clears this delay
+    // once the server returns its id, so its initial flight can be sent too.
     Motion& motion = m_motion[aId];
     motion = Motion{};
     if (TESObjectREFR* pRef = Cast<TESObjectREFR>(TESForm::GetById(aRefFormId)))
@@ -197,7 +197,7 @@ bool DroppedItemService::SendAdd(TESObjectREFR* apRef, const Inventory::Entry& a
         modSystem.GetServerModId(pWorldSpace->formID, request.WorldSpaceId);
 
     m_transport.Send(request);
-    m_pending.push_back(Pending{apRef->formID, acItem.BaseId});
+    m_pending.push_back(Pending{apRef->formID, acItem.BaseId, aAnnouncement});
     return true;
 }
 
@@ -297,8 +297,16 @@ void DroppedItemService::OnNotifyDroppedItem(const NotifyDroppedItem& acMessage)
         if (it->BaseId != acMessage.Item.BaseId)
             continue;
         const uint32_t cRefFormId = it->RefFormId;
+        const bool cFreshDrop = !it->Announcement;
         m_pending.erase(it);
         Map(acMessage.Id, cRefFormId);
+        if (cFreshDrop)
+        {
+            Motion& motion = m_motion[acMessage.Id];
+            const auto now = std::chrono::steady_clock::now();
+            motion.QuietUntil = now;
+            motion.FreshDropUntil = now + std::chrono::seconds(2);
+        }
         spdlog::info("DroppedItem: {} is our own {:X}", acMessage.Id, cRefFormId);
         return;
     }
@@ -508,7 +516,8 @@ void DroppedItemService::OnUpdate(const UpdateEvent&) noexcept
         if (!motion.Loaded)
         {
             motion.Loaded = true;
-            motion.QuietUntil = std::max(motion.QuietUntil, now + std::chrono::seconds(2));
+            if (now >= motion.FreshDropUntil)
+                motion.QuietUntil = std::max(motion.QuietUntil, now + std::chrono::seconds(2));
         }
 
         // Held on the other side's word and nothing heard for two seconds: put down over there, or the carrier went

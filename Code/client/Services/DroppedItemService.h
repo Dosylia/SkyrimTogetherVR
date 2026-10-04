@@ -75,6 +75,7 @@ private:
     {
         uint32_t RefFormId{};
         GameId BaseId{};
+        bool Announcement{};
     };
     std::vector<Pending> m_pending;
 
@@ -101,6 +102,9 @@ private:
         bool RemoteAtRest{};
         //! Its 3D was there on the last pass. A cell loading settles every item in it, which is not a move.
         bool Loaded{};
+        //! A fresh local drop can start falling before its 3D is first observed. Loads during its first two
+        //! seconds are part of the throw, not a cell reload that needs the normal settling grace period.
+        std::chrono::steady_clock::time_point FreshDropUntil{};
     };
     std::unordered_map<uint32_t, Motion> m_motion;
 

@@ -3210,10 +3210,17 @@ void CharacterService::RunWeaponTouch() noexcept {}
 
 void CharacterService::RunRemoteUpdates() noexcept
 {
-    // Delay by 300ms to let the interpolation system accumulate interpolation points
-    const auto tick = m_transport.GetClock().GetCurrentTick() - 300;
-    // VR poses use a shorter delay: hands lagging behind are much more noticeable than movement.
-    const auto poseTick = m_transport.GetClock().GetCurrentTick() - 100;
+    // The same sample drives the reference/controller and its visible skeleton. The previous 300 ms position
+    // paired with a 100 ms pose made fast-moving players' visible bodies diverge from their actor references. The session log
+    // showed at least 95 ms of buffered headroom at a 300 ms delay during ordinary play; 225 ms leaves room for
+    // that jitter while reducing the displacement in combat.
+#ifdef SKYRIMVR
+    constexpr uint64_t cPlaybackDelay = 225;
+#else
+    constexpr uint64_t cPlaybackDelay = 300;
+#endif
+    const uint64_t nowTick = m_transport.GetClock().GetCurrentTick();
+    const uint64_t tick = nowTick > cPlaybackDelay ? nowTick - cPlaybackDelay : 0;
 
     // Interpolation has to keep running even if the actor is not in view, otherwise we will never know if we need to spawn it
     auto interpolatedEntities = m_world.view<RemoteComponent, InterpolationComponent>();
@@ -3230,7 +3237,7 @@ void CharacterService::RunRemoteUpdates() noexcept
             pActor = Cast<Actor>(pForm);
         }
 
-        InterpolationSystem::Update(pActor, interpolationComponent, tick, poseTick);
+        InterpolationSystem::Update(pActor, interpolationComponent, tick);
 
 #ifdef SKYRIMVR
         // Cheap: it returns at once unless this is a dead body within arm's reach. A body somebody else owns that is

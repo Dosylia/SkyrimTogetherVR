@@ -72,13 +72,17 @@ import io, json, math, os, re, shutil, subprocess, sys, time, urllib.request
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 RELEASE = os.path.join(ROOT, 'build', 'windows', 'x64', 'release')
-CLIENT_LOG = 'E:/FUS/tools/Skyrim Together VR/logs/tp_client.log'
+FUS_ROOT = os.environ.get('SKYRIM_FUS_ROOT') or next(
+    (path for path in ('C:/FUS', 'E:/FUS') if os.path.isfile(os.path.join(path, 'ModOrganizer.exe'))),
+    'E:/FUS',
+)
+CLIENT_LOG = os.path.join(FUS_ROOT, 'tools', 'Skyrim Together VR', 'logs', 'tp_client.log')
 DEVBENCH = 'http://127.0.0.1:8921/api/tool/'
 HEALTH_TOLERANCE = 1.5
 PLAYER_TOLERANCE = 2.0
 DROP_TOLERANCE = 4.0    # units; a position travels packed to about one unit
 SHOTS = os.path.join(RELEASE, 'logs', 'shots')
-CAPTURES = 'E:/FUS/overwrite/SKSE/Plugins/devbench/captures'   # where MO2 puts what DevBench writes under Data
+CAPTURES = os.path.join(FUS_ROOT, 'overwrite', 'SKSE', 'Plugins', 'devbench', 'captures')   # where MO2 puts what DevBench writes under Data
 
 # Order matters: the "away" scripts travel by cell (`cow Tamriel 34 8` and back to 34 -9, Mistwatch) and leave the
 # player at the centre of the Mistwatch cell. Not "go to Lydia": she follows the player back, and the next "go to

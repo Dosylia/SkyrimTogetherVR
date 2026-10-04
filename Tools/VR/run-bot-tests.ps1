@@ -81,7 +81,7 @@ $botVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim
 $startedServer = $false
 if (-not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
     Write-Host "Starting a server" -ForegroundColor Cyan
-    Start-Process -FilePath $serverExe -WorkingDirectory $release -WindowStyle Minimized | Out-Null
+    Start-Process -FilePath $serverExe -WorkingDirectory $release -WindowStyle Hidden | Out-Null
     $startedServer = $true
     # Wait for the port rather than for a guessed number of seconds: the server is usually up in well under a
     # second, and on a slow machine five would not have been enough anyway.
@@ -116,7 +116,8 @@ if (-not (Test-Path $hostScript)) {
 # The watching half runs minimised, so without this its output goes nowhere -- and in a two-sided test that is the
 # half doing the checking. Every failure investigation starts by reading this file.
 $hostLog = Join-Path $release 'logs\watcher.log'
-$hostBot = Start-Process -FilePath $bot -WorkingDirectory $release -PassThru -WindowStyle Minimized `
+$hostOwnLog = Join-Path $release "logs\bot-$hostName.log"
+$hostBot = Start-Process -FilePath $bot -WorkingDirectory $release -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput $hostLog `
     -ArgumentList @("scripts\$hostScriptName", '--server', $Server, '--name', $hostName, '--standalone', '--host-timeout', '2', '--x', '0', '--y', '0', '--max-runtime', $MaxRuntime)
 # Touching the handle is what makes ExitCode readable later. Without it the property comes back empty and a passing
@@ -131,7 +132,9 @@ $hostReady = $false
 $deadline = (Get-Date).AddSeconds(60)
 while ((Get-Date) -lt $deadline) {
     if ($hostBot.HasExited) { break }
-    if ((Test-Path $hostLog) -and (Select-String -Path $hostLog -Pattern 'In the world: our character is' -Quiet -ErrorAction SilentlyContinue)) {
+    if ((Test-Path -LiteralPath $hostOwnLog) -and
+        (Get-Item -LiteralPath $hostOwnLog).LastWriteTime -ge $hostBot.StartTime -and
+        (Get-Content -LiteralPath $hostOwnLog -Tail 30 | Select-String -Pattern 'In the world: our character is' -Quiet)) {
         $hostReady = $true
         break
     }

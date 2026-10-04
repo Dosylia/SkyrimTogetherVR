@@ -76,7 +76,7 @@ if (Test-Path $serverLogPath) { $logBeforeStart = @(Get-Content $serverLogPath).
 
 $startedServer = $false
 if (-not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
-    Start-Process -FilePath $serverExe -WorkingDirectory $release -WindowStyle Minimized | Out-Null
+    Start-Process -FilePath $serverExe -WorkingDirectory $release -WindowStyle Hidden | Out-Null
     $startedServer = $true
     $deadline = (Get-Date).AddSeconds(30)
     while ((Get-Date) -lt $deadline -and -not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
@@ -140,7 +140,7 @@ for ($i = 0; $i -lt $batch.Count; $i++) {
     }
 
     $watcherLog = Join-Path $release "logs\parallel-$pair-watcher.log"
-    $watcher = Start-Process -FilePath $bot -WorkingDirectory $release -PassThru -WindowStyle Minimized -RedirectStandardOutput $watcherLog `
+    $watcher = Start-Process -FilePath $bot -WorkingDirectory $release -PassThru -WindowStyle Hidden -RedirectStandardOutput $watcherLog `
         -ArgumentList @("scripts\$pair-watcher.txt", '--server', $Server, '--name', "W-$pair", '--standalone', '--host-timeout', '2',
                         '--worldspace', $ws, '--x', '0', '--y', '0', '--max-runtime', $MaxRuntime)
     $null = $watcher.Handle
@@ -154,7 +154,7 @@ for ($i = 0; $i -lt $batch.Count; $i++) {
     }
 
     $actorLog = Join-Path $release "logs\parallel-$pair-actor.log"
-    $actor = Start-Process -FilePath $bot -WorkingDirectory $release -PassThru -WindowStyle Minimized -RedirectStandardOutput $actorLog `
+    $actor = Start-Process -FilePath $bot -WorkingDirectory $release -PassThru -WindowStyle Hidden -RedirectStandardOutput $actorLog `
         -ArgumentList @("scripts\$pair-actor.txt", '--server', $Server, '--name', "A-$pair", '--worldspace', $ws,
                         '--x', '200', '--y', '0', '--max-runtime', $MaxRuntime)
     $null = $actor.Handle

@@ -16,7 +16,7 @@
 #include <Games/Skyrim/VRBodySync.h>
 #endif
 
-void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterpolationComponent, const uint64_t aTick, const uint64_t aPoseTick) noexcept
+void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterpolationComponent, const uint64_t aTick) noexcept
 {
     auto& movements = aInterpolationComponent.TimePoints;
 
@@ -107,26 +107,20 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     }
 #endif
 
-    // Calculate delta movement since last update
-    auto delta = 0.0001f;
-    const auto tickDelta = static_cast<float>(second.Tick - first.Tick);
-    if (tickDelta > 0.f)
-    {
-        delta = 1.f / tickDelta * static_cast<float>(aTick - first.Tick);
-    }
-
-    // Clamped at both ends. The lower clamp is belt and braces rather than a fix: `aTick - first.Tick` is
-    // unsigned, so a playback tick behind the oldest point wraps to an enormous positive value and the upper
-    // clamp already catches it. (Written on 2026-09-26 as though it fixed the displaced actors below. It does
-    // not -- Lerp with delta in [0, 1] can only ever put an actor *between* the two points it is given.)
-    delta = TiltedPhoques::Max(0.f, TiltedPhoques::Min(delta, 1.0f));
+    // Do not subtract unsigned ticks until their order is known. A clock correction or a newly trimmed buffer
+    // can put playback before its first point; that should hold the first position, not wrap to the second.
+    float delta = 0.f;
+    if (aTick >= second.Tick)
+        delta = 1.f;
+    else if (aTick > first.Tick && second.Tick > first.Tick)
+        delta = static_cast<float>(aTick - first.Tick) / static_cast<float>(second.Tick - first.Tick);
 
     const NiPoint3 position{TiltedPhoques::Lerp(first.Position, second.Position, delta)};
 
     aInterpolationComponent.Position = position;
 
-    // The VR pose is played back with a shorter delay (aPoseTick) than movement: hands 300 ms behind felt
-    // out of sync.
+    // The pose and actor position must come from the same instant. Different playback ticks put the visible
+    // body and hands ahead of the actor/controller that combat collides with.
     auto& vrPose = aInterpolationComponent.InterpolatedVRPose;
     vrPose.HasData = false;
     vrPose.NoBones = false;
@@ -135,14 +129,13 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
     vrPose.HasScale = false;
     vrPose.HasRootPosition = false;
     {
-        const uint64_t poseTick = aPoseTick ? aPoseTick : aTick;
         const InterpolationComponent::TimePoint* pBefore = nullptr;
         const InterpolationComponent::TimePoint* pAfter = nullptr;
         for (const auto& point : movements)
         {
             if (!point.VRPoseData.HasData)
                 continue;
-            if (point.Tick <= poseTick)
+            if (point.Tick <= aTick)
                 pBefore = &point;
             else
             {
@@ -158,8 +151,12 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
         if (pBefore && pAfter)
         {
             float poseDelta = 1.f;
-            if (pAfter->Tick > pBefore->Tick)
-                poseDelta = TiltedPhoques::Min(static_cast<float>(poseTick - TiltedPhoques::Min(poseTick, pBefore->Tick)) / static_cast<float>(pAfter->Tick - pBefore->Tick), 1.0f);
+            if (pAfter->Tick > pBefore->Tick && aTick < pAfter->Tick)
+            {
+                poseDelta = 0.f;
+                if (aTick > pBefore->Tick)
+                    poseDelta = static_cast<float>(static_cast<double>(aTick - pBefore->Tick) / static_cast<double>(pAfter->Tick - pBefore->Tick));
+            }
 
             vrPose.HasData = true;
             // A body with no readable skeleton (VRPose::NoBones): there is nothing to blend and nothing to pose,
@@ -472,19 +469,28 @@ void InterpolationSystem::AddPoint(InterpolationComponent& aInterpolationCompone
     auto itor = std::begin(aInterpolationComponent.TimePoints);
     const auto end = std::cend(aInterpolationComponent.TimePoints);
 
+    bool inserted = false;
     while (itor != end)
     {
         if (itor->Tick > acPoint.Tick)
         {
             aInterpolationComponent.TimePoints.insert(itor, acPoint);
-
-            return;
+            inserted = true;
+            break;
         }
 
         ++itor;
     }
 
-    aInterpolationComponent.TimePoints.push_back(acPoint);
+    if (!inserted)
+        aInterpolationComponent.TimePoints.push_back(acPoint);
+
+    // Normally Update consumes old points each frame. If the playback clock stalls or the sender's clock runs
+    // ahead, points can otherwise grow without bound for every remote actor. Keep a few seconds of the newest
+    // samples; Update can hold the oldest retained point until the clock catches up.
+    constexpr size_t cMaxBufferedPoints = 64;
+    while (aInterpolationComponent.TimePoints.size() > cMaxBufferedPoints)
+        aInterpolationComponent.TimePoints.pop_front();
 }
 
 InterpolationComponent& InterpolationSystem::Setup(World& aWorld, const entt::entity aEntity) noexcept

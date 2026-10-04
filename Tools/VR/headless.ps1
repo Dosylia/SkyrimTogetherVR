@@ -28,10 +28,27 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$settingsPath = 'C:\Program Files (x86)\Steam\config\steamvr.vrsettings'
-$mo2 = 'E:\FUS\ModOrganizer.exe'
+$steamRoot = $env:SKYRIM_STEAM_ROOT
+if (-not $steamRoot) {
+    $steamRoot = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -ErrorAction SilentlyContinue).InstallPath
+}
+if (-not $steamRoot) { $steamRoot = 'C:\Program Files (x86)\Steam' }
+$settingsPath = Join-Path $steamRoot 'config\steamvr.vrsettings'
+$fusRoot = $env:SKYRIM_FUS_ROOT
+if (-not $fusRoot) {
+    $fusRoot = @('C:\FUS', 'E:\FUS') | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'ModOrganizer.exe') } | Select-Object -First 1
+}
+if (-not $fusRoot) { throw 'FUS installation not found. Set SKYRIM_FUS_ROOT to its directory.' }
+$mo2 = Join-Path $fusRoot 'ModOrganizer.exe'
+$mo2Ini = Join-Path $fusRoot 'ModOrganizer.ini'
+$mo2Shortcut = if ((Test-Path -LiteralPath $mo2Ini) -and
+    (Select-String -LiteralPath $mo2Ini -Pattern '^\d+\\title=PLAY Skyrim Together VR$' -Quiet)) {
+    'PLAY Skyrim Together VR'
+} else {
+    'SkyrimTogetherVR'
+}
 $release = (Resolve-Path (Join-Path $PSScriptRoot '..\..\build\windows\x64\release')).Path
-$clientLog = 'E:\FUS\tools\Skyrim Together VR\logs\tp_client.log'
+$clientLog = Join-Path $fusRoot 'tools\Skyrim Together VR\logs\tp_client.log'
 $stateFile = Join-Path $env:TEMP 'st-headless-state.json'
 # The game plays in Emma's own MO2 profile, so whatever it saves lands among her saves. On 2026-10-03 it did: a test
 # autosaved at 16:01 (going through a door), that was then the newest save, and her "Continue" that evening loaded it --
@@ -39,7 +56,7 @@ $stateFile = Join-Path $env:TEMP 'st-headless-state.json'
 # So the saves folder is copied aside before the game starts and put back exactly as it was once the game has gone:
 # whatever the test game wrote or changed is moved to saves-made-by-rig\<time>, whatever it overwrote comes back from
 # the copy. A run that died before putting it back is put right by the next "up" or "down".
-$profileDir = 'E:\FUS\profiles\FUS RO DAH (Basic + Appearance + Gameplay)'
+$profileDir = Join-Path $fusRoot 'profiles\FUS RO DAH (Basic + Appearance + Gameplay)'
 $savesDir = Join-Path $profileDir 'saves'
 $savesCopy = Join-Path $profileDir 'saves-before-rig'
 $savesCopyDone = Join-Path $profileDir 'saves-before-rig.complete'
@@ -215,18 +232,18 @@ try {
     Wait-Until { Test-Running '^vrserver$' } 90 'SteamVR to start'
     Start-Sleep -Seconds 12
 
-    $vrLog = 'C:\Program Files (x86)\Steam\logs\vrserver.txt'
+    $vrLog = Join-Path $steamRoot 'logs\vrserver.txt'
     $loaded = Select-String -Path $vrLog -Pattern "Driver 'null' finished adding tracked device with serial number 'CTRL2Serial'" -Quiet
     if (-not $loaded) { throw "SteamVR is up, but the null driver did not add its controllers (see $vrLog). Is the built driver_null.dll still in place?" }
 
     if (-not $NoConnect -and -not (Test-Running '^SkyrimTogetherServer$')) {
-        Start-Process -FilePath (Join-Path $release 'SkyrimTogetherServer.exe') -WorkingDirectory $release -WindowStyle Minimized
+        Start-Process -FilePath (Join-Path $release 'SkyrimTogetherServer.exe') -WorkingDirectory $release -WindowStyle Hidden
         $startedServer = $true
         @{ startedServer = $true; save = $Save } | ConvertTo-Json | Set-Content $stateFile
         Start-Sleep -Seconds 4
     }
 
-    Start-Process -FilePath $mo2 -ArgumentList '"moshortcut://:PLAY Skyrim Together VR"'
+    Start-Process -FilePath $mo2 -ArgumentList "`"moshortcut://:$mo2Shortcut`""
     Wait-Until { Get-Health } 180 'DevBench to answer (the game to start)'
     Wait-Until { (Invoke-Tool 'menu' @{ action = 'list' }).openMenus -contains 'Main Menu' } 180 'the main menu' -NeedsGame
 

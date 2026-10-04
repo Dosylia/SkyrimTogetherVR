@@ -12,11 +12,20 @@
 # the binary -- a truncated exe has neither.
 
 param(
-    [string]$Destination = 'E:\FUS\tools\Skyrim Together VR',
+    [string]$Destination = '',
     [int]$MinimumBytes = 5000000
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $Destination) {
+    $fusRoot = $env:SKYRIM_FUS_ROOT
+    if (-not $fusRoot) {
+        $fusRoot = @('C:\FUS', 'E:\FUS') | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'ModOrganizer.exe') } | Select-Object -First 1
+    }
+    if (-not $fusRoot) { throw 'FUS installation not found. Set SKYRIM_FUS_ROOT or -Destination.' }
+    $Destination = Join-Path $fusRoot 'tools\Skyrim Together VR'
+}
 
 $release = (Resolve-Path (Join-Path $PSScriptRoot '..\..\build\windows\x64\release')).Path
 $exe = Join-Path $release 'SkyrimTogetherVR.exe'
