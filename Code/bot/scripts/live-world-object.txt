@@ -31,6 +31,8 @@ log DO papyrus ObjectReference SetPosition 92D04 f:139200 f:-33349 f:-9679
 wait 1
 log DO papyrus ObjectReference SetPosition 92D04 f:139200 f:-33300 f:-9679
 waitfor objectmoves >= 1 15
+# The client's log reaches the disk a little after the line is written; the check read it too early once (16:11).
+wait 2
 log CHECK logged WorldObject: 92D04 is being moved here
 wait 4
 
@@ -50,6 +52,13 @@ moveobject 92D04 139020 -33210 -9600 rest
 log CHECK logged WorldObject: 92D04 is being moved over there; holding it here and following
 wait 4
 log CHECK logged WorldObject: 92D04 was put down over there; handed back to physics here
+
+# Seen, 2026-10-03 15:16: "if one player moves or touches an item like a book it gets unusable for the other side".
+# The plate was just held and let go here; the player must still be able to take it.
+log -- the player takes the plate the bot let go of
+log DO papyrus ObjectReference Activate 92D04 14 b:false
+wait 4
+log CHECK player has 31941
 log CHECK game alive
 log DO god off
 wait 3

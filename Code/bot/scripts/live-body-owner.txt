@@ -1,0 +1,91 @@
+# A dead body its owner drags past the player stays the owner's: the game that only watches it move must not ask for it.
+#
+#   python Tools\VR\live-check.py live-body-owner
+#
+# 2026-10-03 20:54-20:56: the corpse of the Mistwatch dragon, moved by its owner's updates, made Seen's game ask for
+# it ("Body 35541 is being moved here; asking for it") and Emma's take it back, four times in a minute, and Emma saw
+# a dead dragon appear out of nowhere. Since 2026-10-03 21:30 a body that moves here because its owner's updates
+# move it is not asked for; only one moved here by something of this game's (a hand) is.
+log live body owner
+waitfor connected 45
+collect spawn health death ownership
+expect known me
+waitfor known other 40
+wait 5
+
+log -- a bear of this bot's, killed
+npc temp 23A8A
+waitfor owned == 1 20
+wait 8
+npclife dead 0
+wait 6
+log CHECK npc dead
+
+log -- this bot drags it past the player: thirty steps of 15 units, five a second
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+npcmove 0 15 0
+wait 0.2
+wait 4
+expect owned == 1
+log CHECK absent Body .* is being moved here; asking for it
+log CHECK game alive
+wait 3
+log done
+stop

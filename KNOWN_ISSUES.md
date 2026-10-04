@@ -253,7 +253,10 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
     threads, 5.6 GB of commit left on the machine. EngineFixesVR's `MemoryManager` (which replaces that allocator)
     is `false` in the modlist.
   - Crashed at 12:32 (the next run, eighth script, a trip away): in an AMD driver thread (`amdxx64.dll`), a call to
-    0x7FFC00000028; 11.5 GB private, 265 threads. First time among 106 crash reports.
+    0x7FFC00000028; 11.5 GB private, 265 threads. First time among 106 crash reports. Again at 15:48, on the first
+    trip of a fresh game (`cow Tamriel 33 -9`), so not only the growth: the same frame (`amdxx64.dll+0x1280B0`), a
+    call to 0x300000000. The driver files date from 2026-05-29; both crashes were in the rig (no headset, build
+    22ae2af). Not seen in play.
   - Also frozen, the same way as far as could be seen: loading Emma's Autosave2 of 2026-10-03 09:32:50 in a fresh
     game, with this build and the one before. Not looked into further.
   The rig restarts the game every six scripts since (`run-live.ps1 -Batch`). In play, a long session with many
@@ -327,15 +330,23 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   [rank]`, `stay`, and `ref:<hex>` names the actor the server sent for one of the other game's placed references. The
   driver now follows the copy actually bound to a server character (`New entity remotely managed`), not the first
   one a spawn made. In Emma's save the Mistwatch bandit `45A63` is already dead; use the bear `860F8` for kills.
-  The save every test starts from (since 2026-10-03 11:35): `STTest_Mistwatch` in the MO2 profile's saves, made from
-  Emma's Save62 with the player moved to the centre of Mistwatch's cell (`cow Tamriel 34 -9`), its file date set back
-  to 09:36:00 so that it is never her most recent save. `headless.ps1 up` loads it when it exists (`-Save <name>` for
-  another), and `log DO load last` loads the save the session started from. Before that the rig loaded the most
-  recent save, which after Emma's session of 2026-10-03 was inside Mistwatch's tower: every bot waited outside for a
-  player who never came. Her Autosave2 of 09:32:50, made outside the tower, hangs the game a frame after loading,
-  with this build and the one before (every thread waiting, none of ours on any stack); not looked into further.
+  **The rig plays in Emma's own MO2 profile, and the game saves there.** On 2026-10-03 a test autosaved at 16:01
+  (it sent the player through a door), that file was the newest save, and Emma's "Continue" that evening loaded it: a
+  rollback to a test copy of her morning. The test save `STTest_Mistwatch` (made by console `save`, a name without a
+  character id) also gave every save made from it the character id `00000000`, and once one of those was loaded the
+  Load menu hid all her real saves (`C232C981`). Since then `headless.ps1` copies the saves folder aside before the
+  game starts and puts it back exactly once the game has gone (`saves-before-rig`, with a `.complete` marker; what
+  the test game wrote goes to `saves-made-by-rig\<time>`); a run that died before that is put right by the next
+  `up` or `down`. The test save was moved out with the rollback saves (`saves\_moved-2026-10-03`); without it the rig
+  loads her most recent save. A save made by console must never go into her folder again.
+  Before that the rig loaded the most recent save, which after Emma's session of 2026-10-03 was inside Mistwatch's
+  tower: every bot waited outside for a player who never came. Her Autosave2 of 09:32:50 hung the game a frame
+  after loading, with this build and the one before; not looked into further.
   `CHECK ref <hex> near <x> <y> <z> <units>` reads a reference's position; the bot's `moveobject <hex> <x> <y> <z>
   held|rest` moves a world object as a hand would, and `waitfor objectmoves >= <n>` counts the moves it was sent.
+  Also: `CHECK player in <worldspace>` (outdoors there, not in an interior), `CHECK player has <hex>`, papyrus
+  arguments `f:<float>` and `b:true|false`, and the bot's `activate <hex> by other|me [door state]` (an activation in
+  the name of the game's player or the bot's own; a door is replayed only in the state the sender saw, 3 = closed).
 - **Emma's VR Address Library is a combined file (2026-10-01), not a released one.** DevBench needs ids only the
   current library has (0.275.0); the modlist was built on 0.158.0. The released 0.275.0 corrects two addresses
   (100997, 74491) and drops three (63607-63609), and the installed Community Shaders is built for the old value of

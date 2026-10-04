@@ -268,6 +268,7 @@ private:
     //! Moves relayed to this bot by the server, which only sends them to players in range.
     uint32_t m_dropMoves{};
     uint32_t m_objectMoves{}; //!< world-object moves relayed to this bot
+    uint32_t m_activationsBack{}; //!< activations relayed to this bot in its own name: its own, sent back by a game
     std::vector<std::pair<uint32_t, std::string>> m_names; // player id -> username
 
     size_t m_pc = 0;

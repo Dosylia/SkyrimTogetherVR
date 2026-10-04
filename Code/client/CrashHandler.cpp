@@ -3,12 +3,16 @@
 #include "CrashHandler.h"
 #include <DbgHelp.h>
 #include <Windows.h>
+#include <TlHelp32.h>
+#include <Psapi.h>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <strsafe.h>
+#include <Games/Memory.h>
 
 using time_point = std::chrono::system_clock::time_point;
 
@@ -453,6 +457,190 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
     return retval;
 }
 
+namespace FreezeWatchdog
+{
+namespace
+{
+std::atomic<int64_t> s_lastBeatMs{0};
+std::atomic<DWORD> s_updateThreadId{0};
+
+int64_t NowMs() noexcept
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// The game's main thread: the oldest thread of the process (the launcher's, which runs the game's WinMain). In the
+// freeze of 2026-10-03 12:07 it was waiting inside the game's allocator while every other thread waited too.
+DWORD FindMainThreadId() noexcept
+{
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE)
+        return 0;
+    DWORD oldestId = 0;
+    ULONGLONG oldestTime = ~0ull;
+    THREADENTRY32 entry{};
+    entry.dwSize = sizeof(entry);
+    for (BOOL ok = Thread32First(hSnapshot, &entry); ok; ok = Thread32Next(hSnapshot, &entry))
+    {
+        if (entry.th32OwnerProcessID != GetCurrentProcessId())
+            continue;
+        HANDLE hThread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ThreadID);
+        if (!hThread)
+            continue;
+        FILETIME created{}, exited{}, kernel{}, user{};
+        if (GetThreadTimes(hThread, &created, &exited, &kernel, &user))
+        {
+            const ULONGLONG cTime = (static_cast<ULONGLONG>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+            if (cTime < oldestTime)
+            {
+                oldestTime = cTime;
+                oldestId = entry.th32ThreadID;
+            }
+        }
+        CloseHandle(hThread);
+    }
+    CloseHandle(hSnapshot);
+    return oldestId;
+}
+
+uint32_t CountThreads() noexcept
+{
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (hSnapshot == INVALID_HANDLE_VALUE)
+        return 0;
+    uint32_t count = 0;
+    THREADENTRY32 entry{};
+    entry.dwSize = sizeof(entry);
+    for (BOOL ok = Thread32First(hSnapshot, &entry); ok; ok = Thread32Next(hSnapshot, &entry))
+        if (entry.th32OwnerProcessID == GetCurrentProcessId())
+            ++count;
+    CloseHandle(hSnapshot);
+    return count;
+}
+
+// Where a thread is, without touching anything it may hold: it is suspended only for as long as it takes to copy its
+// registers and the top of its stack into a buffer that exists already. Nothing is allocated or logged meanwhile (the
+// thread may hold the heap lock or the logger's), and the copy is made with ReadProcessMemory, which fails instead of
+// faulting on a page that is not there.
+void LogThread(const char* apWhat, const DWORD aThreadId) noexcept
+{
+    if (!aThreadId || aThreadId == GetCurrentThreadId())
+        return;
+    HANDLE hThread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, aThreadId);
+    if (!hThread)
+    {
+        spdlog::error("FreezeWatchdog: could not open the {} (thread {})", apWhat, aThreadId);
+        return;
+    }
+
+    static uintptr_t s_stack[4096]; // 32 KB, as much as the crash report scans
+    CONTEXT context{};
+    context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+    SIZE_T copied = 0;
+    bool haveContext = false;
+    if (SuspendThread(hThread) != static_cast<DWORD>(-1))
+    {
+        haveContext = GetThreadContext(hThread, &context) != FALSE;
+        if (haveContext)
+        {
+            // Shrink the window until it reads: the stack ends somewhere above rsp.
+            for (SIZE_T size = sizeof(s_stack); size >= 4096 && copied == 0; size /= 2)
+                if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(context.Rsp & ~static_cast<DWORD64>(7)), s_stack, size, &copied))
+                    copied = 0;
+        }
+        ResumeThread(hThread);
+    }
+    CloseHandle(hThread);
+
+    if (!haveContext)
+    {
+        spdlog::error("FreezeWatchdog: could not read where the {} is (thread {})", apWhat, aThreadId);
+        return;
+    }
+
+    char desc[MAX_PATH + 64];
+    DescribeCodeAddress(reinterpret_cast<void*>(context.Rip), desc, sizeof(desc));
+    spdlog::error("FreezeWatchdog: the {} (thread {}) is at rip 0x{:x} ({})", apWhat, aThreadId, static_cast<uint64_t>(context.Rip), desc);
+    spdlog::error("  rax 0x{:016x}  rcx 0x{:016x}  rdx 0x{:016x}  rbx 0x{:016x}  rsp 0x{:016x}", static_cast<uint64_t>(context.Rax),
+                  static_cast<uint64_t>(context.Rcx), static_cast<uint64_t>(context.Rdx), static_cast<uint64_t>(context.Rbx), static_cast<uint64_t>(context.Rsp));
+    size_t hits = 0;
+    for (size_t slot = 0; slot < copied / sizeof(uintptr_t) && hits < 40; ++slot)
+    {
+        auto* pCandidate = reinterpret_cast<void*>(s_stack[slot]);
+        if (!IsExecutableAddress(pCandidate))
+            continue;
+        DescribeCodeAddress(pCandidate, desc, sizeof(desc));
+        spdlog::error("    [rsp+0x{:04x}] 0x{:012x}  {}", slot * sizeof(uintptr_t), reinterpret_cast<uint64_t>(pCandidate), desc);
+        ++hits;
+    }
+}
+
+void LogHealth(const int64_t aSinceBeatMs) noexcept
+{
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    counters.cb = sizeof(counters);
+    const bool cHaveMemory = GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters), sizeof(counters)) != FALSE;
+    spdlog::info("Health: private {} MB, working set {} MB, {} threads, last frame {} ms ago", cHaveMemory ? counters.PrivateUsage / (1024 * 1024) : 0,
+                 cHaveMemory ? counters.WorkingSetSize / (1024 * 1024) : 0, CountThreads(), aSinceBeatMs);
+}
+
+DWORD WINAPI WatchdogMain(LPVOID) noexcept
+{
+    int64_t nextHealthMs = NowMs() + 30000;
+    int64_t reportedForBeat = -1;
+    int reportsForBeat = 0;
+    for (;;)
+    {
+        Sleep(1000);
+        if (IsProcessExiting())
+            return 0;
+        const int64_t cBeat = s_lastBeatMs.load(std::memory_order_relaxed);
+        if (!cBeat)
+            continue; // the game has not run a frame of ours yet
+        const int64_t cNow = NowMs();
+        const int64_t cSince = cNow - cBeat;
+
+        if (cNow >= nextHealthMs)
+        {
+            nextHealthMs = cNow + 30000;
+            LogHealth(cSince);
+        }
+
+        // Once at 25 s and once more at 2 minutes for the same stall. A long loading screen also gets here.
+        if (cBeat != reportedForBeat)
+        {
+            reportedForBeat = cBeat;
+            reportsForBeat = 0;
+        }
+        const int64_t cThreshold = reportsForBeat == 0 ? 25000 : 120000;
+        if (cSince < cThreshold || reportsForBeat >= 2)
+            continue;
+        ++reportsForBeat;
+        spdlog::error("FreezeWatchdog: no frame of ours for {} s (a long loading screen does this too); where the game is:", cSince / 1000);
+        LogHealth(cSince);
+        const DWORD cMain = FindMainThreadId();
+        LogThread("game's main thread", cMain);
+        const DWORD cUpdate = s_updateThreadId.load(std::memory_order_relaxed);
+        if (cUpdate != cMain)
+            LogThread("thread that last ran our update", cUpdate);
+        spdlog::default_logger()->flush();
+    }
+}
+} // namespace
+
+void Beat() noexcept
+{
+    s_lastBeatMs.store(NowMs(), std::memory_order_relaxed);
+    s_updateThreadId.store(GetCurrentThreadId(), std::memory_order_relaxed);
+}
+
+void Start() noexcept
+{
+    if (HANDLE hWatchdog = CreateThread(nullptr, 0, &WatchdogMain, nullptr, 0, nullptr))
+        CloseHandle(hWatchdog);
+}
+} // namespace FreezeWatchdog
+
 LPTOP_LEVEL_EXCEPTION_FILTER CrashHandler::m_pUnhandled;
 CrashHandler::CrashHandler()
 {
@@ -464,6 +652,8 @@ CrashHandler::CrashHandler()
     SetUnhandledExceptionFilter(m_pUnhandled);
 
     m_handler = AddVectoredExceptionHandler(1, &VectoredExceptionHandler);
+
+    FreezeWatchdog::Start();
 }
 
 CrashHandler::~CrashHandler()

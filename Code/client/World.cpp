@@ -1,6 +1,7 @@
 #include <TiltedOnlinePCH.h>
 
 #include "World.h"
+#include <CrashHandler.h>
 #include <PerfScope.h>
 
 #include <Services/DiscoveryService.h>
@@ -72,6 +73,8 @@ World::~World() = default;
 
 void World::Update() noexcept
 {
+    FreezeWatchdog::Beat();
+
     const auto cNow = std::chrono::high_resolution_clock::now();
     const auto cDelta = cNow - m_lastFrameTime;
     m_lastFrameTime = cNow;

@@ -1,0 +1,46 @@
+# An activation that comes back: a game replays another player's activation on that player's copy and sends the
+# replay on again, in that player's name.
+#
+#   python Tools\VR\live-check.py live-door-echo
+#
+# 2026-10-03 15:21: Seen walked out of Mistwatch's upper door and was back inside 0.9 s later, six times in a minute.
+# Emma's game replayed his arrival on his copy (an activation of the outside door) and its activation hook sent that
+# on again in his name; the server relayed it to Seen, whose game made its own player use the door.
+#
+# Two halves. The bot uses the door 3F558 as itself: the game replays it on the bot's copy, and must not send it back
+# (activationsback). Then the bot sends an activation in the name of the game's own player: the game must not do it.
+# Red on 22ae2af (the player went through the door into Mistwatch01), green on 73fbe77.
+log live door echo
+waitfor connected 45
+expect known me
+waitfor known other 40
+wait 5
+
+log DO god on
+log -- the player to Mistwatch's upper door, outside (within the cells loaded at the test save's start)
+log DO console player.moveto 3F558
+wait 10
+log CHECK player in Tamriel
+# The game replays a door only when its door is in the state the sender saw (the bot sends 3, closed).
+log DO papyrus ObjectReference GetOpenState 3F558
+
+log -- this bot uses the door; the game replays it on the bot's copy
+activate 3F558 by me
+wait 8
+# The game replays it with the game's own Activate, which our hook does not see, so the replay itself is never sent
+# back (checked 2026-10-03 16:10). What would carry this bot's id back is the copy activating something on its own
+# (its AI); the client no longer sends any copy's activation ("not sent: its owner reports its own"). The echo only
+# reaches this bot if the server has it in the door's cell, which it may not (it follows the player by grid).
+expect activationsback == 0
+
+log -- another game says this game's player used the door
+activate 3F558 by other
+wait 10
+log CHECK player in Tamriel
+log CHECK logged Activation of .* came back from another game; not done again
+wait 3
+log CHECK game alive
+log DO god off
+wait 3
+log done
+stop

@@ -16,6 +16,8 @@
 #include <Messages/NotifyDroppedItemRemoved.h>
 #include <Messages/NotifyDroppedItemMove.h>
 #include <Messages/NotifyWorldObjectMove.h>
+#include <Messages/ActivateRequest.h>
+#include <Messages/NotifyActivate.h>
 #include <Messages/RequestWorldObjectMove.h>
 #include <Messages/RequestDroppedItemMove.h>
 #include <Messages/RequestDroppedItemAdd.h>
@@ -1085,6 +1087,17 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         return;
     }
 
+    if (opcode == NotifyActivate::Opcode)
+    {
+        const auto& message = static_cast<const NotifyActivate&>(acMessage);
+        if (message.ActivatorId == m_serverId)
+        {
+            ++m_activationsBack;
+            spdlog::warn("Activation of {:X}:{:X} came back in this bot's own name", message.Id.ModId, message.Id.BaseId);
+        }
+        return;
+    }
+
     if (opcode == NotifyWorldObjectMove::Opcode)
     {
         const auto& message = static_cast<const NotifyWorldObjectMove&>(acMessage);
@@ -1744,6 +1757,78 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         request.Changes[pNpc->ServerId].ExtraFactions.push_back(faction);
         SendMsg(request);
         spdlog::info("[script] NPC {:X} put in faction {:X} at rank {}", pNpc->ServerId, factionId, faction.Rank);
+        return true;
+    }
+
+    // "npcmove <dx> <dy> <dz>": the first NPC this bot owns moved by that much in one update, the way an owner's game
+    // reports a body it is dragging. For the dead-body hand-off: a body its owner moves must not be asked for by a
+    // game that only watches it move (2026-10-03 20:55, the Mistwatch dragon's corpse traded back and forth).
+    if (name == "npcmove")
+    {
+        float dx = 0.f, dy = 0.f, dz = 0.f;
+        if (args.size() < 3 || !ParseFloat(args[0], dx) || !ParseFloat(args[1], dy) || !ParseFloat(args[2], dz))
+        {
+            spdlog::error("[script] npcmove needs an offset, e.g. 'npcmove 0 40 0'");
+            return true;
+        }
+        uint32_t npcId = kNoId;
+        for (const auto& actor : m_actors)
+            if (actor.OwnedByUs && !actor.IsPlayer && actor.ServerId != m_serverId)
+                npcId = actor.ServerId;
+        if (npcId == kNoId)
+        {
+            spdlog::warn("[script] npcmove: this bot owns no NPC");
+            return true;
+        }
+        m_npcPosition += glm::vec3(dx, dy, dz);
+        ClientReferencesMoveRequest message{};
+        message.Tick = GetClock().GetCurrentTick();
+        ReferenceUpdate& update = message.Updates[npcId];
+        update.UpdatedMovement.Position = ToNet(m_npcPosition);
+        update.UpdatedMovement.CellId = m_cell;
+        update.UpdatedMovement.WorldSpaceId = m_worldSpace;
+        SendMsg(message);
+        spdlog::info("[script] NPC {:X} moved to ({:.0f}, {:.0f}, {:.0f})", npcId, m_npcPosition.x, m_npcPosition.y, m_npcPosition.z);
+        return true;
+    }
+
+    // "activate <hex reference> by other|me [door state]": an activation of that reference of Skyrim.esm, in this bot's cell, in the
+    // name of the other player's character (what Emma's game sent Seen's when it replayed his door on his copy and
+    // sent the replay on again, 2026-10-03 15:21; he went back through the door six times) or of this bot's own (the
+    // game replays it on this bot's copy; a game that sends the replay on sends it back here, see activationsback).
+    // The server relays it to the players in that cell, the game among them.
+    if (name == "activate")
+    {
+        uint32_t refId = 0;
+        if (args.size() < 3 || !ParseHex(args[0], refId) || args[1] != "by" || (args[2] != "other" && args[2] != "me"))
+        {
+            spdlog::error("[script] activate needs a hex reference and 'by other' or 'by me'");
+            return true;
+        }
+        uint32_t otherId = args[2] == "me" ? m_serverId : kNoId;
+        for (const auto& player : m_players)
+            if (otherId == kNoId && player.ServerId != m_serverId)
+            {
+                otherId = player.ServerId;
+                break;
+            }
+        if (otherId == kNoId)
+        {
+            spdlog::warn("[script] activate: nobody else is here");
+            return true;
+        }
+        ActivateRequest request{};
+        request.Id = Skyrim(refId);
+        request.CellId = m_cell;
+        request.ActivatorId = otherId;
+        // The state the door had before it was used, as the sender saw it: a game replays a door's activation only when
+        // its own door is in that state too. 3 is "closed", what a load door reports (TESObjectREFR::OpenState).
+        float state = 3.f;
+        if (args.size() >= 4)
+            ParseFloat(args[3], state);
+        request.PreActivationOpenState = static_cast<uint8_t>(state);
+        SendMsg(request);
+        spdlog::info("[script] activation of {:X} sent in the name of {:X}, in cell {:X}", refId, otherId, m_cell.BaseId);
         return true;
     }
 
@@ -2470,6 +2555,24 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
         // mydrop: the server has sent this bot's own drop back.
         aOutWhy = m_drops.count(m_ownDrop) ? fmt::format("item {} is this bot's drop", m_ownDrop) : fmt::format("{} item(s) known, none of them this bot's", m_drops.size());
         return m_drops.count(m_ownDrop) != 0;
+    }
+
+    if (what == "activationsback")
+    {
+        // activationsback <op> <n>: activations relayed to this bot in its own name -- its own, sent back by a game
+        // that replayed them on this bot's copy.
+        float wanted = 0.f;
+        if (acArgs.size() < 3 || !ParseFloat(acArgs[2], wanted))
+            return std::nullopt;
+        const float value = static_cast<float>(m_activationsBack);
+        aOutWhy = fmt::format("{} activation(s) came back in this bot's name", m_activationsBack);
+        const std::string& op = acArgs[1];
+        if (op == "==") return value == wanted;
+        if (op == ">=") return value >= wanted;
+        if (op == "<=") return value <= wanted;
+        if (op == ">") return value > wanted;
+        if (op == "<") return value < wanted;
+        return std::nullopt;
     }
 
     if (what == "objectmoves")

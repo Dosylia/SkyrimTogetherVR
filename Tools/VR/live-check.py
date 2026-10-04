@@ -14,6 +14,9 @@ Checks:
     player mark | player dropped <n>                                      the local player's health, before and after
     drop exists | drop gone | drop mark | drop moved <dx> <dy> <dz>       the item the game placed for the bot's drop
     player alive                                                          the local player is not dead
+    player has <hex>                                                      the local player carries that item
+    player in <worldspace>                                                outdoors in that worldspace (Tamriel), not
+                                                                          in an interior
     ref <hex> near <x> <y> <z> <units>                                    a reference of the game's own is that close
                                                                           to that place
     game alive | game inworld                                             the game still answers | and is in the
@@ -80,7 +83,7 @@ CAPTURES = 'E:/FUS/overwrite/SKSE/Plugins/devbench/captures'   # where MO2 puts 
 # Lydia" is then two paces that unload nothing (found 2026-10-02, a session that passed for that reason alone).
 ALL = ['live-copy', 'live-npc', 'live-dropmove', 'live-look', 'live-walk', 'live-creatures', 'live-npc-away', 'live-away-seeker',
        'live-temp-remove', 'live-temp-reuse', 'live-copy-abandon', 'live-temp-reconnect', 'live-crime', 'live-netch',
-       'live-sender', 'live-game-drops', 'live-equip', 'live-factions', 'live-menu-hold', 'live-levelled', 'live-whiterun', 'live-time', 'live-hit-npc', 'live-world-object', 'live-death', 'live-load', 'live-load-dead']
+       'live-sender', 'live-game-drops', 'live-equip', 'live-factions', 'live-menu-hold', 'live-levelled', 'live-whiterun', 'live-time', 'live-hit-npc', 'live-world-object', 'live-door-echo', 'live-death', 'live-load', 'live-load-dead']
 # Not in the list, run by name: live-seeker-copy-remote and live-seeker-copy-local (the two halves that showed the
 # crash of live-copy-abandon needs a copy and its original together).
 
@@ -328,6 +331,18 @@ class Run:
                 # suite, 2026-10-03) it did not happen to reuse one. The run then tests nothing, and says so.
                 ok = True
                 detail = ('reused: %s' % ', '.join(sorted(set(reused)))) if reused else 'SKIPPED: none of the %d deleted ids came back, so this run tests nothing' % len(deleted)
+            elif who == 'player' and what == 'has':
+                # "player has <hex>": the local player carries at least one of that item.
+                count = papyrus('ObjectReference', 'GetItemCount', '14', [{'form': '0x' + words[2]}])
+                ok = isinstance(count, int) and count > 0
+                detail = 'GetItemCount(%s) %s' % (words[2], count)
+            elif who == 'player' and what == 'in':
+                # "player in <worldspace editor id>": the player is outdoors in that worldspace (not in an interior).
+                scene = tool('inspect', {'kind': 'scene'})
+                ws = (scene.get('worldspace') or {}).get('editorId')
+                cell = (scene.get('cell') or {}).get('editorId') or (scene.get('cell') or {}).get('formId')
+                ok = ws == words[2]
+                detail = 'worldspace %s, cell %s' % (ws, cell)
             elif who == 'player' and what == 'alive':
                 dead = papyrus('Actor', 'IsDead', '14')
                 health = tool('inspect', {'kind': 'player'})['actorValues']['health']['current']

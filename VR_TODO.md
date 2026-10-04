@@ -154,6 +154,18 @@ A longer write-up goes in the section the item belongs to further down; this lis
   tried yet: update DynDOLOD DLL NG to Alpha-33, and set `MemoryManager = true` in EngineFixesVR.ini (replaces the
   allocator that deadlocked). Both machines would need the same. Tell me which to try and I will measure it the same
   way.
+- **Dragons taken over in flight (2026-10-03):** your game takes over every creature that reaches it (the party
+  leader's claim), dragons in the air included; the Mistwatch dragon fell and died right after (09:06). Options:
+  (1) never take a dragon over from the game that has it flying -- the other player's game keeps running it until
+  it lands or is killed; (2) keep the claim. (1) is what I would do; your hits on it still count either way.
+- **Who runs a follower when the two of you are in different places? (2026-10-03 15:09)** Lydia is your follower.
+  During your 10-second loading screen the server gave her to Seen, who was still in the tower with her, while your
+  game brought her out with you; for 15 seconds the two games pulled her back and forth (92 times), and Seen lost her
+  afterwards. Options: (1) a player's follower always belongs to that player's game, whoever else is near (your game
+  takes her back as soon as she is with you); (2) keep it as it is and have a loading screen not count as leaving.
+  (1) is what I would do; it changes who controls followers in every fight.
+- **Seen's EngineFixesVR (asked 2026-10-03):** his crash at 15:24 is the script-engine one on a freed form. Is
+  `FormCaching = false` in his `EngineFixesVR.ini` too? Yours has been since 2026-09-30.
 - **Did you close the game window at about 00:35 on 2026-10-03?** The game ended by itself thirty seconds after a
   green test run: no crash report, no Windows error event, and our log stops in mid-flow. Seen once; the next
   session ran twenty-two minutes of the same tests and closed normally.
@@ -224,6 +236,25 @@ send; it changes the protocol, so Seen needs the new exe **and** a server rebuil
 - [x] Objects in the world moved by hand (a bottle in hand, a cart) were not synced. Now each client watches the movable objects within 400 units of its player (items, alchemy apparatus, movable statics such as carts) and sends where one goes; the other client holds it and follows, and the server remembers where it was put down for whoever comes later (22ae2af, new messages). `live-world-object` green twice: the game's move reaches the bot, and the bot's move puts the game's plate within 20 units of where it was sent.
 - [ ] Lydia did not fight back while Emma was down (09:36), and enemies ignored Seen while he was invisible to Emma (Emma's game had no copy of him to attack). Recheck after the invisibility fixes.
 - [x] Seen's crash at 09:36:59 was the quit crash (journal open, EnchantmentEffectExtender.dll reading the UI singleton +0x160), the known family.
+
+### Session with Seen, 2026-10-03 15:06-15:24 (both on 22ae2af)
+
+Read from both clients' logs. Seen's clock runs about 3 s ahead of Emma's.
+
+- [x] Seen "teleported inside constantly" (15:21-15:22): six times he came out of Mistwatch's upper door (`3F558`) and his own game made his player use it again 0.8-0.9 s later; each time Emma's game received his next activation just as his copy was removed. An activation that arrives in the player's own name sends the player through the door: reproduced with the bot (`live-door-echo`, red on 22ae2af, the player ended in Mistwatch01). Now a game refuses an activation by one of its own actors coming from elsewhere and logs `came back from another game; not done again`, and it never sends an activation by another game's actor (a copy) -- on Emma's side only Seen's copy could carry his id (73fbe77, green three times). Not proven: what made Emma's game send one in his name; our own replay does not pass through the hook, so it was something his copy did by itself there. If he bounces again, the log says which side it came from.
+- [ ] Lydia popping in and out for Emma (15:09:39-55, 92 times) and gone for Seen afterwards: Emma's loading screen took 10 s with nothing sent, the server gave Lydia to Seen (still inside), while Emma's game had brought her outside as Emma's follower. Seen's updates put her back inside, Emma's follower AI pulled her out, every 130 ms, until Emma took her back. Seen's game then placed her 11,752 units lower than before (an outdoor height inside). Design question for Emma above.
+- [ ] A book Emma touched could not be read by Seen (15:15-15:16): Emma took the skill book `108DE7` (SkillHeavyArmor1) and dropped it again; Seen's game never learned it was taken, still had it on the table, and took it for Emma's drop ("already lying here as 108DE7"), then held it while she moved it. Every hold was released 2-3 s later as designed, and in the rig a plate held and let go of can still be taken (`live-world-object`, `player has 31941`). Not reproduced; ask Seen what "cannot interact" looked like (no prompt, nothing happens, cannot grab).
+- [ ] The bandit "ignoring us" (15:18): probably the unequip loop -- the Bandit Leader `430B5` refused 92 Unequip actions a second on Emma's side (15:19:58). Not looked into further.
+- [x] Seen's crash at 15:24:28: `SkyrimVR.exe+0x93CE11`, the script engine on a freed temporary form (`FF001253`), the known family (KNOWN_ISSUES.md section 6). EngineFixesVR `FormCaching` is false on Emma's machine since 2026-09-30; on Seen's it is not known.
+
+### Session with Seen, 2026-10-03 20:44-21:07 (both on 73fbe77)
+
+- [ ] Emma's game froze at 21:06:48, one frame after loading into the Ragged Flagon: the log stops, no crash report. No stack, so the cause is not known; the rig's freeze at 12:07 with the same signature was the game's own allocator deadlocking (KNOWN_ISSUES.md section 6). Build 5d11dbd adds a watchdog: after 25 s without a frame it logs where the game's main thread and our update thread are (registers and stack scan), and every 30 s a "Health:" line with memory and thread count. The next freeze will say where.
+- [x] The dead Blood Dragon "out of nowhere" (20:55): the Mistwatch dragon `35541` (DragonLair8Boss) has been a corpse since this morning. Emma's game took it over at 09:06:05 the moment it arrived, in flight, and it "fell from the sky next to Dosylia"; by 09:16 it had its death item and from 09:17 its corpse was being moved. At 20:54-20:56 the corpse moved on Seen's side by Emma's updates and by itself, and the dead-body hand-off (built in 22ae2af) made the two games ask for it in turn, four times in a minute. A body is now asked for only when one of this player's hands is on it, never when its owner's updates move it (5d11dbd; `live-body-owner` green, old exe green as well, so the test does not reproduce the dragon's case).
+- [ ] Why dragons are "already dead": the morning dragon died after the leader's game took it over mid-flight. Question for Emma above.
+- [ ] Emma's 19:52 crash (before this session, on the rolled-back save): the AI thread on an actor with no cell (`SkyrimVR.exe+0x24E6D0`, GetWorldSpace), 47 ms after the server teleported nine actors into cells outside Emma's loaded area (`MoveActor` loads such a cell and moves the actor into it). One occurrence; not changed yet.
+- [ ] The bear "did a backflip on dying" and its death position was not synced, for Seen only (20:50). Low priority; not looked into.
+- [ ] World sync Emma ranks highest after crashes: a body being dragged, the swords in the hands of the other player's copy, items held in a hand -- each "in the right spot" on the other screen. To be measured in the rig first (positions on both sides), then fixed one by one.
 
 ### Sync: verify in the real game, fix what fails
 

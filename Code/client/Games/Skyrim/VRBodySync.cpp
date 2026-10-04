@@ -1484,6 +1484,42 @@ bool ResolveHolding(Actor* apActor, Holding& aOut) noexcept
 std::mutex s_touchLock;
 TiltedPhoques::Vector<uint32_t> s_touchCandidates;
 
+// When the owner's bones last moved a dead body here (ApplyRemotePoses). See ObserveRemoteBodyMotion.
+std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_bodyPosedByOwnerAt;
+
+// How close the nearer of the player's two hands is to any node of a body, in units; very large when it cannot be
+// told. Every node, not only the root: a dragon is dragged by a wing or the tail, a long way from its root.
+float NearestHandToBody(void* apBodyRoot) noexcept
+{
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    Holding mine;
+    if (!apBodyRoot || !pPlayer || !ResolveHolding(pPlayer, mine) || (!mine.RightHand.Valid && !mine.LeftHand.Valid))
+        return 1e9f;
+
+    float nearest = 1e9f;
+    TiltedPhoques::Vector<void*> queue;
+    queue.push_back(apBodyRoot);
+    for (size_t head = 0; head < queue.size() && head < 1024; ++head)
+    {
+        void* pNode = AsNode(queue[head]);
+        if (!pNode)
+            continue;
+        const glm::vec3 at = ToGlm(At<NiTransform>(pNode, kWorldOffset).translate);
+        const Segment point{at, at, true};
+        for (const Segment* pHand : {&mine.RightHand, &mine.LeftHand})
+            if (pHand->Valid)
+                nearest = std::min(nearest, SegmentDistance(*pHand, point));
+
+        void** pChildren = At<void**>(pNode, kChildrenOffset + 0x8);
+        const uint16_t capacity = At<uint16_t>(pNode, kChildrenOffset + 0x10);
+        if (!pChildren)
+            continue;
+        for (uint16_t i = 0; i < capacity; ++i)
+            if (pChildren[i])
+                queue.push_back(pChildren[i]);
+    }
+    return nearest;
+}
 } // namespace
 
 namespace VRBodySync
@@ -1689,6 +1725,7 @@ void OnFrameEnd() noexcept
             if (!pActor->actorState.IsDead())
                 continue;
             isBody = true;
+            s_bodyPosedByOwnerAt[formId] = now;
 
             // The other half of the sender's line, so one log shows the whole chain.
             static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextSaid;
@@ -2269,7 +2306,7 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept
 // rest in a second or two; a body someone is dragging keeps moving for as long as they drag it. So what gets
 // measured is *sustained* motion within arm's reach -- how long, how far, and how close -- and the numbers decide
 // the threshold rather than the other way round.
-bool ObserveRemoteBodyMotion(Actor* apActor) noexcept
+bool ObserveRemoteBodyMotion(Actor* apActor, const glm::vec3& acOwnerPosition) noexcept
 {
     if (!apActor || !apActor->actorState.IsDead())
         return false;
@@ -2299,6 +2336,8 @@ bool ObserveRemoteBodyMotion(Actor* apActor) noexcept
         float Travelled = 0.f;
         std::chrono::steady_clock::time_point TouchedAt{};
         bool Reported = false; // this grab has been reported to the caller
+        glm::vec3 OwnerLast{};
+        std::chrono::steady_clock::time_point OwnerMovedAt{};
     };
     static std::unordered_map<uint32_t, Watch> s_watch;
 
@@ -2312,12 +2351,30 @@ bool ObserveRemoteBodyMotion(Actor* apActor) noexcept
     if (!watch.Placed)
     {
         watch.Last = at;
+        watch.OwnerLast = acOwnerPosition;
         watch.Placed = true;
         return false;
     }
 
     const float step = glm::distance(at, watch.Last);
     watch.Last = at;
+
+    // Moved by its owner: its updates moved it (the position they give, or its bones). That is the other side
+    // carrying it, not a hand here. On 2026-10-03 (20:54-20:56) the corpse of the Mistwatch dragon, moved that way,
+    // made Seen's game ask for it twice and Emma's take it back each time: "a dead blood dragon spawns out of nowhere".
+    if (glm::distance(acOwnerPosition, watch.OwnerLast) >= 4.f)
+        watch.OwnerMovedAt = now;
+    watch.OwnerLast = acOwnerPosition;
+    const auto posed = s_bodyPosedByOwnerAt.find(apActor->formID);
+    const bool cOwnerMovesIt = now - watch.OwnerMovedAt < std::chrono::milliseconds(1500) ||
+                               (posed != s_bodyPosedByOwnerAt.end() && now - posed->second < std::chrono::milliseconds(1500));
+    if (cOwnerMovesIt)
+    {
+        watch.Travelled = 0.f;
+        watch.LastMoved = {};
+        watch.Reported = false;
+        return false;
+    }
 
     // The same 4 units CaptureBodyPose uses: a settled ragdoll still twitches.
     if (step >= 4.f)
@@ -2339,13 +2396,19 @@ bool ObserveRemoteBodyMotion(Actor* apActor) noexcept
 
     const auto movingFor = std::chrono::duration_cast<std::chrono::milliseconds>(now - watch.MovingSince).count();
 
-    // A third of a second of being moved is a hand on it, not a ragdoll settling: the caller asks for the body, so that
-    // this side becomes the one that sends it (see CharacterService::RunRemoteUpdates).
+    // A third of a second of being moved, with one of this player's hands on it: the caller asks for the body, so
+    // that this side becomes the one that sends it (see CharacterService::RunRemoteUpdates). The hand is the proof:
+    // a body also moves here by itself -- a corpse falling or settling after its owner let go of it -- and on
+    // 2026-10-03 (20:55) the Mistwatch dragon's corpse, which nobody here was holding, was asked for that way.
     bool cGrabbed = false;
     if (movingFor >= 300 && !watch.Reported)
     {
         watch.Reported = true;
-        cGrabbed = true;
+        const float cHand = NearestHandToBody(pRoot);
+        cGrabbed = cHand <= 40.f;
+        if (!cGrabbed)
+            spdlog::info("Body {:X} is moving here, but no hand of this player's is on it (nearest {:.0f} units); left to its owner", apActor->formID,
+                         std::min(cHand, 99999.f));
     }
 
     if (movingFor < 1000 || now < watch.NextLog)

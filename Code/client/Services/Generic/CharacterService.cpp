@@ -3133,7 +3133,7 @@ void CharacterService::RunRemoteUpdates() noexcept
         // Cheap: it returns at once unless this is a dead body within arm's reach. A body somebody else owns that is
         // being moved here is asked for, so that this side sends it: only the owner sends a body, and on 2026-10-03 a
         // bandit Emma had killed was carried around by Seen (09:28) and did not move at all on her screen.
-        if (VRBodySync::ObserveRemoteBodyMotion(pActor) && pFormIdComponent)
+        if (VRBodySync::ObserveRemoteBodyMotion(pActor, interpolationComponent.Position) && pFormIdComponent)
         {
             const auto& remoteComponent = interpolatedEntities.get<RemoteComponent>(entity);
             spdlog::info("Body {:X} (server id {:X}) is being moved here; asking for it, so that this side sends it", pFormIdComponent->Id, remoteComponent.Id);

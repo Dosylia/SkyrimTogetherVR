@@ -18,9 +18,12 @@
 
 param(
     [Parameter(Position = 0)][ValidateSet('up', 'down', 'status')][string]$Action = 'status',
-    [string]$Save = '',                 # a save name; empty loads the test save (below), or the most recent one without it
+    [string]$Save = '',                 # a save name; empty loads the most recent one
     [switch]$NoConnect,                 # no server and no waiting for a connection: the game alone, mod loaded
-    [int]$LoadTimeout = 180
+    [int]$LoadTimeout = 180,
+    # Where the player is put once the save has loaded: the tests start outside Mistwatch (Tamriel, cell 34 -9), and
+    # Emma's most recent save is wherever she last played. Empty leaves the player where the save has them.
+    [string]$StartCell = 'Tamriel 34 -9'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,12 +33,17 @@ $mo2 = 'E:\FUS\ModOrganizer.exe'
 $release = (Resolve-Path (Join-Path $PSScriptRoot '..\..\build\windows\x64\release')).Path
 $clientLog = 'E:\FUS\tools\Skyrim Together VR\logs\tp_client.log'
 $stateFile = Join-Path $env:TEMP 'st-headless-state.json'
-# The save every test starts from: Emma's autosave of 2026-10-03 09:32 outside Mistwatch, copied under a name of its own
-# with its date kept, so that it never becomes her most recent save. The most recent one is wherever she last played
-# (on 2026-10-03, inside the tower), and from there every bot waited outside for a player who never came.
-$testSave = 'STTest_Mistwatch'
-$testSavePath = 'E:\FUS\profiles\FUS RO DAH (Basic + Appearance + Gameplay)\saves\' + $testSave + '.ess'
-if (-not $Save -and (Test-Path -LiteralPath $testSavePath)) { $Save = $testSave }
+# The game plays in Emma's own MO2 profile, so whatever it saves lands among her saves. On 2026-10-03 it did: a test
+# autosaved at 16:01 (going through a door), that was then the newest save, and her "Continue" that evening loaded it --
+# a rollback to a test copy of her morning, under another character id that hid her real saves from the Load menu.
+# So the saves folder is copied aside before the game starts and put back exactly as it was once the game has gone:
+# whatever the test game wrote or changed is moved to saves-made-by-rig\<time>, whatever it overwrote comes back from
+# the copy. A run that died before putting it back is put right by the next "up" or "down".
+$profileDir = 'E:\FUS\profiles\FUS RO DAH (Basic + Appearance + Gameplay)'
+$savesDir = Join-Path $profileDir 'saves'
+$savesCopy = Join-Path $profileDir 'saves-before-rig'
+$savesCopyDone = Join-Path $profileDir 'saves-before-rig.complete'
+$rigSaves = Join-Path $profileDir 'saves-made-by-rig'
 $devbench = 'http://127.0.0.1:8921'
 
 function Test-Running([string]$pattern) {
@@ -99,6 +107,52 @@ function Show-Status {
         $(if (Test-Running '^SkyrimTogetherServer$') { 'running' } else { 'stopped' }))
 }
 
+function Copy-SavesAside {
+    if (Test-Path -LiteralPath $savesCopy) { Restore-Saves }
+    if (Test-Path -LiteralPath $savesCopy) { throw "The saves from an earlier run could not be put back ($savesCopy); not starting the game." }
+    Remove-Item -LiteralPath $savesCopyDone -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $savesCopy | Out-Null
+    $files = @(Get-ChildItem -LiteralPath $savesDir -File)
+    foreach ($f in $files) { Copy-Item -LiteralPath $f.FullName -Destination $savesCopy -Force }
+    $copied = @(Get-ChildItem -LiteralPath $savesCopy -File)
+    if ($copied.Count -ne $files.Count) { throw "Only $($copied.Count) of $($files.Count) saves were copied aside; not starting the game." }
+    # Only a complete copy may ever be used to decide what the test game wrote.
+    Set-Content -LiteralPath $savesCopyDone -Value $files.Count
+    Write-Host "Saves copied aside ($($files.Count) files); they are put back when the game is closed."
+}
+
+function Restore-Saves {
+    if (-not (Test-Path -LiteralPath $savesCopy)) { return }
+    if (Test-Running '^(SkyrimTogetherVR|SkyrimVR)$') { Write-Host 'The game is still running; saves NOT put back yet.' -ForegroundColor Red; return }
+    if (-not (Test-Path -LiteralPath $savesCopyDone)) {
+        # Copying aside stopped halfway, before the game was started: the saves were never touched.
+        Remove-Item -LiteralPath $savesCopy -Recurse -Force
+        Write-Host 'An incomplete copy of the saves was thrown away; the saves themselves were not touched.' -ForegroundColor Yellow
+        return
+    }
+    $moved = 0; $restored = 0
+    $quarantine = Join-Path $rigSaves (Get-Date -Format 'yyyyMMdd-HHmmss')
+    $before = @{}
+    foreach ($f in Get-ChildItem -LiteralPath $savesCopy -File) { $before[$f.Name] = $f }
+    foreach ($f in Get-ChildItem -LiteralPath $savesDir -File) {
+        $old = $before[$f.Name]
+        if ($old -and $old.Length -eq $f.Length -and $old.LastWriteTimeUtc -eq $f.LastWriteTimeUtc) { continue }
+        New-Item -ItemType Directory -Force -Path $quarantine | Out-Null
+        Move-Item -LiteralPath $f.FullName -Destination $quarantine -Force
+        $moved++
+    }
+    foreach ($name in $before.Keys) {
+        if (-not (Test-Path -LiteralPath (Join-Path $savesDir $name))) {
+            Copy-Item -LiteralPath $before[$name].FullName -Destination $savesDir -Force
+            $restored++
+        }
+    }
+    Remove-Item -LiteralPath $savesCopy -Recurse -Force
+    Remove-Item -LiteralPath $savesCopyDone -ErrorAction SilentlyContinue
+    if ($moved -or $restored) { Write-Host "Saves put back: $moved file(s) the test game wrote moved to $quarantine, $restored restored from the copy." -ForegroundColor Yellow }
+    else { Write-Host 'Saves put back: the test game wrote nothing.' }
+}
+
 function Stop-Everything {
     $state = $null
     if (Test-Path $stateFile) { $state = Get-Content $stateFile -Raw | ConvertFrom-Json }
@@ -114,6 +168,8 @@ function Stop-Everything {
     }
 
     if ($state -and $state.startedServer) { Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue | Stop-Process -Force }
+
+    Restore-Saves
 
     # More than once if need be. SteamVR's parts restart one another: on 2026-10-02 a single pass left all five
     # running, the setting could not be removed, and the fake headset stayed switched on until somebody noticed.
@@ -151,6 +207,7 @@ if (Test-Running '^(vrserver|vrmonitor)$') { throw 'SteamVR is already running. 
 
 $startedServer = $false
 try {
+    Copy-SavesAside
     Set-NullDriver $true
     @{ startedServer = $false; save = $Save } | ConvertTo-Json | Set-Content $stateFile
 
@@ -176,6 +233,15 @@ try {
     if ($Save) { Invoke-Tool 'game' @{ action = 'load'; name = $Save } | Out-Null }
     else { Invoke-Tool 'game' @{ action = 'loadLast' } | Out-Null }
     Wait-Until { $h = Get-Health; $h -and $h.lastLifecycle -eq 'postLoadGame' } $LoadTimeout 'the save to load' -NeedsGame
+
+    if ($StartCell) {
+        Start-Sleep -Seconds 3
+        Invoke-Tool 'console' @{ action = 'exec'; command = "cow $StartCell" } | Out-Null
+        Start-Sleep -Seconds 3
+        Wait-Until { -not ((Invoke-Tool 'menu' @{ action = 'list' }).openMenus -contains 'Loading Menu') } $LoadTimeout 'the start cell to load' -NeedsGame
+        Start-Sleep -Seconds 5
+        Write-Host "Player put at the start: cow $StartCell"
+    }
 
     if ($NoConnect) {
         Write-Host 'Up, not connected (no server was started).' -ForegroundColor Green

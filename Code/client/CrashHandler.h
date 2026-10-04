@@ -10,6 +10,16 @@ void Leave() noexcept;
 [[nodiscard]] bool Inside() noexcept;
 } // namespace CrashGuard
 
+//! A freeze leaves no crash report: the game just stops. World::Update calls Beat() every frame; a thread started with
+//! the crash handler notices when no frame has finished for 25 s and logs where the game's main thread and the thread
+//! that last ran our update are stuck (registers and a stack scan, the same as a crash report). Every 30 s it also
+//! logs the process's memory and thread count, the two numbers that grew before the freezes of 2026-10-03.
+namespace FreezeWatchdog
+{
+void Beat() noexcept;
+void Start() noexcept;
+} // namespace FreezeWatchdog
+
 class CrashHandler
 {
     PVOID m_handler;

@@ -379,6 +379,16 @@ void ObjectService::OnActivate(const ActivateEvent& acEvent) noexcept
         return;
     }
 
+    // Only what this game's own actors do. A copy activating something here is the replay of its owner's activation
+    // (OnActivateNotify below), and sending that again carried the owner's own server id back to the owner, whose game
+    // then made its player use the door once more: Seen walked out of Mistwatch and was back inside 0.9 s later, six
+    // times in a minute (2026-10-03 15:21), each time Emma's game had his copy ready in time to replay his arrival.
+    if (!m_world.all_of<LocalComponent>(*pEntity))
+    {
+        spdlog::info("Activation of {:X} by {:X}, another game's actor, not sent: its owner reports its own", acEvent.pObject->formID, acEvent.pActivator->formID);
+        return;
+    }
+
     std::optional<uint32_t> serverIdRes = Utils::GetServerId(*pEntity);
     if (!serverIdRes.has_value())
         return;
@@ -395,6 +405,14 @@ void ObjectService::OnActivateNotify(const NotifyActivate& acMessage) noexcept
     if (!pActor)
     {
         spdlog::error("{}: could not find actor server id {:X}", __FUNCTION__, acMessage.ActivatorId);
+        return;
+    }
+
+    // An activation by an actor this game runs -- its own player above all -- can only be one of ours coming back
+    // from another game. Replaying it would do it twice; for a load door, it put the player back through the door.
+    if (const auto entity = Utils::FindEntityByServerId(acMessage.ActivatorId); pActor == PlayerCharacter::Get() || (entity && m_world.all_of<LocalComponent>(*entity)))
+    {
+        spdlog::warn("Activation of {:X}:{:X} by {:X}, an actor of this game, came back from another game; not done again", acMessage.Id.ModId, acMessage.Id.BaseId, pActor->formID);
         return;
     }
 

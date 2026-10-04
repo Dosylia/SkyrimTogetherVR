@@ -27,7 +27,8 @@ bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept;
 bool CaptureBodyPose(Actor* apActor, VRPose& aOutPose) noexcept;
 //! Watch a dead body this client does **not** own for signs of being handled here. True once per grab, when it has
 //! been moving here for a third of a second: the caller then asks for the body, so that this side sends it.
-bool ObserveRemoteBodyMotion(Actor* apActor) noexcept;
+//! acOwnerPosition is where the owner's updates put it: motion that follows those is the owner's, not a hand here.
+bool ObserveRemoteBodyMotion(Actor* apActor, const glm::vec3& acOwnerPosition) noexcept;
 
 //! Weapon touch: a controller pulse when your blade or your hand meets somebody else's weapon.
 //!
