@@ -367,6 +367,25 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   `E:\FUS\mods\VR Address Library for SKSEVR` is 0.275.0 with every id from 0.158.0 kept at its old address
   (script: scratchpad `merge_addrlib.py`; the untouched 0.158.0 is beside it as `version-1-4-15-0.csv.0.158.0.bak`).
   Do not replace it with a plain newer release without updating Community Shaders to match.
+- **Engine Fixes VR 7.x (alandtse's unified build, `EngineFixes.dll`): black view, fixed in the launcher
+  (2026-10-05).** It is a different mod from the 1.2.6 in FUS (`EngineFixesVR.dll`, `EngineFixesVR.ini`): settings in
+  `EngineFixes.toml`, user overrides in `EngineFixesCustom.toml`, and it **must** be preloaded by FUS's `d3dx9_42.dll`
+  (Part 2 v1.26, already in "FUS Boot Files"; held back from the preloader, it logs "plugin did not preload, please
+  install the preloader" and the game stops at SKSE's plugin loading).
+  - **Cause:** two of its guards (`bCullingFreedObjectCrash`, `bSceneGraphDetachFreedCrash`) only accept game code at
+    0x7FF0'0000'0000 and above (`EmitLoadedSlotGuard` in its `src/util.h`), where Windows puts the game when it
+    starts the exe itself. This launcher maps the game at 0x1'4000'0000, so every game function looked freed: the
+    culling guard skipped every object's `OnVisible`, and nothing was drawn (sound and menus working; a tester with
+    7.9.0, then the rig: every pixel 0 with it on, the scene back with only it off, twice). The scene-graph guard
+    skips child nodes on teardown the same way.
+  - **Fix:** the launcher writes both as `false` into `EngineFixesCustom.toml` when it lets `EngineFixes.dll` load
+    (`stubs/DllBlocklist.cpp`, `EnsureEngineFixes7Settings`), and the client logs once whether they are off ("Engine
+    Fixes 7 is loaded, with the two guards ... off"). Rig, from no override file at all and every other default
+    (memory manager on): the file written, the scene drawn, three runs out of three.
+  - The same black view would hit SE/AE players of this launcher with Engine Fixes 7.x; the clean fix is upstream
+    (the guard should accept the game image's own range). Tested only on VR, a few minutes per run.
+  - `headless.ps1 up -Shortcut SKSE` (the game without the mod) reached the main menu by Engine Fixes' log, but the
+    script's menu check never saw it; not followed up.
 
 - **Read `logs/tp_client.log` first.** On a crash it contains the faulting access, the registers and a
   raw stack scan. A real stack walk is impossible, because the custom-loaded game image has no

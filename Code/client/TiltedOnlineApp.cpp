@@ -58,6 +58,31 @@ std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> CreateClientLogSink(const 
 }
 }
 
+// Engine Fixes 7.x (EngineFixes.dll): the launcher switches off two of its guards that cannot work under it, in
+// EngineFixesCustom.toml (stubs/DllBlocklist.cpp in the launcher). Said once, at the first update, so a log shows
+// whether they were: the preloader loads it during the game's startup, 2 s after this app is constructed and after
+// InstallHooks2 too (the rig, 2026-10-05). The working directory is the game's.
+static void LogEngineFixes7() noexcept
+{
+    if (GetModuleHandleW(L"EngineFixes.dll"))
+    {
+        std::ifstream custom("Data\\SKSE\\Plugins\\EngineFixesCustom.toml");
+        uint32_t off = 0;
+        for (std::string line; std::getline(custom, line);)
+        {
+            line.erase(std::remove_if(line.begin(), line.end(), [](const char c) { return c == ' ' || c == '\t'; }), line.end());
+            if (line.rfind("bCullingFreedObjectCrash=false", 0) == 0 || line.rfind("bSceneGraphDetachFreedCrash=false", 0) == 0)
+                ++off;
+        }
+        if (off == 2)
+            spdlog::info("Engine Fixes 7 is loaded, with the two guards that cannot work under this launcher off (EngineFixesCustom.toml)");
+        else
+            spdlog::error("Engine Fixes 7 is loaded, but only {} of its two guards that cannot work under this launcher is off in "
+                          "EngineFixesCustom.toml: with bCullingFreedObjectCrash on, the view is black",
+                          off);
+    }
+}
+
 TiltedOnlineApp::TiltedOnlineApp()
 {
     // Set console code page to UTF-8 so console known how to interpret string data
@@ -143,6 +168,13 @@ void TiltedOnlineApp::Update()
     POINTER_SKYRIMSE(uint32_t, bAlwaysActive, 380768, 380768);
 
     *bAlwaysActive = 1;
+
+    static bool s_engineFixesLogged = false;
+    if (!s_engineFixesLogged)
+    {
+        s_engineFixesLogged = true;
+        LogEngineFixes7();
+    }
 
     World::Get().Update();
 }

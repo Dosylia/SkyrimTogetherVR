@@ -23,8 +23,16 @@ param(
     [int]$LoadTimeout = 180,
     # Where the player is put once the save has loaded: the tests start outside Mistwatch (Tamriel, cell 34 -9), and
     # Emma's most recent save is wherever she last played. Empty leaves the player where the save has them.
-    [string]$StartCell = 'Tamriel 34 -9'
+    [string]$StartCell = 'Tamriel 34 -9',
+    # Another MO2 executable to start instead of Skyrim Together, e.g. 'SKSE' to see whether something happens
+    # without the mod at all. Implies -NoConnect.
+    [string]$Shortcut = ''
 )
+
+if ($Shortcut) { $NoConnect = $true }
+# The game's process: the launcher's own, or the game itself when another executable starts it.
+$gameProcess = if ($Shortcut) { 'SkyrimVR' } else { 'SkyrimTogetherVR' }
+$gamePattern = '^' + $gameProcess + '$'
 
 $ErrorActionPreference = 'Stop'
 
@@ -41,7 +49,7 @@ if (-not $fusRoot) {
 if (-not $fusRoot) { throw 'FUS installation not found. Set SKYRIM_FUS_ROOT to its directory.' }
 $mo2 = Join-Path $fusRoot 'ModOrganizer.exe'
 $mo2Ini = Join-Path $fusRoot 'ModOrganizer.ini'
-$mo2Shortcut = if ((Test-Path -LiteralPath $mo2Ini) -and
+$mo2Shortcut = if ($Shortcut) { $Shortcut } elseif ((Test-Path -LiteralPath $mo2Ini) -and
     (Select-String -LiteralPath $mo2Ini -Pattern '^\d+\\title=PLAY Skyrim Together VR$' -Quiet)) {
     'PLAY Skyrim Together VR'
 } else {
@@ -97,7 +105,7 @@ function Set-NullDriver([bool]$on) {
 function Wait-Until([scriptblock]$test, [int]$seconds, [string]$what, [switch]$NeedsGame) {
     $deadline = (Get-Date).AddSeconds($seconds)
     while ((Get-Date) -lt $deadline) {
-        if ($NeedsGame -and -not (Test-Running '^SkyrimTogetherVR$')) {
+        if ($NeedsGame -and -not (Test-Running $gamePattern)) {
             throw "The game closed while waiting for $what; see the newest crash log in Documents\My Games\Skyrim VR\SKSE."
         }
         $ok = $false
@@ -110,7 +118,7 @@ function Wait-Until([scriptblock]$test, [int]$seconds, [string]$what, [switch]$N
 
 function Show-Status {
     $health = Get-Health
-    $game = Test-Running '^SkyrimTogetherVR$'
+    $game = Test-Running $gamePattern
     $connected = 'unknown'
     if ($game -and (Test-Path $clientLog)) {
         $probe = Get-Content $clientLog -Tail 400 | Select-String -Pattern 'Probe: connected (yes|no)' | Select-Object -Last 1
@@ -174,13 +182,13 @@ function Stop-Everything {
     $state = $null
     if (Test-Path $stateFile) { $state = Get-Content $stateFile -Raw | ConvertFrom-Json }
 
-    if (Test-Running '^SkyrimTogetherVR$') {
+    if (Test-Running $gamePattern) {
         # The game's own quit. A kill would leave a crash report that reads like a real crash later.
         try { Invoke-Tool 'console' @{ action = 'exec'; command = 'qqq' } 8 | Out-Null } catch { }
-        try { Wait-Until { -not (Test-Running '^SkyrimTogetherVR$') } 40 'the game to quit' }
+        try { Wait-Until { -not (Test-Running $gamePattern) } 40 'the game to quit' }
         catch {
             Write-Host 'The game did not quit on its own; stopping it.' -ForegroundColor Yellow
-            Get-Process SkyrimTogetherVR -ErrorAction SilentlyContinue | Stop-Process -Force
+            Get-Process $gameProcess -ErrorAction SilentlyContinue | Stop-Process -Force
         }
     }
 

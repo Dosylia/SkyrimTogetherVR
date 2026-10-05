@@ -7,8 +7,9 @@ tested on.
 1. Install the usual SKSE mods through Vortex like any other mod: SKSE VR and VR Address Library for
    SKSEVR (required), and VRIK (recommended, it is the body your friend sees). Engine Fixes VR is
    optional: Skyrim Together does not need it (the launcher raises the open-file limit itself), but its
-   general crash fixes help a big modlist. If the game misbehaves with it (a black view, a hang), leave it
-   off; an SKSE plugin built for another version of the address library patches the wrong places. Both
+   general crash fixes help a big modlist. Engine Fixes 7.x needs its "Part 2" preloader in the SkyrimVR
+   folder; the launcher switches off two of its settings that black out the view under it (it writes them
+   into `EngineFixesCustom.toml`). If the game misbehaves with it anyway, leave it off. Both
    players should run the same list; different setups are the number one cause of "he sees a bear, I see
    a wolf".
 2. Zip the folder `Skyrim Together mod` (right click, Send to, Compressed folder), then in Vortex go to

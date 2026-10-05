@@ -249,6 +249,10 @@ NTSTATUS WINAPI TP_LdrLoadDll(const wchar_t* apPath, uint32_t* apFlags, UNICODE_
         // The d3dx9_42 plugin preloader (shipped by FUS) loads EngineFixesVR during the game's CRT init,
         // which crashes under this launcher. Refuse it until SKSE starts; SKSE then loads it fine.
         // STATUS_DLL_NOT_FOUND, so the later load isn't blocked too.
+        //
+        // Not Engine Fixes 7.x (EngineFixes.dll, one build for SE, AE and VR): it must be preloaded. Held back
+        // here, it logged "plugin did not preload, please install the preloader" and the game stopped at SKSE's
+        // plugin loading (the rig, 2026-10-05).
         const std::wstring_view baseName(name, fileName.length() - (pos + 1));
         if (!g_ScriptExtenderStarting && baseName.size() == 17 && _wcsnicmp(baseName.data(), L"EngineFixesVR.dll", 17) == 0)
             return 0xC0000135; // STATUS_DLL_NOT_FOUND

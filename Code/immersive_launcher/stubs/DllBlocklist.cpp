@@ -1,7 +1,10 @@
+#include <cstddef>
 #include <filesystem>
 #include <iostream>
 #include <fstream>
 #include <regex>
+#include <string>
+#include <vector>
 #define SPDLOG_WCHAR_FILENAMES
 #include <spdlog/formatter.h>
 
@@ -38,7 +41,114 @@ struct DllGreyEntry
     const wchar_t* m_prompt;            // The MessageBox prompt asking for permission to fix.
     const char*    m_sigToInsert;       // This is added at the top of the rewritten config. It can/should say more than just the pattern match signature.
     const char*    m_replacers;         // Regex replacers. Regex & replacement separated by newlines.
-};                                      //     You can have more than one replacer, also separated by newlines
+                                        //     You can have more than one replacer, also separated by newlines
+    void (*m_afterAccept)(const std::filesystem::path& acGamePath) = nullptr; // Run once the config is accepted.
+};
+
+// Engine Fixes 7.x settings this launcher cannot run the game with, switched off in the override file the mod reads
+// after its own (EngineFixesCustom.toml, which is the user's to edit; the lines written here say why they are there).
+//
+// Two of its guards only accept game code where Windows puts the game when it starts the exe itself, at
+// 0x7FF0'0000'0000 and above (EngineFixesSkyrim64 src/util.h, EmitLoadedSlotGuard). This launcher maps the game at
+// 0x1'4000'0000, so the guards took every game function for freed memory. bCullingFreedObjectCrash then skipped
+// every object's OnVisible and nothing was drawn: a black view with sound and menus working (a tester with 7.9.0,
+// then the rig with 7.10.0 on 2026-10-05 -- black with it on, the scene back with only it off, twice).
+// bSceneGraphDetachFreedCrash uses the same check to skip child nodes while the scene graph is torn down.
+struct TomlSetting
+{
+    const char* m_section;
+    const char* m_key;
+    const char* m_value;
+    const char* m_why;
+};
+
+constexpr TomlSetting kEngineFixes7Settings[] = {
+    {"Fixes", "bCullingFreedObjectCrash", "false", "on, it blacks out the view"},
+    {"Fixes", "bSceneGraphDetachFreedCrash", "false", "on, it skips taking apart every part of a scene being unloaded"},
+};
+
+std::string Trim(const std::string& acText)
+{
+    const auto first = acText.find_first_not_of(" \t\r");
+    if (first == std::string::npos)
+        return {};
+    return acText.substr(first, acText.find_last_not_of(" \t\r") - first + 1);
+}
+
+void EnsureEngineFixes7Settings(const std::filesystem::path& acGamePath)
+{
+    const std::filesystem::path path = acGamePath / L"Data\\SKSE\\Plugins\\EngineFixesCustom.toml";
+
+    std::vector<std::string> lines;
+    {
+        std::ifstream in(path);
+        for (std::string line; std::getline(in, line);)
+            lines.push_back(Trim(line).empty() ? std::string{} : line.substr(0, line.find_last_not_of('\r') + 1));
+    }
+
+    bool changed = false;
+    for (const TomlSetting& setting : kEngineFixes7Settings)
+    {
+        const std::string header = std::string("[") + setting.m_section + "]";
+        const std::string wanted = std::string(setting.m_key) + " = " + setting.m_value + "    # Skyrim Together: " + setting.m_why +
+                                   " under the Skyrim Together launcher";
+
+        size_t sectionAt = std::string::npos;
+        size_t sectionEnd = lines.size();
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            const std::string trimmed = Trim(lines[i]);
+            if (sectionAt == std::string::npos)
+            {
+                if (trimmed == header)
+                    sectionAt = i;
+            }
+            else if (!trimmed.empty() && trimmed[0] == '[')
+            {
+                sectionEnd = i;
+                break;
+            }
+        }
+
+        if (sectionAt == std::string::npos)
+        {
+            if (!lines.empty())
+                lines.push_back({});
+            lines.push_back(header);
+            lines.push_back(wanted);
+            changed = true;
+            continue;
+        }
+
+        bool found = false;
+        for (size_t i = sectionAt + 1; i < sectionEnd && !found; ++i)
+        {
+            const std::string trimmed = Trim(lines[i]);
+            const auto equals = trimmed.find('=');
+            if (equals == std::string::npos || Trim(trimmed.substr(0, equals)) != setting.m_key)
+                continue;
+            found = true;
+            const std::string value = Trim(trimmed.substr(equals + 1, trimmed.find('#') == std::string::npos ? std::string::npos : trimmed.find('#') - equals - 1));
+            if (value != setting.m_value)
+            {
+                lines[i] = wanted;
+                changed = true;
+            }
+        }
+        if (!found)
+        {
+            lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(sectionAt) + 1, wanted);
+            changed = true;
+        }
+    }
+
+    if (!changed)
+        return;
+
+    std::ofstream out(path, std::ios::trunc);
+    for (const std::string& line : lines)
+        out << line << '\n';
+}
 
 // Data drive this. The intent is make sure we can put this in an external file for easy updates
 // (although the format would probably be updated to something standard like JSON then, it 
@@ -85,7 +195,8 @@ const DllGreyEntry kDllGreyList[] =
         "",                             // No sig regex
         L"",                            // No prompt
         "",                             // No sig to insert
-        nullptr                         // We need to check for EF7 vs. EF6, but don't need any changes for EF7.
+        nullptr,                        // Nothing rewritten in EngineFixes.toml itself...
+        &EnsureEngineFixes7Settings     // ...but two of its guards are switched off in the user overrides.
     }
 };
 
@@ -233,7 +344,11 @@ enum GreyListDisposition IsDllGreyListBlocked(const std::wstring_view aDllName)
             // so only exit iteration early if config accepted.
             retval = IsConfigOK(gamePath, greyListEntry);
             if (retval == kGreyListAccept)
+            {
+                if (greyListEntry.m_afterAccept)
+                    greyListEntry.m_afterAccept(gamePath);
                 break;
+            }
         }
     }
     return retval;
