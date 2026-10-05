@@ -4,9 +4,13 @@ Vortex works. It writes mods straight into the game's `Data` folder (hardlinks b
 launcher sees them without going through Vortex at all. Mod Organizer 2 is only what the developers
 tested on.
 
-1. Install the usual SKSE mods through Vortex like any other mod: SKSE VR, VR Address Library for
-   SKSEVR, Engine Fixes VR, and VRIK (recommended, it is the body your friend sees). Both players
-   should run the same list; different setups are the number one cause of "he sees a bear, I see a wolf".
+1. Install the usual SKSE mods through Vortex like any other mod: SKSE VR and VR Address Library for
+   SKSEVR (required), and VRIK (recommended, it is the body your friend sees). Engine Fixes VR is
+   optional: Skyrim Together does not need it (the launcher raises the open-file limit itself), but its
+   general crash fixes help a big modlist. If the game misbehaves with it (a black view, a hang), leave it
+   off; an SKSE plugin built for another version of the address library patches the wrong places. Both
+   players should run the same list; different setups are the number one cause of "he sees a bear, I see
+   a wolf".
 2. Zip the folder `Skyrim Together mod` (right click, Send to, Compressed folder), then in Vortex go to
    Mods, Install From File, pick that zip, and enable the mod. In the Plugins tab enable
    `SkyrimTogether.esp`. Deploy if Vortex asks.
