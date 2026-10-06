@@ -21,6 +21,7 @@ struct OwnershipTransferEvent;
 struct MountRequest;
 struct NewPackageRequest;
 struct RequestRespawn;
+struct ClashRequest;
 struct SyncExperienceRequest;
 struct DialogueRequest;
 struct SubtitleRequest;
@@ -62,6 +63,7 @@ protected:
     void OnMountRequest(const PacketEvent<MountRequest>& acMessage) const noexcept;
     void OnNewPackageRequest(const PacketEvent<NewPackageRequest>& acMessage) const noexcept;
     void OnRequestRespawn(const PacketEvent<RequestRespawn>& acMessage) const noexcept;
+    void OnClashRequest(const PacketEvent<ClashRequest>& acMessage) const noexcept;
     void OnSyncExperienceRequest(const PacketEvent<SyncExperienceRequest>& acMessage) const noexcept;
     void OnDialogueRequest(const PacketEvent<DialogueRequest>& acMessage) const noexcept;
     void OnSubtitleRequest(const PacketEvent<SubtitleRequest>& acMessage) const noexcept;
@@ -96,6 +98,7 @@ private:
     entt::scoped_connection m_mountConnection;
     entt::scoped_connection m_newPackageConnection;
     entt::scoped_connection m_requestRespawnConnection;
+    entt::scoped_connection m_clashConnection;
     entt::scoped_connection m_syncExperienceConnection;
     entt::scoped_connection m_dialogueConnection;
     entt::scoped_connection m_subtitleConnection;

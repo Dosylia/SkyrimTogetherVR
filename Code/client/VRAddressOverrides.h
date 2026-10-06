@@ -3015,4 +3015,14 @@ static constexpr VRAddressOverrideEntry kVRAddressOverrides[] = {
     { 33236u, 0x050e7a0u }, // SE 32489 CombatController update-target hook (s_updateTarget)
     { 21600u, 0x03067f0u }, // SE 21600 PlayerCamera::IsFirstPerson helper
     { 63591u, 0x0b5f9a0u }, // SE 63591 BShkbAnimationGraph internal send event
+
+    // Havok calls with no SE/AE id in either address library. Ids from 9000001 up are private to this table (no
+    // library uses that range). VR addresses from PLANCK's src/RE/offsets.cpp (github.com/adamhynek/activeragdoll),
+    // in use on Emma's game every session; used by VRBodySync for the other player's sword (Physics queue P1).
+    { 9000001u, 0x0ab0cb0u }, // hkpWorld::addEntity
+    { 9000002u, 0x0aa9030u }, // hkpEntity::setPositionAndRotation
+    { 9000009u, 0x0dfb722u }, // the call to ahkpWorld::stepDeltaTime in bhkWorld::Update (HIGGS prePhysicsStepHookLoc)
+    { 9000010u, 0x0a02b10u }, // hkRealTohkUFloat8 (PLANCK's offsets.cpp)
+    { 9000011u, 0x0b266abu }, // the call to hkbRagdollDriver::driveToPose (PLANCK's driveToPoseHookLoc)
+    { 9000012u, 0x0b268dcu }, // the call to hkbRagdollDriver::postPhysics (PLANCK's postPhysicsHookLoc)
 };

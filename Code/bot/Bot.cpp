@@ -1,6 +1,7 @@
 #include "Bot.h"
 
 #include <Messages/AssignCharacterRequest.h>
+#include <Messages/DrawWeaponRequest.h>
 #include <Messages/AuthenticationRequest.h>
 #include <Messages/AuthenticationResponse.h>
 #include <Messages/ClientReferencesMoveRequest.h>
@@ -15,6 +16,8 @@
 #include <Messages/NotifyDroppedItem.h>
 #include <Messages/NotifyDroppedItemRemoved.h>
 #include <Messages/NotifyDroppedItemMove.h>
+#include <Messages/ClashRequest.h>
+#include <Messages/NotifyClash.h>
 #include <Messages/NotifyWorldObjectMove.h>
 #include <Messages/ActivateRequest.h>
 #include <Messages/NotifyActivate.h>
@@ -628,6 +631,8 @@ void Bot::SendMovement() noexcept
     movement.CellId = m_cell;
     movement.WorldSpaceId = m_worldSpace;
     movement.Direction = 0.f;
+    if (m_holdPose && m_lastReplayedPose.HasData)
+        update.UpdatedVRPose = m_lastReplayedPose;
 
     SendMsg(message);
     m_lastMovement = Clock::now();
@@ -674,7 +679,7 @@ void Bot::SendDeath(const bool aDead) noexcept
     spdlog::info("Death state {} sent", aDead ? "dead" : "alive");
 }
 
-void Bot::SendHit(const uint32_t aTargetId, const float aDelta) noexcept
+void Bot::SendHit(const uint32_t aTargetId, const float aDelta, const uint64_t aTick) noexcept
 {
     if (!m_hasCharacter || aTargetId == kNoId)
         return;
@@ -685,9 +690,11 @@ void Bot::SendHit(const uint32_t aTargetId, const float aDelta) noexcept
     RequestHealthChangeBroadcast request{};
     request.Id = aTargetId;
     request.DeltaHealth = aDelta;
+    const uint64_t cNow = GetClock().GetCurrentTick();
+    request.Tick = aTick ? aTick : cNow;
     SendMsg(request);
 
-    spdlog::info("Hit {:X} for {:.1f}", aTargetId, aDelta);
+    spdlog::info("Hit {:X} for {:.1f}, at tick {} ({} ms ago)", aTargetId, aDelta, request.Tick, static_cast<int64_t>(cNow) - static_cast<int64_t>(request.Tick));
 }
 
 void Bot::SendEquip(const uint32_t aBaseId, const uint32_t aSlot, const bool aUnequip, const bool aSpell) noexcept
@@ -1073,6 +1080,20 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
                          message.Item.Count, message.CellId.BaseId, message.Position.x, message.Position.y, message.Position.z);
             Record(Collect::Spawn, fmt::format("drop {} {:X}", message.Id, message.Item.BaseId.BaseId));
         }
+        return;
+    }
+
+    if (opcode == NotifyClash::Opcode)
+    {
+        const auto& message = static_cast<const NotifyClash&>(acMessage);
+        ++m_clashes;
+        m_lastClashTick = message.Tick;
+        const glm::vec3 cPoint(message.Point);
+        const int64_t cAgo = static_cast<int64_t>(GetClock().GetCurrentTick()) - static_cast<int64_t>(message.Tick);
+        spdlog::info("Clash from {}: its {} met the {} weapon of {} at ({:.0f}, {:.0f}, {:.0f}), {:.0f} units a second, {} ms ago", message.FromId,
+                     message.OwnSide == 0 ? "left hand" : message.OwnSide == 1 ? "right hand" : "hand", message.OtherSide ? "right" : "left", message.OtherId, cPoint.x, cPoint.y,
+                     cPoint.z, message.Speed, cAgo);
+        Record(Collect::Movement, fmt::format("clash from {} on {}", message.FromId, message.OtherId));
         return;
     }
 
@@ -1518,6 +1539,8 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
                     update.UpdatedVRPose.RightHandOffset[i] = m_handTargets[1][i];
                 }
             }
+            if (!asNpc && update.UpdatedVRPose.HasData)
+                m_lastReplayedPose = update.UpdatedVRPose;
             const glm::vec3 place = m_replayBase + (FromNet(captured.Update.UpdatedMovement.Position) - origin);
             update.UpdatedMovement.Position = ToNet(place);
             update.UpdatedMovement.CellId = m_cell;
@@ -1616,7 +1639,20 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
             return true;
         }
 
-        SendHit(target, arg(1, -30.f));
+        // "atclash": stamped at the moment the last clash relayed to this bot was seen on the other player's screen,
+        // less the VR playback delay (225 ms, CharacterService::RunRemoteUpdates): a hit the defender's game showed
+        // landing just as its weapon met this one.
+        uint64_t tick = 0;
+        if (args.size() > 2 && args[2] == "atclash")
+        {
+            if (!m_lastClashTick)
+            {
+                spdlog::error("[script] hit ... atclash: no clash relayed yet");
+                return true;
+            }
+            tick = m_lastClashTick > 225 ? m_lastClashTick - 225 : 1;
+        }
+        SendHit(target, arg(1, -30.f), tick);
         return true;
     }
 
@@ -1972,6 +2008,88 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
     // A cell change by coordinates sends no cell-change message, so the bot would not follow the host there on its
     // own (live-whiterun, 2026-10-03: it stayed at Mistwatch while the player stood at Whiterun's gate). The grid it
     // now stands in is reported on the next tick.
+    // "teleport away": far out of everyone's range (fifteen cells east), so the other players' copies of this
+    // character are removed; "teleport back": to where it left from, cell included, so the server sends the
+    // character again -- with whatever it holds now, e.g. a weapon drawn ("draw on").
+    if (name == "teleport" && !args.empty() && (args[0] == "away" || args[0] == "back"))
+    {
+        if (args[0] == "away")
+        {
+            m_awayFrom = m_position;
+            m_awayFromCell = m_cell;
+            m_awayFromStandalone = m_standaloneCell;
+            m_isAway = true;
+            m_position.x += 61440.f;
+            m_standaloneCell = true;
+            m_cell = GameId{};
+        }
+        else if (m_isAway)
+        {
+            m_position = m_awayFrom;
+            m_cell = m_awayFromCell;
+            m_standaloneCell = m_awayFromStandalone;
+            m_isAway = false;
+        }
+        spdlog::info("[script] teleported {} ({:.0f}, {:.0f})", args[0], m_position.x, m_position.y);
+        return true;
+    }
+
+    // "holdpose on|off": after a replay, keep sending the last VR pose it sent with this character's movement, so the
+    // copy stays posed for as long as a test needs (the replayed stream alone ends, and the copy's pose with it).
+    if (name == "holdpose")
+    {
+        m_holdPose = args.empty() || args[0] != "off";
+        spdlog::info("[script] holding the last replayed pose: {}{}", m_holdPose ? "on" : "off", m_holdPose && !m_lastReplayedPose.HasData ? " (none replayed yet)" : "");
+        return true;
+    }
+
+    // "clash other|<hex> [left|right]": this character's hand met that character's weapon (ClashRequest), as a client
+    // says it when the other player's sword touches one of its HIGGS bodies.
+    if (name == "clash")
+    {
+        uint32_t id = kNoId;
+        if (!args.empty() && args[0] == "other")
+        {
+            for (const auto& player : m_players)
+                if (player.ServerId != m_serverId)
+                {
+                    id = player.ServerId;
+                    break;
+                }
+        }
+        else if (!args.empty())
+            id = static_cast<uint32_t>(std::strtoul(args[0].c_str(), nullptr, 16));
+        if (!m_hasCharacter || id == kNoId)
+        {
+            spdlog::error("[script] clash needs a character to have met, e.g. 'clash other right'");
+            return true;
+        }
+        ClashRequest request{};
+        request.OtherId = id;
+        request.OtherSide = args.size() > 1 && args[1] == "left" ? 0 : 1;
+        request.OwnSide = 1;
+        request.Point = m_position;
+        request.Speed = 250.f;
+        request.Tick = GetClock().GetCurrentTick();
+        SendMsg(request);
+        spdlog::info("[script] clash sent against {} ({} weapon)", id, request.OtherSide ? "right" : "left");
+        return true;
+    }
+
+    // "draw on|off": this character's weapon drawn or sheathed, as a client says it (DrawWeaponRequest). The server
+    // keeps it and sends it with the character the next time it is spawned for someone; it is not passed on live.
+    if (name == "draw")
+    {
+        if (!m_hasCharacter)
+            return true;
+        DrawWeaponRequest request{};
+        request.Id = m_serverId;
+        request.IsWeaponDrawn = args.empty() || args[0] != "off";
+        SendMsg(request);
+        spdlog::info("[script] weapon {}", request.IsWeaponDrawn ? "drawn" : "sheathed");
+        return true;
+    }
+
     if (name == "teleport")
     {
         float x = 0.f, y = 0.f;
@@ -2615,6 +2733,23 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
             return std::nullopt;
         const float value = static_cast<float>(m_objectMoves);
         aOutWhy = fmt::format("{} world-object move(s) relayed", m_objectMoves);
+        const std::string& op = acArgs[1];
+        if (op == "==") return value == wanted;
+        if (op == ">=") return value >= wanted;
+        if (op == "<=") return value <= wanted;
+        if (op == ">") return value > wanted;
+        if (op == "<") return value < wanted;
+        return std::nullopt;
+    }
+
+    if (what == "clashes")
+    {
+        // clashes <op> <n>: clashes the server relayed to this bot (NotifyClash).
+        float wanted = 0.f;
+        if (acArgs.size() < 3 || !ParseFloat(acArgs[2], wanted))
+            return std::nullopt;
+        const float value = static_cast<float>(m_clashes);
+        aOutWhy = fmt::format("{} clash(es) relayed", m_clashes);
         const std::string& op = acArgs[1];
         if (op == "==") return value == wanted;
         if (op == ">=") return value >= wanted;

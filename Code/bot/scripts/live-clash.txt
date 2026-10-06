@@ -1,0 +1,77 @@
+# Clash events (Physics queue P4): a sword held with HIGGS meets the other player's physical sword, and both hear of it.
+#
+#   python Tools\VR\live-check.py live-clash
+#
+# The steps of live-higgs-block: the copy holds a drawn iron sword, a body in this world (VRWeaponBody); the player's
+# right HIGGS hand grabs an iron sword by script and is moved onto the copy's blade. The client should see the contact as
+# a clash (the copy's sword against something the player's HIGGS hand holds), feel it on that hand and send it; the
+# server passes it to the copy's owner, this bot. Then the other way: the bot says its hand met the player's right
+# weapon, and the client should hear of it and feel it on its right hand. Both sides play the game's blade-block sound
+# at the point (the rig has no controllers, so the haptic pulse itself is not measured).
+log live clash
+waitfor connected 45
+# Daylight, for a screenshot that shows something (the test game's clock; her saves are put back afterwards).
+log DO console set gamehour to 13
+expect known me
+waitfor known other 40
+wait 3
+
+# The copy draws (see live-sword-body).
+additem 12EB7
+equip 12EB7
+wait 1
+draw on
+wait 1
+teleport away
+wait 6
+teleport back
+wait 8
+log CHECK logged Player copy \w+ came with its weapon drawn
+
+# In view of the headset, then the copy posed by the player's own stream, held after the replay.
+log DO papyrus ObjectReference MoveTo 14 copy f:50 f:0 f:0 b:false
+wait 3
+capture other 12
+wait 1
+handtargets -15 15 70 15 20 80
+holdpose on
+replay me 2
+wait 3
+log CHECK logged VRWeaponBody: actor \w+ right weapon .* is a body in the world now
+
+# A sword in the player's right hand, by HIGGS. The bot waits out each step: live-check performs them on the game's side
+# and they take seconds, and the copy (with its sword) is gone as soon as the bot stops.
+log DO papyrus Actor SheatheWeapon 14
+wait 4
+log DO drop 12EB7 here
+wait 7
+log DO grab dropped right
+wait 5
+log DO sample held 2
+wait 4
+
+# Onto the copy's blade.
+log DO bring held to copy weapon
+wait 3
+log DO sample held 4
+wait 6
+log CHECK logged VRWeaponBody: actor \w+ right weapon touches a body .*held by the player's HIGGS hand
+log CHECK logged Clash: our (left|right) hand .*met the right weapon of \w+ .*felt and heard here, sent
+waitfor clashes >= 1 10
+log SHOT held against copy of copy
+log CHECK game alive
+wait 4
+
+# One meeting, a clash or two -- not one every quarter second while the hand rests on the blade.
+expect clashes <= 4
+
+# The other way: this bot's hand met the player's right weapon.
+clash other right
+wait 3
+log CHECK logged Clash from server \d+: their right hand met our right weapon
+log CHECK logged Clash from server \d+: heard, felt
+
+holdpose off
+wait 2
+log done
+stop

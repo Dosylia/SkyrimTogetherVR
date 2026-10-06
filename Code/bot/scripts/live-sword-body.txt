@@ -1,0 +1,79 @@
+# Is the other player's sword a physical thing in this game? (Physics queue P1, VR_TODO.md.)
+#
+#   python Tools\VR\live-check.py live-sword-body
+#
+# The bot's copy holds a drawn iron sword in the pose the bot replays (the player's own stream, as in
+# live-weapon-grip), and the bot goes on sending the last of that pose afterwards ("holdpose"): a stream without a
+# pose hands the copy back to its animation, and its sword's body leaves the world with it. A plate is dropped just
+# above the centre of mass of the sword's body. With nothing physical there it falls through to the ground; with the
+# sword a physical body, it hits the blade -- Havok says so (VRWeaponBody: "... touches a body on layer 4"). It does
+# not stay there: a plate does not balance on a blade's edge, and in the rig the sword is held low (no controllers,
+# so the recorded arms hang; 2026-10-06).
+# The client also logs what the Havok world holds for the copy ("PhysicsProbe: actor ...") and which collision
+# layers collide with which, once per session.
+log live sword body
+waitfor connected 45
+# Daylight, for a screenshot that shows something (the test game's clock; her saves are put back afterwards).
+log DO console set gamehour to 13
+expect known me
+waitfor known other 40
+wait 3
+
+# The bot's own character holds the sword (a copy draws only what it has equipped) and says it is drawn ("draw on").
+# The server keeps that and sends it with the character the next time it is spawned for someone, so the bot leaves
+# range and comes back: the copy is spawned again "with its weapon drawn", and the client draws it
+# (SetWeaponDrawnEx, Actor::SetWeaponDrawn -- which on VR called the wrong virtual until 2026-10-06: "set drawn; the
+# game now says sheathed", both passes).
+additem 12EB7
+equip 12EB7
+wait 1
+draw on
+wait 1
+teleport away
+wait 6
+teleport back
+wait 8
+log CHECK logged Player copy \w+ came with its weapon drawn
+log CHECK logged Weapon of player copy \w+ set drawn \(first pass\); the game went from sheathed to (wantToDraw|drawing|drawn)
+
+# The player draws too, so the pose the bot replays has a sword held (VRPose::HasWeapons) and the copy's is placed in it.
+log DO console player.additem 12EB7 1
+log DO console player.equipitem 12EB7
+wait 2
+log DO papyrus Actor DrawWeapon 14
+wait 4
+
+# In view of the headset (see live-hands), or the copy is not posed at all.
+log DO papyrus ObjectReference MoveTo 14 copy f:50 f:0 f:0 b:false
+wait 3
+log -- recording the player's stream for 12 s
+capture other 12
+wait 1
+handtargets -15 15 70 15 20 80
+holdpose on
+replay me 3
+wait 3
+
+log CHECK logged PhysicsProbe: actor \w+ --
+log CHECK logged PhysicsProbe: actor \w+ right weapon drawn at
+# The sword's own body in the world (VRWeaponBody), where Havok keeps it: read back right where it was put (the motion
+# state offset is right), then within a few units of the drawn sword frame after frame (the drive works).
+log CHECK logged VRWeaponBody: actor \w+ right weapon .* is a body in the world now: layer 8
+log CHECK logged VRWeaponBody: actor \w+ right weapon .* placed, it reads [0-2]\.\d units from where it was put
+log CHECK logged VRWeaponBody: actor \w+ right weapon body [0-9]\.\d units from where the weapon is drawn
+log DO drop 31941 onto copy weapon body 12
+wait 3
+log CHECK logged VRWeaponBody: actor \w+ right weapon touches a body on layer 4
+log SHOT sword of copy
+
+# The copy leaves range and its sword's body leaves the world with it.
+holdpose off
+teleport away
+wait 4
+log CHECK logged VRWeaponBody: actor \w+ right weapon body out of the world
+teleport back
+wait 8
+log CHECK game alive
+wait 3
+log done
+stop

@@ -16,7 +16,7 @@ struct NotifyHealthChangeBroadcast final : ServerMessage
 
     bool operator==(const NotifyHealthChangeBroadcast& acRhs) const noexcept
     {
-        return Id == acRhs.Id && DeltaHealth == acRhs.DeltaHealth && AttackerPlayerId == acRhs.AttackerPlayerId && GetOpcode() == acRhs.GetOpcode();
+        return Id == acRhs.Id && DeltaHealth == acRhs.DeltaHealth && AttackerPlayerId == acRhs.AttackerPlayerId && Tick == acRhs.Tick && GetOpcode() == acRhs.GetOpcode();
     }
 
     uint32_t Id;
@@ -25,4 +25,6 @@ struct NotifyHealthChangeBroadcast final : ServerMessage
     //! actor uses it to put that player in its combat, so an NPC fights everyone hitting it and not only whoever
     //! angered it first.
     uint32_t AttackerPlayerId{};
+    //! When it happened in the attacker's game, on the server's clock; 0 when not known (RequestHealthChangeBroadcast).
+    uint64_t Tick{};
 };

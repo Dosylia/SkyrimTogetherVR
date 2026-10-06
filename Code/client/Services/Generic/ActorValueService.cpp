@@ -13,6 +13,8 @@
 #include <Events/ConnectedEvent.h>
 #include <Events/DisconnectedEvent.h>
 #include <Events/HealthChangeEvent.h>
+#include <Events/ClashEvent.h>
+#include <PlayerCharacter.h>
 
 #include <Messages/NotifyActorValueChanges.h>
 #include <Messages/RequestActorValueChanges.h>
@@ -38,6 +40,7 @@ ActorValueService::ActorValueService(World& aWorld, entt::dispatcher& aDispatche
     m_dispatcher.sink<NotifyActorMaxValueChanges>().connect<&ActorValueService::OnActorMaxValueChanges>(this);
     m_dispatcher.sink<HealthChangeEvent>().connect<&ActorValueService::OnHealthChange>(this);
     m_dispatcher.sink<NotifyHealthChangeBroadcast>().connect<&ActorValueService::OnHealthChangeBroadcast>(this);
+    m_dispatcher.sink<ClashEvent>().connect<&ActorValueService::OnClash>(this);
     m_dispatcher.sink<NotifyDeathStateChange>().connect<&ActorValueService::OnDeathStateChange>(this);
 }
 
@@ -76,6 +79,8 @@ void ActorValueService::OnDisconnected(const DisconnectedEvent& acEvent) noexcep
 {
     // TODO: this crashes sometimes, no clue why
     m_world.clear<ActorValuesComponent>();
+    m_heldHits.clear();
+    m_clashes.clear();
 }
 
 void ActorValueService::OnActorRemoved(const ActorRemovedEvent& acEvent) noexcept
@@ -104,6 +109,7 @@ void ActorValueService::OnUpdate(const UpdateEvent& acEvent) noexcept
     PerfScope perfScope("ActorValueService::OnUpdate");
 
     RunSmallHealthUpdates();
+    RunHeldHits();
     RunDeathStateUpdates();
     RunActorValuesUpdates();
 }
@@ -233,6 +239,7 @@ void ActorValueService::OnHealthChange(const HealthChangeEvent& acEvent) noexcep
     RequestHealthChangeBroadcast requestHealthChange;
     requestHealthChange.Id = serverId;
     requestHealthChange.DeltaHealth = acEvent.DeltaHealth;
+    requestHealthChange.Tick = m_transport.GetClock().GetCurrentTick();
 
     m_transport.Send(requestHealthChange);
 
@@ -257,6 +264,7 @@ void ActorValueService::RunSmallHealthUpdates() noexcept
             RequestHealthChangeBroadcast requestHealthChange;
             requestHealthChange.Id = value.first;
             requestHealthChange.DeltaHealth = value.second;
+            requestHealthChange.Tick = m_transport.GetClock().GetCurrentTick();
 
             m_transport.Send(requestHealthChange);
 
@@ -319,7 +327,87 @@ void ActorValueService::RunActorValuesUpdates() noexcept
     BroadcastActorValues();
 }
 
-void ActorValueService::OnHealthChangeBroadcast(const NotifyHealthChangeBroadcast& acMessage) const noexcept
+namespace
+{
+// The defender's rule (Physics queue P4; agreed 2026-10-06: the defender's screen decides whether a hit was blocked).
+// This game shows the other player's VR pose 225 ms after it happened (CharacterService::RunRemoteUpdates), so a hit
+// that happened at tick t in the attacker's game is seen here at t + 225. It is held until a little after that, and
+// dropped if this player's hand, or what it held, met that player's weapon around that moment.
+constexpr uint64_t kHitSeenAfter = 225;
+// The blades meet before the hit would have landed (the blade still had to reach the body), and a contact is only
+// taken at the next frames. First values, to be measured in a fight between two headsets.
+constexpr uint64_t kBlockBefore = 300;
+constexpr uint64_t kBlockAfter = 100;
+} // namespace
+
+void ActorValueService::OnClash(const ClashEvent& acEvent) noexcept
+{
+    m_clashes.push_back({acEvent.FormId, acEvent.Tick});
+}
+
+void ActorValueService::RunHeldHits() noexcept
+{
+    if (m_heldHits.empty() && m_clashes.empty())
+        return;
+
+    const uint64_t cNow = m_transport.GetClock().GetCurrentTick();
+    // Kept a while: a hit can arrive late.
+    m_clashes.erase(std::remove_if(m_clashes.begin(), m_clashes.end(), [cNow](const auto& acClash) { return acClash.second + 30000 < cNow; }), m_clashes.end());
+
+    for (auto it = m_heldHits.begin(); it != m_heldHits.end();)
+    {
+        const uint64_t cSeen = it->Tick + kHitSeenAfter;
+        // A tick from the future (a clock not yet in step) is not waited for.
+        if (cNow < cSeen + kBlockAfter && it->Tick < cNow + 5000)
+        {
+            ++it;
+            continue;
+        }
+
+        uint32_t copy = 0;
+        auto view = m_world.view<FormIdComponent, PlayerComponent>();
+        for (const auto entity : view)
+            if (view.get<PlayerComponent>(entity).Id == it->AttackerPlayerId)
+            {
+                copy = view.get<FormIdComponent>(entity).Id;
+                break;
+            }
+        const auto clash = std::find_if(m_clashes.begin(), m_clashes.end(), [copy, cSeen](const auto& acClash)
+                                        { return copy && acClash.first == copy && acClash.second + kBlockBefore >= cSeen && acClash.second <= cSeen + kBlockAfter; });
+        if (clash != m_clashes.end())
+        {
+            const int64_t cOffset = static_cast<int64_t>(clash->second) - static_cast<int64_t>(cSeen);
+            spdlog::info("Defender's rule: a hit of {:.0f} from player {} is blocked: our weapon met theirs {} ms {} it was seen here", -it->DeltaHealth, it->AttackerPlayerId,
+                         std::abs(cOffset), cOffset <= 0 ? "before" : "after");
+        }
+        else
+        {
+            spdlog::info("Defender's rule: a hit of {:.0f} from player {} lands, {} ms after it happened; nothing of ours met their weapon", -it->DeltaHealth, it->AttackerPlayerId,
+                         static_cast<int64_t>(cNow) - static_cast<int64_t>(it->Tick));
+            ApplyHealthChange(*it);
+        }
+        it = m_heldHits.erase(it);
+    }
+}
+
+void ActorValueService::OnHealthChangeBroadcast(const NotifyHealthChangeBroadcast& acMessage) noexcept
+{
+#ifdef SKYRIMVR
+    // Another player's hit on this player waits for the defender's rule (RunHeldHits).
+    if (acMessage.DeltaHealth < 0.f && acMessage.AttackerPlayerId)
+        if (Actor* pActor = Utils::GetByServerId<Actor>(acMessage.Id); pActor && pActor == PlayerCharacter::Get())
+        {
+            NotifyHealthChangeBroadcast held = acMessage;
+            if (!held.Tick)
+                held.Tick = m_transport.GetClock().GetCurrentTick();
+            m_heldHits.push_back(held);
+            return;
+        }
+#endif
+    ApplyHealthChange(acMessage);
+}
+
+void ActorValueService::ApplyHealthChange(const NotifyHealthChangeBroadcast& acMessage) const noexcept
 {
     Actor* pActor = Utils::GetByServerId<Actor>(acMessage.Id);
     if (!pActor)

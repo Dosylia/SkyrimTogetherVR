@@ -234,6 +234,10 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   - **PLANCK is part of it.** The same `live-copies-left-3` run with PLANCK switched off passed (2026-10-03 03:00;
     `modlist.txt` backed up as `modlist.txt.bak-20261003-planck` and restored). PLANCK gives creature bones physics
     bodies (`activeragdoll.dll`); what the crash meets is a body of a creature skeleton whose owner is gone.
+  - Seen again 2026-10-06 14:33 at a new address, `SkyrimVR.exe+0xCBFD24` (a read at 0x1A8 through a null pointer,
+    `NiNode::Destroy`'s neighbourhood on the stack), on the trip of the travel tests, a Loading Menu just queued. The
+    other player's sword body (new that day) had been out of the world for six minutes; the same tests in the next run
+    passed.
   - Tried from our side, none of it a fix: disposing of copies this client runs when their cell unloads (it never ran:
     after a teleport the game has already destroyed them when the client notices); taking our own creatures back
     instead of copying them (right for its own reasons, see the next entry; it only removed the copies from one

@@ -2,6 +2,7 @@
 
 #include <Events/EventDispatcher.h>
 #include <Games/Events.h>
+#include <Messages/NotifyHealthChangeBroadcast.h>
 
 struct World;
 
@@ -16,6 +17,7 @@ struct NotifyActorValueChanges;
 struct NotifyActorMaxValueChanges;
 struct NotifyHealthChangeBroadcast;
 struct NotifyDeathStateChange;
+struct ClashEvent;
 
 struct Actor;
 
@@ -79,7 +81,11 @@ private:
     /**
      * @brief Receives health value changes and applies them locally.
      */
-    void OnHealthChangeBroadcast(const NotifyHealthChangeBroadcast& acMessage) const noexcept;
+    void OnHealthChangeBroadcast(const NotifyHealthChangeBroadcast& acMessage) noexcept;
+    void ApplyHealthChange(const NotifyHealthChangeBroadcast& acMessage) const noexcept;
+    //! The defender's rule: this player's clashes, and the other players' hits held until they are seen here.
+    void OnClash(const ClashEvent& acEvent) noexcept;
+    void RunHeldHits() noexcept;
     //! Puts the player who landed a hit into the combat of an NPC this client owns.
     void StartCombatWithAttacker(Actor* apActor, uint32_t aAttackerPlayerId, float aDeltaHealth) const noexcept;
     /**
@@ -122,4 +128,8 @@ private:
 
     //! @brief Server ids and collected health changes.
     Map<uint32_t, float> m_smallHealthChanges;
+    //! Other players' hits on this player, held until this game shows them (RunHeldHits).
+    Vector<NotifyHealthChangeBroadcast> m_heldHits;
+    //! This player's clashes: the other player's copy and when, on the server's clock.
+    Vector<std::pair<uint32_t, uint64_t>> m_clashes;
 };

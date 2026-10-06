@@ -2,6 +2,7 @@
 #include "Structs/Inventory.h"
 #include "Structs/ActorData.h"
 
+struct NotifyClash;
 struct ActorAddedEvent;
 struct ActorRemovedEvent;
 struct UpdateEvent;
@@ -72,6 +73,8 @@ struct CharacterService
     void OnFactionsChanges(const NotifyFactionsChanges& acEvent) const noexcept;
     void OnOwnershipTransfer(const NotifyOwnershipTransfer& acMessage) noexcept;
     void OnRemoveCharacter(const NotifyRemoveCharacter& acMessage) const noexcept;
+    void OnNotifyClash(const NotifyClash& acMessage) const noexcept;
+    void SendClashes() noexcept;
     void OnMountEvent(const MountEvent& acEvent) const noexcept;
     void OnNotifyMount(const NotifyMount& acMessage) const noexcept;
     void OnInitPackageEvent(const InitPackageEvent& acEvent) const noexcept;
@@ -153,6 +156,7 @@ private:
     entt::scoped_connection m_factionsConnection;
     entt::scoped_connection m_ownershipTransferConnection;
     entt::scoped_connection m_removeCharacterConnection;
+    entt::scoped_connection m_clashConnection;
     entt::scoped_connection m_connectedConnection;
     entt::scoped_connection m_disconnectedConnection;
     entt::scoped_connection m_assignCharacterConnection;

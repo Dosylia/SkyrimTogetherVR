@@ -50,6 +50,9 @@
 #include <Messages/AssignCharacterResponse.h>
 #include <Messages/ServerReferencesMoveRequest.h>
 #include <Messages/ClientReferencesMoveRequest.h>
+#include <Messages/ClashRequest.h>
+#include <Messages/NotifyClash.h>
+#include <Events/ClashEvent.h>
 #include <Messages/CharacterSpawnRequest.h>
 #include <Messages/RequestFactionsChanges.h>
 #include <Messages/NotifyFactionsChanges.h>
@@ -510,6 +513,7 @@ CharacterService::CharacterService(World& aWorld, entt::dispatcher& aDispatcher,
     m_factionsConnection = m_dispatcher.sink<NotifyFactionsChanges>().connect<&CharacterService::OnFactionsChanges>(this);
     m_ownershipTransferConnection = m_dispatcher.sink<NotifyOwnershipTransfer>().connect<&CharacterService::OnOwnershipTransfer>(this);
     m_removeCharacterConnection = m_dispatcher.sink<NotifyRemoveCharacter>().connect<&CharacterService::OnRemoveCharacter>(this);
+    m_clashConnection = m_dispatcher.sink<NotifyClash>().connect<&CharacterService::OnNotifyClash>(this);
 
     m_mountConnection = m_dispatcher.sink<MountEvent>().connect<&CharacterService::OnMountEvent>(this);
     m_notifyMountConnection = m_dispatcher.sink<NotifyMount>().connect<&CharacterService::OnNotifyMount>(this);
@@ -804,6 +808,9 @@ void CharacterService::OnActorRemoved(const ActorRemovedEvent& acEvent) noexcept
 
 void CharacterService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
 {
+#ifdef SKYRIMVR
+    SendClashes();
+#endif
     {
         PerfScope perfScope("CharacterService::RunSpawnUpdates");
         RunSpawnUpdates();
@@ -3336,6 +3343,8 @@ void CharacterService::RunRemoteUpdates() noexcept
         }
 
         m_weaponDrawUpdates[pActor->formID] = {waitingFor3D.SpawnRequest.IsWeaponDrawn};
+        if (waitingFor3D.SpawnRequest.IsPlayer)
+            spdlog::info("Player copy {:X} came with its weapon {}", pActor->formID, waitingFor3D.SpawnRequest.IsWeaponDrawn ? "drawn" : "sheathed");
 
         if (pActor->IsDead() != waitingFor3D.SpawnRequest.IsDead)
         {
@@ -3539,7 +3548,13 @@ void CharacterService::ApplyCachedWeaponDraws(const UpdateEvent& acUpdateEvent) 
             continue;
         }
 
+        // WEAPON_STATE, bits 5-7 of ActorState::flags2: a draw that took shows "wantToDraw" or "drawing" here.
+        static constexpr const char* kWeaponStates[8] = {"sheathed", "wantToDraw", "drawing", "drawn", "wantToSheathe", "sheathing", "6", "7"};
+        const uint32_t cStateBefore = pActor->actorState.flags2 >> 5 & 7;
         pActor->SetWeaponDrawnEx(data.m_drawWeapon);
+        if (pActor->GetExtension()->IsRemotePlayer())
+            spdlog::info("Weapon of player copy {:X} set {} ({} pass); the game went from {} to {}", cId, data.m_drawWeapon ? "drawn" : "sheathed", data.m_isFirstPass ? "first" : "second",
+                         kWeaponStates[cStateBefore], kWeaponStates[pActor->actorState.flags2 >> 5 & 7]);
 
         if (!data.m_isFirstPass)
             toRemove.push_back(cId);
@@ -3549,4 +3564,69 @@ void CharacterService::ApplyCachedWeaponDraws(const UpdateEvent& acUpdateEvent) 
 
     for (uint32_t id : toRemove)
         m_weaponDrawUpdates.erase(id);
+}
+
+// Physics queue P4 (2026-10-06): a clash seen here -- the other player's weapon, a body in this game, met one of this
+// player's HIGGS bodies (VRBodySync) -- is felt here as it is taken and sent, so the other player feels it on the
+// hand holding that weapon.
+void CharacterService::SendClashes() noexcept
+{
+#ifdef SKYRIMVR
+    VRBodySync::Clash clash;
+    while (VRBodySync::TakeClash(clash))
+    {
+        auto view = m_world.view<FormIdComponent, RemoteComponent>();
+        const auto it = std::find_if(view.begin(), view.end(), [&view, &clash](auto entity) { return view.get<FormIdComponent>(entity).Id == clash.FormId; });
+        if (it == view.end())
+            continue;
+        // Every touch is weighed by the defender's rule (ActorValueService); only a meeting is felt, heard and sent.
+        const uint64_t cTick = m_transport.GetClock().GetCurrentTick();
+        m_dispatcher.trigger(ClashEvent{clash.FormId, cTick});
+        if (!clash.Start)
+        {
+            // Said every 5 s while it goes on: the evidence that a resting touch is not taken for meetings.
+            static uint32_t s_touches = 0;
+            static auto s_nextSaid = std::chrono::steady_clock::now();
+            ++s_touches;
+            if (const auto cNow = std::chrono::steady_clock::now(); cNow >= s_nextSaid)
+            {
+                spdlog::info("Clash: {} touch(es) of the weapon of {:X} since the last such line, still touching, not meetings", s_touches, clash.FormId);
+                s_touches = 0;
+                s_nextSaid = cNow + std::chrono::seconds(5);
+            }
+            continue;
+        }
+        ClashRequest request{};
+        request.OtherId = view.get<RemoteComponent>(*it).Id;
+        request.OtherSide = clash.Side;
+        request.OwnSide = clash.OwnSide;
+        request.Point = clash.Point;
+        request.Speed = clash.Speed;
+        request.Tick = cTick;
+        m_transport.Send(request);
+        spdlog::info("Clash: our {} ({:.0f} units from its HIGGS body) met the {} weapon of {:X} (server {}) at ({:.0f}, {:.0f}, {:.0f}), {:.0f} units a second; felt{} here, sent",
+                     clash.OwnSide == 0 ? "left hand" : clash.OwnSide == 1 ? "right hand" : "hand or weapon", clash.HandDistance, clash.Side ? "right" : "left", clash.FormId, request.OtherId,
+                     clash.Point.x, clash.Point.y, clash.Point.z, clash.Speed, clash.Heard ? " and heard" : "");
+    }
+#endif
+}
+
+void CharacterService::OnNotifyClash(const NotifyClash& acMessage) const noexcept
+{
+    // Every player near it is told; the one whose weapon it was feels it.
+    auto view = m_world.view<FormIdComponent, LocalComponent>();
+    const auto it = std::find_if(view.begin(), view.end(), [&view](auto entity) { return view.get<FormIdComponent>(entity).Id == 0x14; });
+    const bool cOurs = it != view.end() && view.get<LocalComponent>(*it).Id == acMessage.OtherId;
+    const glm::vec3 point(acMessage.Point);
+    const int64_t cAgo = static_cast<int64_t>(m_transport.GetClock().GetCurrentTick()) - static_cast<int64_t>(acMessage.Tick);
+    spdlog::info("Clash from server {}: their {} met {} {} weapon at ({:.0f}, {:.0f}, {:.0f}), {:.0f} units a second, {} ms ago", acMessage.FromId,
+                 acMessage.OwnSide == 0 ? "left hand" : acMessage.OwnSide == 1 ? "right hand" : "hand or weapon", cOurs ? "our" : fmt::format("{}'s", acMessage.OtherId),
+                 acMessage.OtherSide ? "right" : "left", point.x, point.y, point.z, acMessage.Speed, cAgo);
+#ifdef SKYRIMVR
+    // Heard by everyone near it, felt by the one whose weapon it was.
+    const bool cHeard = VRBodySync::SoundClash(point);
+    if (cOurs)
+        VRBodySync::FeelClash(acMessage.OtherSide);
+    spdlog::info("Clash from server {}: {}{}", acMessage.FromId, cHeard ? "heard" : "not heard (no sound)", cOurs ? ", felt" : "");
+#endif
 }

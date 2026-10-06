@@ -1,0 +1,66 @@
+# A sword held with HIGGS against the other player's physical sword (Physics queue P3).
+#
+#   python Tools\VR\live-check.py live-higgs-block
+#
+# The copy holds a drawn iron sword, posed as in live-sword-body, so its sword is a body in this world (VRWeaponBody).
+# The player's right HIGGS hand grabs an iron sword from the ground by script (HiggsVR.GrabObject; the rig has no
+# controllers to grab with), and the player is moved so that sword meets the centre of the copy's blade. A held object
+# is dynamic, pulled to the hand by HIGGS's grab constraint; the copy's sword is keyframed. Havok should push the held
+# sword out of the blade: it stops there instead of passing through. The sampled positions say how far it stays from
+# the blade and how far from the player's hand, and the client logs what the copy's sword touches.
+log live higgs block
+waitfor connected 45
+# Daylight, for a screenshot that shows something (the test game's clock; her saves are put back afterwards).
+log DO console set gamehour to 13
+expect known me
+waitfor known other 40
+wait 3
+
+# The copy draws (see live-sword-body).
+additem 12EB7
+equip 12EB7
+wait 1
+draw on
+wait 1
+teleport away
+wait 6
+teleport back
+wait 8
+log CHECK logged Player copy \w+ came with its weapon drawn
+
+# In view of the headset, then the copy posed by the player's own stream, held after the replay.
+log DO papyrus ObjectReference MoveTo 14 copy f:50 f:0 f:0 b:false
+wait 3
+capture other 12
+wait 1
+handtargets -15 15 70 15 20 80
+holdpose on
+replay me 2
+wait 3
+log CHECK logged VRWeaponBody: actor \w+ right weapon .* is a body in the world now
+
+# A sword in the player's right hand, by HIGGS. The bot waits out each step: live-check performs them on the game's side
+# and they take seconds, and the copy (with its sword) is gone as soon as the bot stops.
+log DO papyrus Actor SheatheWeapon 14
+wait 4
+log DO drop 12EB7 here
+wait 7
+log DO grab dropped right
+wait 5
+log DO sample held 2
+wait 4
+
+# Onto the copy's blade.
+log DO bring held to copy weapon
+wait 3
+log DO sample held 4
+wait 6
+log CHECK logged VRWeaponBody: actor \w+ right weapon touches a body
+log SHOT held against copy of copy
+log CHECK game alive
+wait 4
+
+holdpose off
+wait 2
+log done
+stop

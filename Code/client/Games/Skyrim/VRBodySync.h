@@ -18,8 +18,35 @@ namespace VRBodySync
 //! Renderer frame end (BSGraphics StopTimer). One thread, once per frame.
 void OnFrameEnd() noexcept;
 
-bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept;
-
+//! The other player's weapon (on their copy FormId, Side 0 left / 1 right) met one of this player's HIGGS bodies.
+struct Clash
+{
+    uint32_t FormId = 0;
+    uint8_t Side = 0;
+    //! This player's hand that met it: 0 left, 1 right, 2 not known.
+    uint8_t OwnSide = 2;
+    glm::vec3 Point{};
+    //! Game units a second.
+    float Speed = 0.f;
+    //! Whether its sound was played.
+    bool Heard = false;
+    //! The two started touching (felt, heard and sent); otherwise they are still touching (only weighed by the
+    //! defender's rule).
+    bool Start = true;
+    //! How far the HIGGS body that met it was from that hand's node.
+    float HandDistance = 0.f;
+};
+//! The next clash seen at a frame end, felt and heard as it is taken when it is a meeting; false when there is none.
+bool TakeClash(Clash& aOut) noexcept;
+//! A clash the other player saw on one of this player's weapons: felt on the hand holding it (0 left, 1 right).
+void FeelClash(uint8_t aSide) noexcept;
+//! The game's blade-block sound, at a clash's point; false when it could not be played.
+bool SoundClash(const glm::vec3& acPoint) noexcept;
+
+bool CaptureLocalPose(PlayerCharacter* apPlayer, VRPose& aOutPose) noexcept;
+
+
+
 //! The pose of a body that is not the local player: a dead NPC this machine owns, so that the other players see it
 //! lie, slump and get dragged around the way it does here (HIGGS grabs, spell pushes, a foot in the ribs).
 //! Upper body, and the legs when the skeleton has them. Returns false, leaving the pose empty, when the body has not

@@ -1,5 +1,198 @@
 # Skyrim Together VR: TODO
 
+## Physics queue (2026-10-06): swords and bodies as real physics, Blade & Sorcery as the aim
+
+Emma: "No matter the cost, no matter the time." The aim is B&S: the other player's sword and body are real physics
+objects in your game where you see them, so a blade is really stopped by his; your own sword has weight. The network
+delay stays, so **the defender's screen decides whether a hit was blocked** (agreed 2026-10-06).
+
+Worked top to bottom by the loop; each item ends `[x]` with its evidence in one line, `[!]` with the question or action
+for Emma copied under "Needs Emma (physics)", or `[-]` with why. A design choice is never the loop's to make.
+
+Known going in (see "Swords between players" below): PLANCK 0.6.6 is installed (0.8.1 exists); its code for making
+characters' equipped weapons physical is commented out in every version; it drives each ragdoll toward the behaviour
+graph's pose at the call to `hkbRagdollDriver::driveToPose` (VR `0xB266AB`, after copying `hkbCharacter.poseLocal`
+into the pose track when foot IK is on); our VR pose is only drawn, at the renderer's frame end
+(`BSGraphicsRenderer.cpp:81`), so no physics ever sees it. The game keeps an equipped weapon's own rigid body out of
+the world (PLANCK 0.7.0 notes). Sources: github.com/adamhynek/activeragdoll (PLANCK, VR offsets in
+`src/RE/offsets.cpp`), github.com/adamhynek/higgs (HIGGS), github.com/ijwzac/WeaponCollisionVR (the parry mod).
+
+**Needs Emma (physics)**
+
+- **DevBench update?** To swing a sword in the test rig (no headset) the rig needs controller poses, which newer
+  DevBench releases have (`input vrTrackedSet`); the installed 1.22.0 has the keyboard only. Would you update DevBench
+  (Nexus mod 181326) in MO2? It is a test tool only, and the combined VR Address Library note in KNOWN_ISSUES section
+  7 still applies.
+- **How should your *equipped* sword meet his?** A sword you grab with HIGGS is already stopped by his (it is a
+  dynamic body on your setup). An equipped sword is not: HIGGS moves its body keyframed, straight to your hand, and two
+  keyframed bodies pass through each other. The choices, each with a different feel:
+  1. *B&S-like*: your equipped sword becomes a dynamic body held to your hand by a strong constraint, and what you see
+     follows that body -- his blade stops yours, your hand keeps moving. The most work; it means taking over what you
+     see of your own sword.
+  2. *Feedback only*: your sword still passes through, but at the touch both of you get a clash (haptics, sound, sparks)
+     and his attack is blocked by the defender's rule (P4). Least work, no physical stop.
+  3. *Grab instead of equip*: fight with swords held by HIGGS (already blocked today); equipping stays as it is.
+  Which one?
+- **Next time you two fight (no rush, nothing to set up):** swords meeting should now buzz the hand and clang for both
+  of you, and a hit he lands while your blade touches his on *your* screen should do no damage. Tell me if a block
+  you saw still cost health, if a hit you did not block was dropped, or if damage now feels late (another player's
+  hits wait about a third of a second to be judged). Your log has every case ("Defender's rule: ..."), and I read it
+  myself; only Seen's log needs sending.
+
+### P0. What the physics needs (reading, no game)
+
+- [x] The Havok calls and their VR addresses (2026-10-06). From PLANCK's `offsets.cpp` (in use on Emma's game every
+      session, PLANCK 0.6.6), checked where another source exists:
+      - `bhkWorld::worldLock` at +0xC598 (PLANCK's static_assert, and CommonLibVR-NG `bhkWorld.h`); `hkpWorld::m_userData`
+        (the bhkWorld) at +0x430; `bhkRigidBody::hkBody` at +0x10; `NiAVObject::collisionObject` at +0x40 (beside our
+        measured parent 0x30 / local 0x48 / world 0x7C). Havok scale `0x15B78F4` (library id 231896, agrees).
+      - `bhkWorld::AddEntity` 0xDFA520, `RemoveEntity` 0xDFAD80; `hkpWorld::AddEntity` 0xAB0CB0, `RemoveEntity` 0xAB0E50
+        (library id 60493, agrees); `bhkRigidBody::setMotionType` 0xE08040 (beside the library's bhkRigidBody setters,
+        SE 76259-76262 at 0xE08670-0xE088B0); `hkpRigidBody::setMotionType` 0xAA9530;
+        `hkpKeyFrameUtility::applyHardKeyFrame` 0xAF6DD0; `bhkWorld::UpdateCollisionFilterOnWorldObject` 0xDFFE50;
+        `bhkWorldObject::UpdateCollisionFilter` 0xDF88D0; `Actor::GetCollisionFilterInfo` 0x5F44A0 (library id 36559,
+        agrees); `NiNode::SetMotionTypeDownwards` 0xDFD160.
+      - From the library itself (CommonLibVR-NG names): `NiAVObject::SetCollisionLayerAndGroup` SE 76171 = 0xE03370,
+        `SetCollisionLayer` 76170 = 0xE03350, `GetCollisionObject` 25482 = 0x3B5CB0.
+      - In our client, an address the library does not have goes into `VRAddressOverrides.h` under an id; for the
+        PLANCK-only ones there is no SE/AE id, so they need a private id range, documented as such.
+      - Not yet confirmed by measurement: the hkpRigidBody field offsets (filter info at +0x4C per the Havok 2010
+        layout). P0's dump reads a known body to confirm.
+- [x] Which collision layers collide with what (rig, 2026-10-06, `PhysicsProbe: layers that collide`): biped 8 collides
+      with 4 5 8 10 56 (clutter, weapon, biped, props, HIGGS) and not with 1 (static) or 30 (character capsule); HIGGS's
+      hands and weapons are layer 56 in the player's group with bit 15 (its `hand.cpp`), and 56 collides with 4 5 8 10
+      32 33 56 1. The copy's drawn weapon body is already layer 8 in the copy's own ragdoll group ("drawn weapon 'Weapon
+      (00012EB7)': layer 8, group 1543, motion type 4, not in the world"), and a body in the same group without bit 15
+      never touches that ragdoll. So the game's own layer and group meet the requirement as they are; nothing to choose.
+
+### P1. His sword, a physics object where it is drawn
+
+- [x] Red first (2026-10-06): the copy's drawn sword has a body, "not in the world" (`PhysicsProbe`, 09:24). On the way:
+      a copy never drew or sheathed from `SetWeaponDrawnEx` on VR ("set drawn; the game now says sheathed", both passes)
+      -- Skyrim VR's second extra Actor virtual sits before `DrawWeaponMagicHands` (VR slot 0xA8, CommonLibVR-NG), and
+      `Actor.h` had it after, so `SetWeaponDrawn` called the wrong slot. Fixed; now "the game went from sheathed to
+      drawing" (a copy that arrives with its weapon drawn really draws it). The plate on its own proved nothing: in the
+      rig the sword is held 19 units above the copy's feet (no controllers, the recorded arms hang; `ReachHands` only
+      fine-tunes 15 units), and a plate does not balance on a blade's edge anyway. Contacts are the evidence instead.
+- [x] The copy's drawn weapon gets a rigid body in the world (`VRBodySync`, `UpdateWeaponBodies`, 2026-10-06): the game's
+      own body of the weapon, put in the copy's ragdoll's world while the weapon is out (drawn, asked to sheathe -- a
+      copy's own AI asks within 1.5 s and its graph never does it -- or sheathing) and its node hangs under the hand;
+      node and body referenced while in; out again at the first frame end the copy is not posed, the weapon not out or
+      not in the hand, or the copy's ragdoll in another world. Out-of-view copies keep theirs. Havok calls from PLANCK's
+      and HIGGS's VR offsets (private ids 9000001+ in `VRAddressOverrides.h`), the world lock and `RemoveEntity` by SE
+      id. Evidence, `live-sword-body` 11 of 11 in five runs (10:17, 10:28, 10:38, 10:47, 10:57): "is a body in the
+      world now: layer 8, group 1541, motion type 4; placed, it reads 0.0 units from where it was put", "out of the
+      world (the weapon is not out)" / "(its copy was not posed)". The rig survived every run. Drawn: the bot's
+      `draw on` + `teleport away|back` (the copy respawns with it drawn) and `holdpose on` (the last replayed pose goes
+      on being sent, or the copy is handed back to its animation when the replay ends).
+- [x] The body follows the drawn sword exactly (2026-10-06): right after every physics step 0.00 units and 0.00 degrees
+      from where the sword is drawn, in two green runs (15:0x, 15:1x) and the confirming run after the clean-up (15:3x),
+      at 60 fps (16.7 ms frames, as with no body at all). What it took, each measured before and after:
+      - driven right before Havok's step (a call patch at VR `0xDFB722`, the same call HIGGS hooks, chained with it),
+        not at the renderer's frame end: from there the velocity given was not the one integrated;
+      - the body's angular limit raised from the game's 31.6 to 500 rad/s while it is ours (HIGGS's value; restored on
+        release): position went from 4-18 units off to 0.1;
+      - velocities worked out from the rotation matrices Havok keeps, not `applyHardKeyFrame`'s quaternion (with that the
+        body sat ~145 degrees off about one axis whatever was tried);
+      - re-seated where the last step left it before each step: the game turns its weapon body to where its own
+        animation holds the sword between steps, every frame at 60 fps (a write in `hkpRigidBody::setRotation` called
+        from the `bhkRigidBody::MoveToPositionAndRotation` area, found with a hardware watchpoint on the rig); driven
+        from there it swept up to 156 degrees through whatever was near in one step. "Between steps moved by something
+        else up to 0.0 units and 156 degrees, put back 300 times" every 5 s.
+      Ruled out on the way, by measurement: the body's motion (a proper keyframed motion, inverse mass and inertia 0, no
+      constraints, no actions), its damping (0.05), its collision quality (already keyframed), and any other mod (the
+      watchpoint found only Havok's own integration and the game's setter). The body's frame is the weapon node's: the
+      visible blade (the node's world bound, `NiAVObject::worldBound` at 0xE4) and the body's centre of mass both lie
+      along the node's +Y.
+      Cost, found and fixed on the way: `IsReadable` (`VirtualQuery`) on these paths cost 26 ms before every step and
+      the rig ran at 14 fps; lookups on live nodes no longer ask it. Now ~0.01 ms a step and ~0.16 ms a frame end.
+- [x] Green twice and nothing broken (2026-10-06): the dropped plate meets the blade in every run since 10:17 ("touches a
+      body on layer 4", Havok's own contact; it does not balance on an edge and the rig holds the sword low), `live-sword-
+      body` 11 of 11 and `live-weapon-grip` 5 of 5 in the same sessions, `live-copy-abandon` 10 of 10 twice, and
+      `live-copies-left-2`'s game checks (alive, copies gone) twice. Frames 16.7 ms with a sword body in the world, as
+      without. Not ours, written down where they belong: the bot registers one of two bears asked for in the same
+      instant (`owned == 2 -- 1 actor(s) owned`, every run today; "Sync: things to build"), and one run crashed during
+      the travel tests (`SkyrimVR.exe+0xCBFD24`, 14:33, no sword body for six minutes before, not reproduced in the next
+      run): the known PLANCK + copies-left crash (KNOWN_ISSUES).
+- [x] Contact, measured (2026-10-06): a contact listener on each weapon body (Havok 2010 `hkpContactListener`, slots 0-2
+      as PLANCK overrides them; `hkpEntity::AddContactListener` SE 60094), recorded under its own lock where Havok calls
+      it and said at the frame end: "touches a body on layer 4 (group 1544, motion type 3) at (...)" for the plate in
+      every run, layer 5 (a sword lying on the ground), and layer 56 (the player's HIGGS bodies, group 9, keyframed)
+      when the copy's sword swept past the player. DevBench `input` has no controllers, so the player could not push a
+      sword in on purpose; the HIGGS contacts came from the copy's side moving. Keyframed against keyframed gives
+      contact points but no push: our sword stopping the other's needs a dynamic body on one side (P3).
+
+### P2. His body, a physics object in his VR pose
+
+- [x] Red first (2026-10-06, `VRRagdoll` lines, rig, `live-sword-body`'s replayed pose): the copy's ragdoll hand bodies --
+      dynamic (motion type 2), in the world -- are 83-98 units from where its hands are drawn and 2.4-3.2 from where its
+      own animation had them that frame, every 5 s. Hits and pushes on his body meet his animation, not his VR pose.
+- [x] Put the VR pose where physics reads it (2026-10-06, `VRBodySync`: `RecordDrawnPose`, `PutDrawnPoseIntoTrack`,
+      `HookDriveToPose`, `HookPostPhysicsOutside`). The frame end records, per remote player copy, the drawn world
+      transform of each animation-skeleton bone with a node of the same name (44 of 99 on a humanoid). Right before
+      `driveToPose` (call patch at VR `0xB266AB`, PLANCK's site, ours inside PLANCK's hook) the pose track gets them as
+      parent-relative transforms, parents first, units measured ("game units"); the track's bones are saved before and
+      put back right after, and after the step (`postPhysics`, VR `0xB268DC`, ours moved outside PLANCK's hook once the
+      game runs) the game's and PLANCK's write-back of the ragdoll pose is undone for these copies. So the ragdoll
+      follows the drawn pose and what is drawn is untouched. The first version, without the putting back, fed the drawn
+      pose into itself: drawn hands 131 units off their owner's (median; normally 65) -- reverted, then this.
+- [x] Green twice (2026-10-06, 16:59 and 17:0x): ragdoll hands 8-14 units from the drawn hands (83-98 before), steady
+      over the run, and 78-90 from the copy's own animation; drawn hands unchanged ("hands within 80" median 65.8 and
+      65.1); `live-sword-body` 11/11, `live-weapon-grip` 5/5, `live-copy-abandon` 10/10, `live-copies-left-2`'s game
+      checks; 60 fps. Not "a few units" yet -- see "Tighter" under P4.
+
+### P3. Your own sword with weight (local, HIGGS territory)
+
+- [x] A sword grabbed with HIGGS is stopped by his (2026-10-06, `live-higgs-block`): the player's right HIGGS hand grabs a
+      dropped iron sword by script (`HiggsVR.GrabObject`, only after the player's own weapon is sheathed -- a drawn
+      weapon's hand cannot grab), and the player is moved so the hand goes to the centre of the copy's blade. The held
+      sword stays 8 units out, in continuous contact (~600 Havok contacts in the window, "layer 5, motion type 3");
+      with the copy's sword body gone (the same steps one run earlier), it went to 1 unit. Emma's HIGGS has
+      `ForcePhysicsGrab = 1`, so a grabbed sword is a dynamic body pulled to the hand by a constraint. With it 0
+      (HIGGS's own default for objects without constraints), HIGGS holds a sword keyframed and it passes through his,
+      keyframed against keyframed (HIGGS `ShouldUsePhysicsBasedGrab`). No damage or hit on the copy from the push (its
+      health 100 throughout). How it lags with the grab-constraint settings, and whether PLANCK counts a *swing*
+      into him as a hit, need a moving hand: [!] below.
+- [!] A swinging hand in the rig: DevBench 1.22.0 drives the keyboard only; its newer releases add `input vrTrackedSet`
+      (HMD and both controllers' poses and buttons, frame by frame -- github.com/alandtse/devbench). With that, the rig
+      can swing a held sword into his and measure the lag and PLANCK's hits. Question under "Needs Emma (physics)".
+- [!] How an equipped sword should meet his: design choice, question under "Needs Emma (physics)".
+
+### P4. Two screens, one fight
+
+- [x] Clash events (2026-10-06, `live-clash`, `live-defender`): when the other player's weapon body (P1) touches one of
+      the player's HIGGS bodies (layer 56: its hands, its body for the equipped weapon) or something a HIGGS hand holds
+      (found through HIGGS's grab constraint: the held body's constraints, layouts from CommonLibVR-NG), the client
+      feels it on that hand, plays the game's blade-block sound there (`WPNBlockBlade1HandVsOtherSD`, 0x3C73C, through
+      `BSAudioManager`/`BSSoundHandle`, SE ids 66391/66404/66370/66355, all in the VR database) and sends a
+      `ClashRequest` (which weapon, which hand, point, speed, server tick); the server passes it on as `NotifyClash`,
+      and the weapon's owner feels it on the hand holding it and hears it. Evidence: "Clash: our right hand (7 units from
+      its HIGGS body) met the right weapon of ... 233 units a second; felt and heard here, sent", the bot had it 16-19 ms
+      later, the other way "Clash from server ...: heard, felt" 21-30 ms after; `live-clash`/`live-defender` clash
+      checks green in four runs (18:09, 18:43, 18:58 and 18:19 for the sound). Fixed on the way, each from a failing
+      run: the hand is the one nearer the HIGGS body with no distance limit (a scripted 84-unit move left it more than
+      40 units from both), and a clash is a *meeting* -- the two start touching after a quarter second apart: a hand
+      resting on the blade gave ~45 clashes a run, each a sound and a pulse (runs 3-4, 1-15 units a second); now "46
+      touch(es) ... still touching, not meetings" every 5 s and one clash (18:58). Not measured in the rig: the pulse
+      itself (no controllers).
+- [ ] The defender's rule (2026-10-06): written and green once. A hit now carries its server tick
+      (`RequestHealthChangeBroadcast`/`NotifyHealthChangeBroadcast.Tick`); this player's game holds another player's
+      hit until it shows it (tick + 225 ms, the VR playback delay, + 100) and drops it if a clash or a touch with that
+      player's weapon fell between 300 ms before and 100 ms after that moment ("Defender's rule: ... is blocked" /
+      "... lands"). Red (18:43, before the rule): a hit stamped at the clash took 30. Green (18:58): "blocked: our
+      weapon met theirs 0 ms before it was seen here", health 335 -> 335; the control hit "lands, 340 ms after it
+      happened", 335 -> 305; 15 of 15. The 18:54 run never started (the test save timed out loading). **One more
+      green run owed.** The 300/100 ms windows are first values: see "Needs Emma (physics)".
+- [ ] Less delay for hands and weapons, measured: send rate and playback delay for them, from the `InterpDiag` numbers.
+      Known (2026-10-06): the player is sent every 33 ms and played 225 ms late (VR). The real sessions kept on the
+      desktop (2026-09-19..27, then 300 ms) say a median 150-175 ms ahead of playback, but `InterpDiag` mixes every NPC
+      copy in, and NPCs that stop updating drown the low end. Next: a players-only line ("InterpDiag players",
+      prepared), then a real session of Emma and Seen to read it -- the rig is one machine and shows no network.
+- [ ] Tighter: the copy's ragdoll hands sit a steady 8-14 units from the drawn hands (2026-10-06). PLANCK's own work
+      before the drive still sees the animation (moving ours before it made the ragdoll worse, when the drawn pose still
+      fed back; worth trying again now that it does not), and its active ragdoll follows softly (12-27 units behind a
+      moving pose).
+
 ## Goals, in the order they are worth fixing (set 2026-09-25)
 
 1. **No more crashes.**
@@ -279,6 +472,24 @@ Hands "perfectly synced" (first time).
 - [ ] Dinya Balu sliding on Emma's screen, not Seen's. Emma's client made her as a copy of Seen's at 15:55:41.889 and claimed her as party leader 60 ms later; Emma owned her until 15:57:18. So she slid on the screen of the game running her. The gained path clears the copy's components; the cause is not known yet.
 - [ ] Seen's crash at 16:26:56: EnchantmentEffectExtender.dll, the signature of his quit crash, 15 s after Emma's crash. Ask whether he was quitting.
 
+### Swords between players, Blade & Sorcery as the aim (2026-10-06)
+
+Emma and Seen: "sword feeling still unsync"; the aim is B&S, feeling the weight and being blocked by the other's sword.
+Agreed: the defender's screen decides whether a hit was blocked. Found before building anything:
+- [x] PLANCK does not make characters' equipped weapons physical: that code is commented out ("TODO", `PostDriveToPoseHook`
+  in its `main.cpp`). The parry mod (WeaponCollisionVR) parries only an enemy in an attack animation, and nullifies
+  the game's melee hit on the player; a VR player swinging freely is neither. So sword-on-sword between players has to
+  be ours. PLANCK does drive characters' ragdolls toward their animation pose (hook at the call to `driveToPose`,
+  VR `0xB266AB`, after copying `hkbCharacter.poseLocal` when foot IK is on), which our pose never reaches: we draw it
+  at the renderer's frame end. That matters for hits on the body (goal 6), not for blocking.
+- [x] The touch check reads what is drawn: in the rig, 0.0 units from where the copy's hands and weapons were drawn 1-3 ms
+  before, every 5 s while posed; 70-80 units (the copy's own animation) only once it is no longer posed (out of view or
+  no pose arriving). A new log line says this each session ("VRWeaponTouch: X as this check reads it ...").
+- [ ] What made it feel out of sync is not measured yet; no log of the session was found. Candidates: the other player's
+  sword is shown 225 ms in the past (a swing at 1-3 m/s is 20-70 cm away by then); the check only buzzes; one-piece
+  blades may not be measured as blades (no far node, see `ReadSide`); our own sword is measured from the VRIK body's
+  node, not the first-person sword (7 degrees apart in the rig).
+
 ### Sync: verify in the real game, fix what fails
 
 - [-] After a burst of copies, a returning player copy "bound to another actor": the test, not the mod. Standing at the Mistwatch cell centre (where the burst test leaves the player), the bot's "far away" spot is still in range, so its character keeps being sent; the first copy, placed at the edge of the loaded cells, is gone a tenth of a second later and the client makes another one for it (`Spawned character for entity`), which is right -- health 55 where it should be. The driver only read spawn lines and kept asking about the first. It now follows the binding (`New entity remotely managed`): the same pair 22 of 22.
@@ -301,6 +512,10 @@ Hands "perfectly synced" (first time).
 - [ ] The invisible body, indoors and outdoors (needs screenshots).
 
 ### Sync: things to build
+
+- [ ] The bot registers one of two NPCs asked for in the same instant: `live-copies-left-2` fails its own `owned == 2`
+      every run on 2026-10-06 (two `npc temp 23A8A` 10 ms apart, one "NPC registered" back). The game's checks in that
+      test pass; the test then only leaves one bear behind. Server or bot, not the client.
 
 - [ ] An equip of a weapon the copy already holds may leave its hand empty: in `live-equip` run straight after `live-game-drops` (2026-10-03 12:54), the bot's copy arrived already holding the iron sword (from its snapshot), the bot equipped it again, and the copy then reported it equipped but nothing in the right hand. On a fresh server the same script is green. Reproduce on purpose (equip twice) before touching `InventoryService::OnNotifyEquipmentChanges`.
 - [ ] The creature-gait check is noisy: since 2026-10-03 05:00 it failed in four runs of nine (a Seeker or a Lurker copy at 30 to 42% against 50%), after passing the five runs before. Not the action filters as far as the runs show: limited to idles, it still failed once in two. An A/B with the filters off, ten runs each way, would settle whether anything of ours moved it.
@@ -514,6 +729,9 @@ A sword was a **dot in her fist**. The blade search walked the attach node's chi
 one geometry with no children at all -- the blade lives in the vertices. So contact only fired when her hilt came
 within 14 cm of Lydia's, which is exactly "sometimes it works and sometimes it doesn't".
 
+- [ ] (2026-10-06) `kWorldBoundOffset` 0xB0 is `previousWorld`; the world bound is at **0xE4** on VR as on SE (CommonLibVR-NG,
+      and measured: the weapon node's bound read there has radius 31.9 for an iron sword, centred 21.9 units along the
+      node's +Y). The touch check below reads 0xB0, which is why "nothing ... looks like a bounding sphere" every session.
 - [x] **[untested] The blade is measured from the node's world bound** (`kWorldBoundOffset`, 0xB0, straight after
       the world transform). The centre of a sword's bound sits halfway down the blade, so the grip and the centre
       give the direction and, doubled, the tip. The read is validated -- a radius outside 4 to 300 units, or a

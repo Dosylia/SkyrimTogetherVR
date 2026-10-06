@@ -43,14 +43,16 @@ struct Actor : TESObjectREFR
     virtual void sub_A3();
     virtual void sub_A4();
     virtual void sub_A5();
-    virtual void SetWeaponDrawn(bool aDraw);
-    virtual void sub_A7();
-    virtual void sub_A8();
 #ifdef SKYRIMVR
     // Second VR-only virtual (the first is in TESObjectREFR): every Actor virtual from here on is
     // two slots higher on VR. Without it SetPosition() called the character controller teardown.
-    virtual void VR_Unk_AA();
+    // It sits before DrawWeaponMagicHands (VR slot 0xA8, CommonLibVR-NG); after it, SetWeaponDrawn()
+    // called this unknown slot instead, and copies never drew or sheathed from it (2026-10-06).
+    virtual void VR_Unk_A7();
 #endif
+    virtual void SetWeaponDrawn(bool aDraw);
+    virtual void sub_A7();
+    virtual void sub_A8();
     virtual void SetPosition(const NiPoint3& acPoint, bool aUpdateCharController = true);
     virtual void sub_AA();
     virtual void Resurrect(bool aResetInventory);

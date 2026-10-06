@@ -6,6 +6,7 @@
 #include <Actor.h>
 #include <Games/ActorExtension.h>
 #include <PlayerCharacter.h>
+#include <BSAnimationGraphManager.h>
 #include <NetImmerse/NiNode.h>
 #include <NetImmerse/NiTransform.h>
 
@@ -1786,6 +1787,1578 @@ bool ResolveHolding(Actor* apActor, Holding& aOut) noexcept
 
 // Everything the local player could touch this frame, filled on the game thread and read at the end of it.
 std::mutex s_touchLock;
+
+// Where each remote body's hands and weapon attach nodes were drawn, recorded right after posing at the renderer's
+// frame end. The touch check runs on the game thread and reads the scene, which the game rebuilds from the copy's
+// own animation every frame; this says what was actually on screen, for comparing the two ("sword feeling still
+// unsync", 2026-10-06).
+struct DrawnGrip
+{
+    std::array<glm::vec3, 2> Hand{};   // left, right
+    std::array<glm::vec3, 2> Attach{}; // "SHIELD", "WEAPON"
+    std::array<bool, 2> HasHand{};
+    std::array<bool, 2> HasAttach{};
+    std::chrono::steady_clock::time_point At{};
+};
+std::mutex s_drawnLock;
+std::unordered_map<uint32_t, DrawnGrip> s_drawn;
+
+// Physics queue P0 (2026-10-06): what the Havok world holds for a copy -- one ragdoll bone's body and its drawn
+// weapon's own body -- and which collision layers collide with which. Read only, once per copy per session. Layouts
+// from PLANCK's static_asserts and CommonLibVR-NG; the filter info offset is the one to confirm by what it reads.
+constexpr uint32_t kCollisionObjectOffset = 0x40; // NiAVObject::collisionObject
+constexpr uint32_t kCollisionBodyOffset = 0x20;   // bhkNiCollisionObject::body (bhkWorldObject)
+constexpr uint32_t kHavokBodyOffset = 0x10;       // bhkWorldObject::hkBody (hkpRigidBody)
+constexpr uint32_t kHkWorldOffset = 0x10;         // hkpWorldObject::world
+constexpr uint32_t kFilterInfoOffset = 0x4C;      // hkpWorldObject::collidable.broadPhaseHandle.collisionFilterInfo
+constexpr uint32_t kMotionTypeOffset = 0x160;     // hkpEntity::motion.type
+constexpr uint32_t kWorldFilterOffset = 0xD0;     // hkpWorld::collisionFilter
+constexpr uint32_t kLayerBitfieldsOffset = 0x1D0; // bhkCollisionFilter::layerBitfields[64]
+
+// The Havok body behind a node, or null. Every pointer is checked before it is followed: this runs once per copy.
+uint8_t* HavokBodyOf(void* apNode) noexcept
+{
+    if (!apNode || !IsReadable(static_cast<uint8_t*>(apNode) + kCollisionObjectOffset, sizeof(void*)))
+        return nullptr;
+    void* pCollision = At<void*>(apNode, kCollisionObjectOffset);
+    if (!pCollision || !IsReadable(pCollision, 0x28))
+        return nullptr;
+    void* pBody = At<void*>(pCollision, kCollisionBodyOffset);
+    if (!pBody || !IsReadable(pBody, 0x18))
+        return nullptr;
+    auto* pHavok = At<uint8_t*>(pBody, kHavokBodyOffset);
+    if (!pHavok || !IsReadable(pHavok, kMotionTypeOffset + 1))
+        return nullptr;
+    return pHavok;
+}
+
+// The same for a node known to be alive -- the rig's, which are checked by vtable every frame, or a weapon node this
+// code holds a reference to -- without IsReadable. That is VirtualQuery, which in this process costs milliseconds a
+// call (see IsReadable): with it on these paths the weapon bodies cost 26 ms before every physics step and the rig
+// ran at 14 frames a second (2026-10-06). A node alive holds its collision object, which holds its body.
+uint8_t* HavokBodyOfLive(void* apNode) noexcept
+{
+    void* pCollision = apNode ? At<void*>(apNode, kCollisionObjectOffset) : nullptr;
+    void* pBody = pCollision ? At<void*>(pCollision, kCollisionBodyOffset) : nullptr;
+    return pBody ? At<uint8_t*>(pBody, kHavokBodyOffset) : nullptr;
+}
+
+std::string DescribeHavokBody(const char* acpWhat, void* apNode, const uint8_t* apHavok) noexcept
+{
+    const uint32_t filter = At<uint32_t>(const_cast<uint8_t*>(apHavok), kFilterInfoOffset);
+    const char* pName = GetName(apNode);
+    return fmt::format("{} '{}': layer {}, group {}, collision {}, motion type {}, {}", acpWhat, pName && IsReadable(pName, 1) ? pName : "?", filter & 0x7F, filter >> 16,
+                       (filter & (1u << 14)) ? "off" : "on", At<uint8_t>(const_cast<uint8_t*>(apHavok), kMotionTypeOffset),
+                       At<void*>(const_cast<uint8_t*>(apHavok), kHkWorldOffset) ? "in the world" : "not in the world");
+}
+
+void LogPhysicsOnce(const uint32_t aFormId, const Rig& acRig) noexcept
+{
+    static std::unordered_set<uint32_t> s_logged;
+    static bool s_worldLogged = false;
+    if (s_logged.count(aFormId) || !acRig.Attach[1].pNode)
+        return;
+
+    // A drawn weapon hangs below the attach node; wait for one.
+    uint8_t* pWeaponBody = nullptr;
+    void* pWeaponNode = nullptr;
+    for (const RigBone& below : acRig.AttachBelow[1])
+        if (below.pNode && (pWeaponBody = HavokBodyOf(below.pNode)) != nullptr)
+        {
+            pWeaponNode = below.pNode;
+            break;
+        }
+    if (acRig.AttachBelow[1].empty())
+    {
+        // Where the weapon hangs instead, once. In the rig on 2026-10-06 nothing was listed below the copy's "WEAPON"
+        // node because the copy had never drawn (SetWeaponDrawn called the wrong VR virtual; see Actor.h).
+        // Fifteen seconds after the copy was first posed, so a weapon drawn in the meantime is in place.
+        static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_firstPosed;
+        static std::unordered_set<uint32_t> s_whereLogged;
+        const auto cNow = std::chrono::steady_clock::now();
+        const auto firstPosed = s_firstPosed.emplace(aFormId, cNow).first->second;
+        if (cNow - firstPosed < std::chrono::seconds(15) || !s_whereLogged.insert(aFormId).second)
+            return;
+        const auto childNames = [](void* apNode)
+        {
+            std::string names;
+            void* pNode = apNode ? AsNode(apNode) : nullptr;
+            if (!pNode)
+                return std::string("(not a node)");
+            void** pChildren = At<void**>(pNode, kChildrenOffset + 0x8);
+            const uint16_t capacity = At<uint16_t>(pNode, kChildrenOffset + 0x10);
+            for (uint16_t i = 0; pChildren && i < capacity; ++i)
+                if (pChildren[i])
+                {
+                    const char* pName = GetName(pChildren[i]);
+                    names += fmt::format(" '{}'", pName && IsReadable(pName, 1) ? pName : "?");
+                }
+            return names.empty() ? std::string(" none") : names;
+        };
+        void* pParent = At<void*>(acRig.Attach[1].pNode, kParentOffset);
+        const char* pParentName = pParent ? GetName(pParent) : nullptr;
+        spdlog::info("PhysicsProbe: actor {:X} weapon node '{}' (under '{}') has children:{}; the right hand has:{}", aFormId, GetName(acRig.Attach[1].pNode),
+                     pParentName && IsReadable(pParentName, 1) ? pParentName : "?", childNames(acRig.Attach[1].pNode), childNames(acRig.Bones[VRPose::kRightHand].pNode));
+        return;
+    }
+    s_logged.insert(aFormId);
+
+    uint8_t* pBoneBody = nullptr;
+    void* pBoneNode = nullptr;
+    for (const RigBone& bone : acRig.Body)
+        if (bone.pNode && (pBoneBody = HavokBodyOf(bone.pNode)) != nullptr)
+        {
+            pBoneNode = bone.pNode;
+            break;
+        }
+
+    spdlog::info("PhysicsProbe: actor {:X} -- {}; {}", aFormId, pBoneBody ? DescribeHavokBody("ragdoll bone", pBoneNode, pBoneBody) : std::string("no ragdoll bone with a body"),
+                 pWeaponBody ? DescribeHavokBody("drawn weapon", pWeaponNode, pWeaponBody) : fmt::format("no body under the drawn weapon ({} nodes)", acRig.AttachBelow[1].size()));
+
+    // Which layers collide with which, from whichever body is in a world.
+    if (s_worldLogged)
+        return;
+    for (uint8_t* pBody : {pBoneBody, pWeaponBody})
+    {
+        void* pWorld = pBody ? At<void*>(pBody, kHkWorldOffset) : nullptr;
+        if (!pWorld || !IsReadable(static_cast<uint8_t*>(pWorld) + kWorldFilterOffset, sizeof(void*)))
+            continue;
+        void* pFilter = At<void*>(pWorld, kWorldFilterOffset);
+        if (!pFilter || !IsReadable(static_cast<uint8_t*>(pFilter) + kLayerBitfieldsOffset, 64 * sizeof(uint64_t)))
+            continue;
+        s_worldLogged = true;
+        constexpr std::array<uint32_t, 9> cLayers{4, 5, 8, 10, 30, 32, 33, 56, 1};
+        std::string table;
+        for (const uint32_t layer : cLayers)
+        {
+            const uint64_t bits = At<uint64_t>(pFilter, kLayerBitfieldsOffset + layer * sizeof(uint64_t));
+            table += fmt::format(" | {}:", layer);
+            for (const uint32_t other : cLayers)
+                if ((bits >> other) & 1)
+                    table += fmt::format(" {}", other);
+        }
+        spdlog::info("PhysicsProbe: layers that collide (clutter 4, weapon 5, biped 8, props 10, character capsule 30, dead body 32, biped without capsule 33, HIGGS 56, static 1){}",
+                     table);
+        break;
+    }
+}
+// Physics queue P1 (2026-10-06): the other player's drawn weapon as a physical thing in this game.
+//
+// The copy's drawn weapon already has a rigid body of its own, which the game keeps out of the world. Measured in the
+// rig: "drawn weapon 'Weapon  (00012EB7)': layer 8, group 1543, collision on, motion type 4, not in the world" --
+// keyframed, on the biped layer, in the copy's own collision group (its ragdoll's). Layer 8 collides with clutter,
+// weapons, bipeds, props and HIGGS's hands and weapons (56), and not with walls or character capsules; the group
+// keeps it off its owner's own ragdoll. So that body is put in the world while the weapon is drawn and driven every
+// frame to where the weapon is drawn, the way HIGGS drives the player's own (hand.cpp, MoveHandAndWeaponCollision).
+//
+// Lifetime: the weapon's node and its body wrapper are referenced while the body is in the world, so neither is freed
+// under the physics. The body leaves the world at the first frame end at which its copy was not posed, the weapon is
+// not fully drawn, the node no longer hangs under the copy's hand, or the copy's ragdoll is in another world.
+constexpr uint32_t kBhkWorldOfHkpWorldOffset = 0x430;   // ahkpWorld::m_userData (bhkWorld)
+constexpr uint32_t kWorldLockOffset = 0xC598;           // bhkWorld::worldLock
+constexpr uint32_t kBodyTransformOffset = 0x170;        // hkpEntity::motion (0x150) .motionState.transform: rotation columns, then translation
+constexpr uint32_t kRigidBodyTRotationOffset = 0x40;    // bhkRigidBodyT::rotation (hkQuaternion)
+constexpr uint32_t kRigidBodyTTranslationOffset = 0x50; // bhkRigidBodyT::translation (hkVector4, Havok units)
+
+using THkpWorldAddEntity = void*(void* apWorld, void* apEntity, int aActivation);
+// Havok's removeEntity returns an hkBool, which MSVC returns through a hidden pointer after `this` (HIGGS calls it so).
+using THkpWorldRemoveEntity = bool*(void* apWorld, bool* apResult, void* apEntity);
+using THkpEntitySetPositionAndRotation = void(void* apEntity, const float* apPosition, const float* apRotation);
+using TWorldLock = void(void* apLock);
+using THkpEntityActivate = void(void* apEntity);
+constexpr uint32_t kAngularVelocityOffset = 0x240; // hkpEntity::motion (0x150) .angularVelocity; linearVelocity just before it
+// ahkpWorld::stepDeltaTime as bhkWorld::Update called it before the hook below; null until the hook is in.
+using TStepDeltaTime = int(void* apHkpWorld, float aSeconds);
+TStepDeltaTime* s_stepDeltaTime = nullptr;
+constexpr uint32_t kBodyQuaternionOffset = 0x1E0;  // hkpEntity::motion.motionState.sweptTransform.rotation1, what the keyframe turns from
+constexpr uint32_t kMaxAngularVelocityOffset = 0x21B; // hkpEntity::motion.motionState.maxAngularVelocity (hkUFloat8)
+constexpr uint32_t kLinearDampingOffset = 0x214;      // hkpEntity::motion.motionState.linearDamping (hkHalf: a float's top 16 bits)
+constexpr uint32_t kAngularDampingOffset = 0x216;     // .angularDamping (hkHalf)
+constexpr uint32_t kTimeFactorOffset = 0x218;         // .timeFactor (hkHalf)
+// hkpWorldObject::collidable.broadPhaseHandle.objectQualityType, two bytes before the filter info (0x4C, measured).
+// Havok 2010: 0 fixed, 1 keyframed, 2 debris, 3 debris with simple TOI, 4 moving, 5 critical, 6 bullet, 9 keyframed reporting.
+constexpr uint32_t kQualityTypeOffset = 0x4A;
+
+
+float FromHalf(const uint16_t aHalf) noexcept
+{
+    const uint32_t bits = static_cast<uint32_t>(aHalf) << 16;
+    float value;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+using THkRealToUFloat8 = bool(uint8_t& aOut, const float& acValue);
+
+struct WeaponBody
+{
+    void* pNode = nullptr;     // the weapon's node, referenced
+    void* pWrapper = nullptr;  // its bhkRigidBody, referenced
+    uint8_t* pHavok = nullptr; // the hkpRigidBody inside it
+    void* pBhkWorld = nullptr; // the world it was put in, checked (by name) when it was
+    bool IsT = false;          // a bhkRigidBodyT, with its own offset from the node
+    bool Seen = false;         // driven at this frame end
+    bool Listening = false;    // our contact listener is on it
+    uint8_t GameMaxAngularVelocity = 0; // the game's limit, put back when the body is let go
+    uint16_t GameAngularDamping = 0;    // as the game had it (logged)
+    int8_t GameQuality = 0;             // the game's collision quality (logged; 1, keyframed, already)
+    uint32_t Driven = 0;         // frame ends since the last line about it
+    float WorstGap = 0.f;        // units the body was from the drawn weapon at a frame end
+    float WorstLag = 0.f;        // degrees its rotation was from the drawn weapon's
+    float WorstTargetStep = 0.f; // degrees the target turned from one frame to the next
+    uint32_t FramesOff = 0;      // frame ends with the body more than 10 degrees off
+    glm::quat LastTarget{1.f, 0.f, 0.f, 0.f};
+};
+// Per copy and side (left, right). Touched only from the renderer's frame end.
+std::unordered_map<uint64_t, WeaponBody> s_weaponBodies;
+
+// What the weapon bodies touch (Physics queue P1, "contact, measured"): Havok's own contact callbacks on each of them.
+// Havok raises them during its step, maybe on its worker threads, so they only write down what touched what, under a
+// lock of their own that is never held while waiting for the world's; the frame end says it. Layout: Havok 2010's
+// hkpContactListener (slots 0-2, as PLANCK overrides them and CommonLibVR-NG lists them) and its events.
+constexpr uint32_t kEventBodiesOffset = 0x08;       // hkpCollisionEvent::bodies[2]
+constexpr uint32_t kEventContactPointOffset = 0x28; // hkpContactPointEvent::contactPoint (hkContactPoint, position first)
+
+using THkpEntityContactListener = void(void* apEntity, void* apListener);
+
+struct WeaponContact
+{
+    const void* pBodies[2]{};
+    uint32_t Filters[2]{};
+    uint8_t MotionTypes[2]{};
+    glm::vec3 Point{};          // Havok units
+    glm::vec3 Velocities[2]{};  // each body's linear velocity, Havok units a second
+    // Whether each body is the local player's: 1 one of HIGGS's own bodies (its hands, its body for the equipped
+    // weapon), 2 held by one of them (HIGGS's grab constraint); where that HIGGS body is, Havok units.
+    uint8_t HiggsKind[2]{};
+    glm::vec3 HiggsAt[2]{};
+};
+
+// A clash: the other player's weapon met one of the local player's HIGGS bodies or something one of them holds,
+// queued at the frame end and taken by CharacterService to be felt and sent.
+struct PendingClash
+{
+    uint32_t FormId;
+    uint8_t Side;
+    glm::vec3 Point; // game units
+    float Speed;     // game units a second
+    glm::vec3 Hand;  // game units: the HIGGS body, which says which of the player's hands it was
+    bool Start;      // the two started touching (a meeting); otherwise still touching
+};
+std::mutex s_clashesLock;
+std::vector<PendingClash> s_clashes;
+// HIGGS's layer: only the local player's hands and the body it gives the equipped weapon are on it (VR_TODO P0).
+constexpr uint32_t kHiggsLayer = 56;
+constexpr uint32_t kBodyTranslationOffset = 0x1A0; // hkpEntity::motion.motionState.transform.translation
+
+bool IsHiggsBody(const uint8_t* apBody) noexcept
+{
+    return apBody && (*reinterpret_cast<const uint32_t*>(apBody + kFilterInfoOffset) & 0x7F) == kHiggsLayer;
+}
+
+// The HIGGS body a dynamic body is held by, through a constraint between the two (HIGGS's physics grab), or null.
+// Called inside Havok's step, where constraints are not added or removed. Layouts from CommonLibVR-NG (hkpEntity,
+// hkpConstraintInstance, hkConstraintInternal).
+const uint8_t* HiggsBodyHolding(const uint8_t* apBody) noexcept
+{
+    const auto partner = [apBody](const uint8_t* apA, const uint8_t* apB) -> const uint8_t*
+    {
+        const uint8_t* pOther = apA == apBody ? apB : apA;
+        return pOther != apBody && IsHiggsBody(pOther) ? pOther : nullptr;
+    };
+    // constraintsMaster: hkSmallArray<hkConstraintInternal> (data, uint16 size), 0x40 each, entities at +0x08 and +0x10.
+    const uint8_t* pMaster = *reinterpret_cast<const uint8_t* const*>(apBody + 0x100);
+    const uint16_t masterCount = *reinterpret_cast<const uint16_t*>(apBody + 0x108);
+    if (pMaster && masterCount <= 32)
+        for (uint16_t i = 0; i < masterCount; ++i)
+        {
+            const uint8_t* pInternal = pMaster + i * 0x40;
+            if (const uint8_t* pHand = partner(*reinterpret_cast<const uint8_t* const*>(pInternal + 0x08), *reinterpret_cast<const uint8_t* const*>(pInternal + 0x10)))
+                return pHand;
+        }
+    // constraintsSlave: hkArray<hkpConstraintInstance*> (data, int32 size), entities at +0x28 and +0x30.
+    const auto* const* ppSlaves = *reinterpret_cast<const uint8_t* const* const*>(apBody + 0x110);
+    const int32_t slaveCount = *reinterpret_cast<const int32_t*>(apBody + 0x118);
+    if (ppSlaves && slaveCount > 0 && slaveCount <= 32)
+        for (int32_t i = 0; i < slaveCount; ++i)
+            if (const uint8_t* pInstance = ppSlaves[i])
+                if (const uint8_t* pHand = partner(*reinterpret_cast<const uint8_t* const*>(pInstance + 0x28), *reinterpret_cast<const uint8_t* const*>(pInstance + 0x30)))
+                    return pHand;
+    return nullptr;
+}
+std::mutex s_contactsLock;
+std::array<WeaponContact, 64> s_contacts{};
+size_t s_contactCount = 0;
+
+std::atomic<uint32_t> s_contactCallbackCount{0};
+
+void OnWeaponContactPoint(void*, const uint8_t* apEvent) noexcept
+{
+    ++s_contactCallbackCount;
+    if (!apEvent)
+        return;
+    WeaponContact contact{};
+    for (size_t i = 0; i < 2; ++i)
+    {
+        contact.pBodies[i] = *reinterpret_cast<void* const*>(apEvent + kEventBodiesOffset + i * sizeof(void*));
+        if (!contact.pBodies[i])
+            return;
+        const auto* pBody = static_cast<const uint8_t*>(contact.pBodies[i]);
+        contact.Filters[i] = *reinterpret_cast<const uint32_t*>(pBody + kFilterInfoOffset);
+        contact.MotionTypes[i] = pBody[kMotionTypeOffset];
+        const float* pVelocity = reinterpret_cast<const float*>(pBody + 0x230); // hkpEntity::motion.linearVelocity
+        contact.Velocities[i] = glm::vec3{pVelocity[0], pVelocity[1], pVelocity[2]};
+        // Motion types 1-3 and 6 are dynamic: only those can be held by HIGGS's grab constraint.
+        const uint8_t motionType = contact.MotionTypes[i];
+        const uint8_t* pHiggs = IsHiggsBody(pBody) ? pBody : (motionType >= 1 && motionType <= 3) || motionType == 6 ? HiggsBodyHolding(pBody) : nullptr;
+        if (pHiggs)
+        {
+            contact.HiggsKind[i] = pHiggs == pBody ? 1 : 2;
+            const float* pAt = reinterpret_cast<const float*>(pHiggs + kBodyTranslationOffset);
+            contact.HiggsAt[i] = glm::vec3{pAt[0], pAt[1], pAt[2]};
+        }
+    }
+    if (const float* pPoint = *reinterpret_cast<const float* const*>(apEvent + kEventContactPointOffset))
+        contact.Point = {pPoint[0], pPoint[1], pPoint[2]};
+
+    std::lock_guard lock(s_contactsLock);
+    for (size_t i = 0; i < s_contactCount; ++i)
+        if (s_contacts[i].pBodies[0] == contact.pBodies[0] && s_contacts[i].pBodies[1] == contact.pBodies[1])
+        {
+            s_contacts[i].Point = contact.Point;
+            return;
+        }
+    if (s_contactCount < s_contacts.size())
+        s_contacts[s_contactCount++] = contact;
+}
+
+void IgnoreContactEvent(void*, const void*) noexcept
+{
+}
+
+// Slot 0 contactPointCallback, 1 collisionAddedCallback, 2 collisionRemovedCallback; the rest are never wanted here.
+void* s_contactListenerVTable[8] = {reinterpret_cast<void*>(&OnWeaponContactPoint), reinterpret_cast<void*>(&IgnoreContactEvent), reinterpret_cast<void*>(&IgnoreContactEvent),
+                                    reinterpret_cast<void*>(&IgnoreContactEvent),   reinterpret_cast<void*>(&IgnoreContactEvent), reinterpret_cast<void*>(&IgnoreContactEvent),
+                                    reinterpret_cast<void*>(&IgnoreContactEvent),   reinterpret_cast<void*>(&IgnoreContactEvent)};
+struct ContactListenerObject
+{
+    void** pVTable;
+};
+ContactListenerObject s_contactListener{s_contactListenerVTable};
+
+// Where each weapon body is to be, set at the frame end and read right before each Havok step, which need not run on
+// the same thread. A body comes off this list before it leaves the world (ReleaseWeaponBody), and the step's drive runs
+// under the world's write lock, which the release also needs -- so the drive never touches a body being let go.
+struct WeaponTarget
+{
+    alignas(16) float Position[4];
+    alignas(16) float Rotation[4];
+    // Where the last step was to leave it: where it should be when the next step begins.
+    alignas(16) float StepPosition[4];
+    alignas(16) float StepRotation[4];
+    bool HasStep;
+    uint8_t* pHavok;
+    void* pBhkWorld; // checked when the body was added; the step's own world is matched against it
+};
+// Per 5 s line: how far bodies were from where the last step left them when the next began (moved by someone else
+// between steps), how many were put back, and how far they were from their target right after a step.
+std::atomic<uint32_t> s_reseats{0};
+std::mutex s_stepStatsLock;
+float s_worstMovedUnits = 0.f;
+float s_worstMovedDegrees = 0.f;
+float s_worstAfterStepUnits = 0.f;
+float s_worstAfterStepDegrees = 0.f;
+std::mutex s_targetsLock;
+std::vector<WeaponTarget> s_targets;
+std::atomic<uint32_t> s_stepDrives{0};
+// Costs, per 5 s line: time in the drive before each step, time in the frame-end body work, and contact callbacks.
+std::atomic<uint64_t> s_stepDriveNanos{0};
+std::atomic<uint64_t> s_frameEndNanos{0};
+std::atomic<uint64_t> s_lockNanos{0};     // of the drive: taking the world's write lock
+std::atomic<uint64_t> s_activateNanos{0}; // of the drive: hkpEntity::activate
+struct FrameEndTimer
+{
+    std::chrono::steady_clock::time_point Start = std::chrono::steady_clock::now();
+    ~FrameEndTimer() { s_frameEndNanos += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - Start).count(); }
+};
+std::atomic<uint32_t> s_stepSkips{0};
+std::atomic<float> s_lastStepSeconds{0.f};
+
+void SetWeaponTarget(uint8_t* apHavok, void* apBhkWorld, const float* apPosition, const float* apRotation) noexcept
+{
+    std::lock_guard lock(s_targetsLock);
+    auto it = std::find_if(s_targets.begin(), s_targets.end(), [apHavok](const WeaponTarget& acTarget) { return acTarget.pHavok == apHavok; });
+    if (it == s_targets.end())
+    {
+        s_targets.push_back({});
+        it = s_targets.end() - 1;
+        it->pHavok = apHavok;
+        it->HasStep = false;
+    }
+    it->pBhkWorld = apBhkWorld;
+    std::copy_n(apPosition, 4, it->Position);
+    std::copy_n(apRotation, 4, it->Rotation);
+}
+
+void ForgetWeaponTarget(const uint8_t* apHavok) noexcept
+{
+    std::lock_guard lock(s_targetsLock);
+    s_targets.erase(std::remove_if(s_targets.begin(), s_targets.end(), [apHavok](const WeaponTarget& acTarget) { return acTarget.pHavok == apHavok; }), s_targets.end());
+}
+
+const char* RttiNameOf(void* apObject) noexcept
+{
+    if (!apObject || !IsReadable(apObject, sizeof(void*)))
+        return nullptr;
+    auto** ppVTable = *static_cast<void***>(apObject);
+    if (!ppVTable || !IsReadable(ppVTable + kVTableGetRttiSlot, sizeof(void*)))
+        return nullptr;
+    using TGetRtti = const char**(__fastcall*)(void*);
+    const char** ppRtti = static_cast<TGetRtti>(ppVTable[kVTableGetRttiSlot])(apObject);
+    return ppRtti && IsReadable(ppRtti, sizeof(void*)) && ppRtti[0] && IsReadable(ppRtti[0], 1) ? ppRtti[0] : nullptr;
+}
+
+// The bhkWorld that owns a Havok world, checked by name: its lock is about to be taken.
+void* BhkWorldOf(void* apHkpWorld) noexcept
+{
+    if (!apHkpWorld || !IsReadable(static_cast<uint8_t*>(apHkpWorld) + kBhkWorldOfHkpWorldOffset, sizeof(void*)))
+        return nullptr;
+    void* pWorld = At<void*>(apHkpWorld, kBhkWorldOfHkpWorldOffset);
+    const char* pName = RttiNameOf(pWorld);
+    if (!pName || std::strncmp(pName, "bhkWorld", 8) != 0 || !IsReadable(static_cast<uint8_t*>(pWorld) + kWorldLockOffset, 8))
+        return nullptr;
+    return pWorld;
+}
+
+class WorldWriteLock
+{
+public:
+    explicit WorldWriteLock(void* apBhkWorld) noexcept
+    {
+        POINTER_SKYRIMSE(TWorldLock, s_lockForWrite, 66977, 66977);
+        if (apBhkWorld && s_lockForWrite.Get())
+        {
+            m_pLock = static_cast<uint8_t*>(apBhkWorld) + kWorldLockOffset;
+            s_lockForWrite.Get()(m_pLock);
+        }
+    }
+    ~WorldWriteLock() noexcept
+    {
+        POINTER_SKYRIMSE(TWorldLock, s_unlockForWrite, 66983, 66983);
+        if (m_pLock && s_unlockForWrite.Get())
+            s_unlockForWrite.Get()(m_pLock);
+    }
+    WorldWriteLock(const WorldWriteLock&) = delete;
+    WorldWriteLock& operator=(const WorldWriteLock&) = delete;
+    [[nodiscard]] bool Held() const noexcept { return m_pLock != nullptr; }
+
+private:
+    void* m_pLock = nullptr;
+};
+
+// Where the body has to be for the weapon to be where it is drawn: the node's world transform, times the body's own
+// offset when it is a bhkRigidBodyT (HIGGS, GetRigidBodyTLocalTransform). Havok units.
+void BodyTarget(const WeaponBody& acBody, const float aHavokScale, float* apPosition, float* apRotation) noexcept
+{
+    const NiTransform& node = At<NiTransform>(acBody.pNode, kWorldOffset);
+    glm::mat3 rotation = ToGlm(node.rotate);
+    glm::vec3 position = ToGlm(node.translate);
+    if (acBody.IsT)
+    {
+        const float* pLocalRotation = reinterpret_cast<const float*>(static_cast<uint8_t*>(acBody.pWrapper) + kRigidBodyTRotationOffset);
+        const float* pLocalTranslation = reinterpret_cast<const float*>(static_cast<uint8_t*>(acBody.pWrapper) + kRigidBodyTTranslationOffset);
+        const glm::quat localRotation{pLocalRotation[3], pLocalRotation[0], pLocalRotation[1], pLocalRotation[2]};
+        const glm::vec3 localTranslation = glm::vec3{pLocalTranslation[0], pLocalTranslation[1], pLocalTranslation[2]} / aHavokScale;
+        position += rotation * (localTranslation * node.scale);
+        rotation = rotation * glm::mat3_cast(localRotation);
+    }
+    const glm::quat quaternion = glm::normalize(glm::quat_cast(rotation));
+    position *= aHavokScale;
+    apPosition[0] = position.x;
+    apPosition[1] = position.y;
+    apPosition[2] = position.z;
+    apPosition[3] = 0.f;
+    apRotation[0] = quaternion.x;
+    apRotation[1] = quaternion.y;
+    apRotation[2] = quaternion.z;
+    apRotation[3] = quaternion.w;
+}
+
+// hkMotionState::transform's rotation: three hkVector4 columns.
+glm::quat BodyRotation(const uint8_t* apHavok) noexcept
+{
+    const float* pColumns = reinterpret_cast<const float*>(apHavok + kBodyTransformOffset);
+    const glm::mat3 rotation{glm::vec3{pColumns[0], pColumns[1], pColumns[2]}, glm::vec3{pColumns[4], pColumns[5], pColumns[6]}, glm::vec3{pColumns[8], pColumns[9], pColumns[10]}};
+    return glm::normalize(glm::quat_cast(rotation));
+}
+
+float DegreesBetween(const glm::quat& acA, const glm::quat& acB) noexcept
+{
+    const float cosHalf = std::min(1.f, std::fabs(glm::dot(acA, acB)));
+    return glm::degrees(2.f * std::acos(cosHalf));
+}
+
+// Which hkpMotion the body really has: the motion type byte says keyframed, the motion object (its vtable) says what
+// the solver does with it. VTABLE_hkp*Motion_0, ids 279525-279533 in the VR Address Library.
+std::string DescribeMotion(const uint8_t* apHavok) noexcept
+{
+    POINTER_SKYRIMSE(void, s_motion, 279525, 279525);
+    POINTER_SKYRIMSE(void, s_keyframed, 279526, 279526);
+    POINTER_SKYRIMSE(void, s_maxSize, 279527, 279527);
+    POINTER_SKYRIMSE(void, s_fixed, 279529, 279529);
+    POINTER_SKYRIMSE(void, s_sphere, 279530, 279530);
+    POINTER_SKYRIMSE(void, s_box, 279531, 279531);
+    POINTER_SKYRIMSE(void, s_thinBox, 279532, 279532);
+    POINTER_SKYRIMSE(void, s_character, 279533, 279533);
+    const void* pVTable = *reinterpret_cast<void* const*>(apHavok + 0x150);
+    const char* pClass = pVTable == s_keyframed.Get() ? "keyframed"
+                         : pVTable == s_box.Get()     ? "box (dynamic)"
+                         : pVTable == s_sphere.Get()  ? "sphere (dynamic)"
+                         : pVTable == s_thinBox.Get() ? "thin box (dynamic)"
+                         : pVTable == s_fixed.Get()   ? "fixed"
+                         : pVTable == s_maxSize.Get() ? "max size"
+                         : pVTable == s_character.Get() ? "character"
+                         : pVTable == s_motion.Get()  ? "base"
+                                                      : "unknown";
+    const float* pInverse = reinterpret_cast<const float*>(apHavok + 0x150 + 0xD0); // inertiaAndMassInv
+    const void* pSaved = *reinterpret_cast<void* const*>(apHavok + 0x150 + 0x128);  // savedMotion
+    return fmt::format("motion object {}, inverse inertia ({:.3g}, {:.3g}, {:.3g}) and inverse mass {:.3g}, {} motion saved aside", pClass, pInverse[0], pInverse[1], pInverse[2],
+                       pInverse[3], pSaved ? "a" : "no");
+}
+
+// hkSweptTransform::rotation1, the quaternion the keyframe turns from (x, y, z, w).
+glm::quat BodyQuaternion(const uint8_t* apHavok) noexcept
+{
+    const float* pQuaternion = reinterpret_cast<const float*>(apHavok + kBodyQuaternionOffset);
+    return glm::normalize(glm::quat{pQuaternion[3], pQuaternion[0], pQuaternion[1], pQuaternion[2]});
+}
+
+glm::vec3 BodyPosition(const uint8_t* apHavok, const float aHavokScale) noexcept
+{
+    const float* pTranslation = reinterpret_cast<const float*>(apHavok + kBodyTransformOffset + 0x30);
+    return glm::vec3{pTranslation[0], pTranslation[1], pTranslation[2]} / aHavokScale;
+}
+
+// In and out of the world is said at most every ten seconds per weapon: a copy whose body flickers between usable
+// and not would otherwise write two lines a frame.
+bool SayAboutWeaponBody(const uint64_t aKey, const bool aIn) noexcept
+{
+    static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> s_quietUntil;
+    const auto cNow = std::chrono::steady_clock::now();
+    auto& quietUntil = s_quietUntil[aKey << 1 | (aIn ? 1 : 0)];
+    if (cNow < quietUntil)
+        return false;
+    quietUntil = cNow + std::chrono::seconds(10);
+    return true;
+}
+
+void ReleaseWeaponBody(const uint64_t aKey, WeaponBody& aBody, const char* acpWhy) noexcept
+{
+    if (!aBody.pHavok)
+        return;
+    ForgetWeaponTarget(aBody.pHavok);
+    POINTER_SKYRIMSE(THkpWorldRemoveEntity, s_removeEntity, 60493, 60493);
+    POINTER_SKYRIMSE(THkpEntityContactListener, s_removeContactListener, 60095, 60095);
+    void* pHkpWorld = At<void*>(aBody.pHavok, kHkWorldOffset);
+    if (pHkpWorld && s_removeEntity.Get())
+    {
+        WorldWriteLock lock(BhkWorldOf(pHkpWorld));
+        // Read again under the lock: the game may have taken it out (a cell unloading) in the meantime.
+        if (lock.Held() && At<void*>(aBody.pHavok, kHkWorldOffset) == pHkpWorld)
+        {
+            if (aBody.Listening && s_removeContactListener.Get())
+                s_removeContactListener.Get()(aBody.pHavok, &s_contactListener);
+            aBody.Listening = false;
+            aBody.pHavok[kMaxAngularVelocityOffset] = aBody.GameMaxAngularVelocity;
+            bool removed = false;
+            s_removeEntity.Get()(pHkpWorld, &removed, aBody.pHavok);
+        }
+    }
+    // Out of every world already: nothing simulates it, so the listener comes off without a lock.
+    if (!At<void*>(aBody.pHavok, kHkWorldOffset))
+    {
+        if (aBody.Listening && s_removeContactListener.Get())
+            s_removeContactListener.Get()(aBody.pHavok, &s_contactListener);
+        aBody.pHavok[kMaxAngularVelocityOffset] = aBody.GameMaxAngularVelocity;
+    }
+    if (SayAboutWeaponBody(aKey, false))
+        spdlog::info("VRWeaponBody: actor {:X} {} weapon body out of the world ({})", static_cast<uint32_t>(aKey >> 1), (aKey & 1) ? "right" : "left", acpWhy);
+    static_cast<NiRefObject*>(aBody.pWrapper)->DecRef();
+    static_cast<NiRefObject*>(aBody.pNode)->DecRef();
+    aBody = {};
+}
+
+// Whether a node still hangs below another, a few levels up at most (the weapon's node sits two or three below the
+// hand's "WEAPON" node). Once sheathed it hangs off the sheath instead.
+bool HangsUnder(void* apNode, void* apAncestor) noexcept
+{
+    void* pNode = apNode;
+    for (int depth = 0; pNode && depth < 6; ++depth)
+    {
+        pNode = At<void*>(pNode, kParentOffset);
+        if (pNode == apAncestor)
+            return true;
+    }
+    return false;
+}
+
+// Where the game's own animation has each side's weapon node this frame (left, right), read before the copy is posed;
+// NaN where there is none. For measuring what, besides this code, moves a weapon body.
+using AnimatedWeapons = std::array<glm::vec3, 2>;
+AnimatedWeapons WeaponsAsAnimated(const Rig& acRig) noexcept
+{
+    FrameEndTimer timer;
+    AnimatedWeapons animated;
+    animated.fill(glm::vec3{std::numeric_limits<float>::quiet_NaN()});
+    for (size_t side = 0; side < 2; ++side)
+        for (const RigBone& below : acRig.AttachBelow[side])
+            if (below.pNode && HavokBodyOfLive(below.pNode))
+            {
+                animated[side] = ToGlm(At<NiTransform>(below.pNode, kWorldOffset).translate);
+                break;
+            }
+    return animated;
+}
+
+// Puts the copy's drawn weapons in the world and drives them to where they are drawn. Right after the copy is posed.
+void UpdateWeaponBodies(const uint32_t aFormId, Actor* apActor, const Rig& acRig, const AnimatedWeapons* apAnimated = nullptr) noexcept
+{
+    FrameEndTimer timer;
+    POINTER_SKYRIMSE(float, s_havokScale, 231896, 231896);
+    POINTER_SKYRIMSE(THkpWorldAddEntity, s_addEntity, 9000001, 9000001);
+    POINTER_SKYRIMSE(THkpEntitySetPositionAndRotation, s_setPositionAndRotation, 9000002, 9000002);
+    POINTER_SKYRIMSE(THkpEntityContactListener, s_addContactListener, 60094, 60094);
+    if (!s_stepDeltaTime || !s_havokScale.Get() || !s_addEntity.Get() || !s_setPositionAndRotation.Get())
+    {
+        static bool s_said = false;
+        if (!s_said)
+        {
+            s_said = true;
+            spdlog::error("VRWeaponBody: a Havok address did not resolve (step hook {}, scale {}, addEntity {}, setPositionAndRotation {}); weapons stay out of the world",
+                          s_stepDeltaTime != nullptr, s_havokScale.Get() != nullptr, s_addEntity.Get() != nullptr, s_setPositionAndRotation.Get() != nullptr);
+        }
+        return;
+    }
+    const float havokScale = *s_havokScale.Get();
+    if (!(havokScale > 0.f))
+        return;
+
+    // The copy's ragdoll says which world it is in; nothing is added without one.
+    void* pCopyWorld = nullptr;
+    for (const RigBone& bone : acRig.Body)
+        if (uint8_t* pBone = bone.pNode ? HavokBodyOfLive(bone.pNode) : nullptr)
+            if ((pCopyWorld = At<void*>(pBone, kHkWorldOffset)) != nullptr)
+                break;
+
+    // Out: drawn, or drawn and asked to go back (a copy's own AI asks to sheathe, and its graph, which only its owner's
+    // actions drive, may never do it: in the rig on 2026-10-06 a copy went "drawing" to "wantToSheathe" within 1.5 s
+    // and still had the sword in its hand 30 s later), or on its way back. The node hanging under the hand decides.
+    const uint32_t weaponState = apActor->actorState.flags2 >> 5 & 7;
+    const bool cOut = weaponState >= 3 && weaponState <= 5;
+    for (uint32_t side = 0; side < 2; ++side)
+    {
+        const uint64_t key = (static_cast<uint64_t>(aFormId) << 1) | side;
+        void* pAttach = acRig.Attach[side].pNode;
+
+        // The weapon's node and body as the rig has them now.
+        void* pNode = nullptr;
+        uint8_t* pHavok = nullptr;
+        if (pAttach)
+            for (const RigBone& below : acRig.AttachBelow[side])
+                if (below.pNode && (pHavok = HavokBodyOfLive(below.pNode)) != nullptr)
+                {
+                    pNode = below.pNode;
+                    break;
+                }
+        const bool cInHand = pNode && HangsUnder(pNode, pAttach);
+        if (pNode && (!cOut || !cInHand || !pCopyWorld))
+        {
+            // Why a weapon with a body is left out, every ten seconds at most.
+            static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> s_nextWhyOut;
+            const auto cNow = std::chrono::steady_clock::now();
+            auto& nextWhyOut = s_nextWhyOut[key];
+            if (cNow >= nextWhyOut)
+            {
+                nextWhyOut = cNow + std::chrono::seconds(10);
+                spdlog::info("VRWeaponBody: actor {:X} {} weapon has a body but stays out: weapon state {} (3 drawn, 4 asked to sheathe, 5 sheathing), {} the hand, {}", aFormId,
+                             side ? "right" : "left", weaponState, cInHand ? "under" : "not under", pCopyWorld ? "its ragdoll in a world" : "no ragdoll in a world");
+            }
+        }
+        if (!cOut || !cInHand)
+        {
+            pNode = nullptr;
+            pHavok = nullptr;
+        }
+
+        auto it = s_weaponBodies.find(key);
+        if (it != s_weaponBodies.end())
+        {
+            WeaponBody& body = it->second;
+            void* pBodyWorld = At<void*>(body.pHavok, kHkWorldOffset);
+            const char* pWhy = !cOut                               ? "the weapon is not out"
+                               : body.pHavok != pHavok             ? "another weapon or none in the hand"
+                               : !pCopyWorld || pBodyWorld != pCopyWorld ? "the copy is in another world, or the game took the body out"
+                                                                   : nullptr;
+            if (pWhy)
+            {
+                ReleaseWeaponBody(key, body, pWhy);
+                s_weaponBodies.erase(it);
+                it = s_weaponBodies.end();
+            }
+        }
+        if (!pHavok || !pCopyWorld)
+            continue;
+
+        alignas(16) float position[4];
+        alignas(16) float rotation[4];
+        if (it == s_weaponBodies.end())
+        {
+            static std::unordered_set<uint64_t> s_saidBusy;
+            if (At<void*>(pHavok, kHkWorldOffset) != nullptr)
+            {
+                // Someone else put it in a world; it is theirs.
+                if (s_saidBusy.insert(key).second)
+                    spdlog::info("VRWeaponBody: actor {:X} {} weapon body is already in a world; left alone", aFormId, side ? "right" : "left");
+                continue;
+            }
+            // A failed add is tried again after five seconds, not every frame: the checks below are slow ones.
+            static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> s_retryAt;
+            const auto cNowAdd = std::chrono::steady_clock::now();
+            if (const auto retry = s_retryAt.find(key); retry != s_retryAt.end() && cNowAdd < retry->second)
+                continue;
+            s_retryAt[key] = cNowAdd + std::chrono::seconds(5);
+            void* pBhkWorld = BhkWorldOf(pCopyWorld);
+            if (!pBhkWorld)
+            {
+                if (s_saidBusy.insert(key).second)
+                    spdlog::warn("VRWeaponBody: actor {:X}: the world its ragdoll is in has no bhkWorld behind it; its weapon stays out", aFormId);
+                continue;
+            }
+
+            WeaponBody body;
+            body.pNode = pNode;
+            body.pWrapper = At<void*>(At<void*>(pNode, kCollisionObjectOffset), kCollisionBodyOffset);
+            body.pHavok = pHavok;
+            body.pBhkWorld = pBhkWorld;
+            const char* pWrapperClass = RttiNameOf(body.pWrapper);
+            body.IsT = pWrapperClass && std::strcmp(pWrapperClass, "bhkRigidBodyT") == 0;
+            if (!pWrapperClass || (std::strcmp(pWrapperClass, "bhkRigidBody") != 0 && !body.IsT) || !IsReadable(pHavok, kBodyQuaternionOffset + 0x10))
+            {
+                if (s_saidBusy.insert(key).second)
+                    spdlog::warn("VRWeaponBody: actor {:X} {} weapon's body is a {}, not a rigid body; left out", aFormId, side ? "right" : "left", pWrapperClass ? pWrapperClass : "?");
+                continue;
+            }
+            BodyTarget(body, havokScale, position, rotation);
+            {
+                WorldWriteLock lock(pBhkWorld);
+                if (!lock.Held() || At<void*>(pHavok, kHkWorldOffset) != nullptr)
+                    continue;
+                static_cast<NiRefObject*>(body.pNode)->IncRef();
+                static_cast<NiRefObject*>(body.pWrapper)->IncRef();
+                body.GameQuality = static_cast<int8_t>(pHavok[kQualityTypeOffset]);
+                s_setPositionAndRotation.Get()(pHavok, position, rotation);
+                // The game gives its weapon body 31.6 rad/s at most; a drawn sword turns faster than that, and the
+                // keyframe, capped there, never settled (up to 160 degrees off, 2026-10-06 -- while asked to turn not at
+                // all the body held still to 0.1 degrees). HIGGS gives its own weapon bodies 500; so does this, while
+                // the body is ours.
+                body.GameMaxAngularVelocity = pHavok[kMaxAngularVelocityOffset];
+                std::memcpy(&body.GameAngularDamping, pHavok + kAngularDampingOffset, sizeof(uint16_t));
+                POINTER_SKYRIMSE(THkRealToUFloat8, s_toUFloat8, 9000010, 9000010);
+                if (s_toUFloat8.Get())
+                {
+                    constexpr float cMaxAngularVelocity = 500.f;
+                    s_toUFloat8.Get()(pHavok[kMaxAngularVelocityOffset], cMaxAngularVelocity);
+                }
+                const glm::quat cTarget{rotation[3], rotation[0], rotation[1], rotation[2]};
+                const float setMatrix = DegreesBetween(BodyRotation(pHavok), cTarget);
+                const float setQuaternion = DegreesBetween(BodyQuaternion(pHavok), cTarget);
+                s_addEntity.Get()(pCopyWorld, pHavok, 1); // HK_ENTITY_ACTIVATION_DO_ACTIVATE
+                spdlog::info("VRWeaponBody: actor {:X} {} weapon body turned as asked: {:.1f} degrees off (matrix) and {:.1f} (quaternion) once set, {:.1f} and {:.1f} once "
+                             "added to the world; {}; its angular limit (hkUFloat8) {:#04x}, raised to {:#04x}; damping {:.3g} linear and {:.3g} angular (now {:.3g}), "
+                             "time factor {:.3g}; collision quality {}, now {}; {} constraints as master, {} as slave, {} actions",
+                             aFormId, side ? "right" : "left", setMatrix, setQuaternion, DegreesBetween(BodyRotation(pHavok), cTarget), DegreesBetween(BodyQuaternion(pHavok), cTarget),
+                             DescribeMotion(pHavok), body.GameMaxAngularVelocity, pHavok[kMaxAngularVelocityOffset],
+                             FromHalf(*reinterpret_cast<const uint16_t*>(pHavok + kLinearDampingOffset)), FromHalf(body.GameAngularDamping),
+                             FromHalf(*reinterpret_cast<const uint16_t*>(pHavok + kAngularDampingOffset)), FromHalf(*reinterpret_cast<const uint16_t*>(pHavok + kTimeFactorOffset)),
+                             body.GameQuality, static_cast<int8_t>(pHavok[kQualityTypeOffset]),
+                             *reinterpret_cast<const uint16_t*>(pHavok + 0x100 + 0x8), *reinterpret_cast<const int32_t*>(pHavok + 0x110 + 0x8),
+                             *reinterpret_cast<const uint16_t*>(pHavok + 0x2A0 + 0x8)); // hkpEntity constraintsMaster, constraintsSlave, actions (sizes)
+                if (s_addContactListener.Get())
+                {
+                    s_addContactListener.Get()(pHavok, &s_contactListener);
+                    body.Listening = true;
+                }
+            }
+            body.Seen = true;
+            s_weaponBodies[key] = body;
+            s_retryAt.erase(key);
+            const uint32_t filter = At<uint32_t>(pHavok, kFilterInfoOffset);
+            const char* pName = GetName(pNode);
+            const char* pClass = RttiNameOf(body.pWrapper);
+            // Read back from where Havok keeps it: 0 here says the transform is read at the right offset.
+            const float placedOff = glm::length(BodyPosition(pHavok, havokScale) - glm::vec3{position[0], position[1], position[2]} / havokScale);
+            if (SayAboutWeaponBody(key, true))
+                spdlog::info("VRWeaponBody: actor {:X} {} weapon '{}' ({}) is a body in the world now: layer {}, group {}, motion type {}; placed, it reads {:.1f} units from where it was put; "
+                             "hkpRigidBody at {}",
+                             aFormId, side ? "right" : "left", pName && IsReadable(pName, 1) ? pName : "?", pClass ? pClass : "?", filter & 0x7F, filter >> 16,
+                             At<uint8_t>(pHavok, kMotionTypeOffset), placedOff, fmt::ptr(pHavok));
+            continue;
+        }
+
+        // Where it is to be. The drive itself happens right before Havok's step (DriveWeaponBodiesBeforeStep), the way
+        // HIGGS drives its weapon bodies. Driven from here, at the renderer's frame end, the velocity given was not the
+        // one Havok integrated (2026-10-06, a 24-frame trace: the body turned toward the target one frame and back the
+        // next, or not at all while 60 rad/s was set), and it never settled: 4-18 units and up to 160 degrees off.
+        WeaponBody& body = it->second;
+        body.Seen = true;
+        BodyTarget(body, havokScale, position, rotation);
+        SetWeaponTarget(body.pHavok, body.pBhkWorld, position, rotation);
+
+        // How far the body is from where the weapon is drawn now, after the last step: what the drive leaves behind.
+        const glm::vec3 wanted = glm::vec3{position[0], position[1], position[2]} / havokScale;
+        const float gap = glm::length(BodyPosition(body.pHavok, havokScale) - wanted);
+        const glm::quat target{rotation[3], rotation[0], rotation[1], rotation[2]};
+        body.WorstGap = std::max(body.WorstGap, gap);
+        const float lag = DegreesBetween(BodyRotation(body.pHavok), target);
+        body.WorstLag = std::max(body.WorstLag, lag);
+        if (lag > 10.f)
+            ++body.FramesOff;
+        if (body.Driven > 0)
+            body.WorstTargetStep = std::max(body.WorstTargetStep, DegreesBetween(body.LastTarget, target));
+        body.LastTarget = target;
+        ++body.Driven;
+
+        static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> s_nextGapLog;
+        const auto cNow = std::chrono::steady_clock::now();
+        auto& nextGapLog = s_nextGapLog[key];
+        if (cNow >= nextGapLog)
+        {
+            nextGapLog = cNow + std::chrono::seconds(5);
+            // Where its centre of mass is held during the steps: from the target, not read from the body now -- between
+            // steps the game has it turned to where its animation holds the sword (2026-10-06), 20 units away.
+            const float* pCentreLocal = reinterpret_cast<const float*>(body.pHavok + kBodyTransformOffset + 0x80);
+            const glm::vec3 centre = wanted + glm::mat3_cast(target) * (glm::vec3{pCentreLocal[0], pCentreLocal[1], pCentreLocal[2]} / havokScale);
+            const glm::vec3 animated = apAnimated ? (*apAnimated)[side] : glm::vec3{std::numeric_limits<float>::quiet_NaN()};
+            const float fromAnimated = glm::length(BodyPosition(body.pHavok, havokScale) - animated);
+            const uint32_t stepDrives = s_stepDrives.exchange(0);
+            const uint32_t stepSkips = s_stepSkips.exchange(0);
+            {
+                std::lock_guard statsLock(s_stepStatsLock);
+                spdlog::info("VRWeaponBody: over the last 5 s, right after each step up to {:.2f} units and {:.2f} degrees from where it was to be; between steps moved by "
+                             "something else up to {:.1f} units and {:.1f} degrees, put back {} times",
+                             s_worstAfterStepUnits, s_worstAfterStepDegrees, s_worstMovedUnits, s_worstMovedDegrees, s_reseats.exchange(0));
+                s_worstAfterStepUnits = s_worstAfterStepDegrees = s_worstMovedUnits = s_worstMovedDegrees = 0.f;
+            }
+            spdlog::info("VRWeaponBody: cost over the last 5 s: {:.2f} ms driving before steps ({:.2f} taking the world lock, {:.2f} waking the bodies), {:.2f} ms at "
+                         "frame ends, {} contact callbacks",
+                         s_stepDriveNanos.exchange(0) / 1e6, s_lockNanos.exchange(0) / 1e6, s_activateNanos.exchange(0) / 1e6, s_frameEndNanos.exchange(0) / 1e6,
+                         s_contactCallbackCount.exchange(0));
+            spdlog::info("VRWeaponBody: actor {:X} {} weapon body {:.1f} units from where the weapon is drawn, {:.1f} from where the game's animation had it; its centre of "
+                         "mass at ({:.1f}, {:.1f}, {:.1f}); over {} frames: up to {:.1f} units and {:.1f} degrees off ({} frames more than 10), the target turning up to "
+                         "{:.1f} degrees a frame; "
+                         "{} drives right before a step ({:.4f} s the last), {} steps skipped (world locked elsewhere)",
+                         aFormId, side ? "right" : "left", gap, std::isfinite(fromAnimated) ? fromAnimated : -1.f, centre.x, centre.y, centre.z, body.Driven, body.WorstGap,
+                         body.WorstLag, body.FramesOff, body.WorstTargetStep, stepDrives, s_lastStepSeconds.load(), stepSkips);
+            body.Driven = 0;
+            body.FramesOff = 0;
+            body.WorstGap = body.WorstLag = body.WorstTargetStep = 0.f;
+        }
+    }
+}
+
+// Right before Havok steps a world: every weapon body in it is woken and keyframed to where its weapon was last drawn,
+// over exactly the time this step covers. Called from inside bhkWorld::Update; the world's write lock is taken only
+// when no other thread holds it or this one already does -- never waited on for a lock this thread may hold for
+// reading -- and the step goes undriven otherwise (counted).
+void DriveWeaponBodiesBeforeStep(void* apHkpWorld, const float aSeconds) noexcept
+{
+    if (!(aSeconds > 0.f))
+        return;
+    const auto cStart = std::chrono::steady_clock::now();
+    struct AddTime
+    {
+        std::chrono::steady_clock::time_point Start;
+        ~AddTime() { s_stepDriveNanos += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - Start).count(); }
+    } addTime{cStart};
+    {
+        std::lock_guard lock(s_targetsLock);
+        if (s_targets.empty())
+            return;
+    }
+    POINTER_SKYRIMSE(THkpEntitySetPositionAndRotation, s_setPositionAndRotation, 9000002, 9000002);
+    POINTER_SKYRIMSE(THkpEntityActivate, s_activate, 60096, 60096);
+    POINTER_SKYRIMSE(float, s_havokScale, 231896, 231896);
+    if (!s_setPositionAndRotation.Get() || !s_activate.Get() || !s_havokScale.Get() || !(*s_havokScale.Get() > 0.f))
+        return;
+
+    // The world being stepped is alive; its bhkWorld is used only if a body of ours was added to that one (checked then).
+    void* pBhkWorld = At<void*>(apHkpWorld, kBhkWorldOfHkpWorldOffset);
+    {
+        std::lock_guard targetsLock(s_targetsLock);
+        if (!pBhkWorld || std::none_of(s_targets.begin(), s_targets.end(), [pBhkWorld](const WeaponTarget& acTarget) { return acTarget.pBhkWorld == pBhkWorld; }))
+            return;
+    }
+    const auto* pLock = reinterpret_cast<const volatile uint32_t*>(static_cast<uint8_t*>(pBhkWorld) + kWorldLockOffset); // BSReadWriteLock: writer thread, lock word
+    if (pLock[0] != GetCurrentThreadId() && pLock[1] != 0)
+    {
+        ++s_stepSkips;
+        return;
+    }
+    const auto cBeforeLock = std::chrono::steady_clock::now();
+    WorldWriteLock lock(pBhkWorld);
+    s_lockNanos += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - cBeforeLock).count();
+    if (!lock.Held())
+        return;
+
+    std::array<WeaponTarget, 8> targets;
+    size_t count = 0;
+    {
+        std::lock_guard targetsLock(s_targetsLock);
+        for (const WeaponTarget& target : s_targets)
+            if (count < targets.size() && target.pBhkWorld == pBhkWorld && At<void*>(target.pHavok, kHkWorldOffset) == apHkpWorld)
+                targets[count++] = target;
+    }
+
+    const float havokScale = *s_havokScale.Get();
+    for (size_t i = 0; i < count; ++i)
+    {
+        WeaponTarget& target = targets[i];
+        uint8_t* pHavok = target.pHavok;
+        // Awake, as HIGGS keeps its own weapon bodies: a sleeping body ignores the velocity a keyframe gives it.
+        const auto cBeforeActivate = std::chrono::steady_clock::now();
+        s_activate.Get()(pHavok);
+        s_activateNanos += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - cBeforeActivate).count();
+        const glm::mat3 targetRotation = glm::mat3_cast(glm::quat{target.Rotation[3], target.Rotation[0], target.Rotation[1], target.Rotation[2]});
+        const glm::vec3 targetPosition{target.Position[0], target.Position[1], target.Position[2]};
+        const float* pColumns = reinterpret_cast<const float*>(pHavok + kBodyTransformOffset);
+        const glm::mat3 bodyRotation{glm::vec3{pColumns[0], pColumns[1], pColumns[2]}, glm::vec3{pColumns[4], pColumns[5], pColumns[6]},
+                                     glm::vec3{pColumns[8], pColumns[9], pColumns[10]}};
+        const glm::vec3 bodyPosition{pColumns[12], pColumns[13], pColumns[14]};
+
+        // Further than a sword's length from the target is a jump (a teleport, a load), not a swing: placed, not swept.
+        if (!target.HasStep || glm::length(bodyPosition - targetPosition) / havokScale > 100.f)
+        {
+            s_setPositionAndRotation.Get()(pHavok, target.Position, target.Rotation);
+            float* pLinear = reinterpret_cast<float*>(pHavok + kAngularVelocityOffset - 0x10);
+            float* pAngular = reinterpret_cast<float*>(pHavok + kAngularVelocityOffset);
+            std::fill_n(pLinear, 4, 0.f);
+            std::fill_n(pAngular, 4, 0.f);
+        }
+        else
+        {
+            // Where the last step left it is where it starts. The game moves its weapon body to where its own
+            // animation holds the sword now and then, between steps (bhkRigidBody's setters, from a worker thread;
+            // 2026-10-06, every frame at 60 fps): driven from there, it swept 150 degrees through whatever was near in
+            // one step. Put back instead, with no speed, and then moved only by as much as the drawn sword moved.
+            const glm::mat3 startRotation = glm::mat3_cast(glm::quat{target.StepRotation[3], target.StepRotation[0], target.StepRotation[1], target.StepRotation[2]});
+            const glm::vec3 startPosition{target.StepPosition[0], target.StepPosition[1], target.StepPosition[2]};
+            glm::quat moved = glm::normalize(glm::quat_cast(bodyRotation * glm::transpose(startRotation)));
+            const float movedDegrees = glm::degrees(glm::angle(moved.w < 0.f ? -moved : moved));
+            const float movedUnits = glm::length(bodyPosition - startPosition) / havokScale;
+            {
+                std::lock_guard statsLock(s_stepStatsLock);
+                s_worstMovedUnits = std::max(s_worstMovedUnits, movedUnits);
+                s_worstMovedDegrees = std::max(s_worstMovedDegrees, movedDegrees);
+            }
+            if (movedUnits > 1.f || movedDegrees > 3.f)
+            {
+                s_setPositionAndRotation.Get()(pHavok, target.StepPosition, target.StepRotation);
+                ++s_reseats;
+            }
+
+            // The velocities that take it from there to the target over this step, from rotation matrices (handed to
+            // applyHardKeyFrame as a quaternion, it sat ~145 degrees off about one axis in every build).
+            glm::quat turn = glm::normalize(glm::quat_cast(targetRotation * glm::transpose(startRotation)));
+            if (turn.w < 0.f)
+                turn = -turn;
+            const float angle = glm::angle(turn);
+            const glm::vec3 spin = angle > 1e-5f ? glm::axis(turn) * (angle / aSeconds) : glm::vec3{};
+            const float* pCentreLocal = reinterpret_cast<const float*>(pHavok + kBodyTransformOffset + 0x80);
+            const glm::vec3 centreLocal{pCentreLocal[0], pCentreLocal[1], pCentreLocal[2]};
+            const glm::vec3 linear = ((targetPosition + targetRotation * centreLocal) - (startPosition + startRotation * centreLocal)) / aSeconds;
+            float* pLinear = reinterpret_cast<float*>(pHavok + kAngularVelocityOffset - 0x10);
+            float* pAngular = reinterpret_cast<float*>(pHavok + kAngularVelocityOffset);
+            pLinear[0] = linear.x, pLinear[1] = linear.y, pLinear[2] = linear.z, pLinear[3] = 0.f;
+            pAngular[0] = spin.x, pAngular[1] = spin.y, pAngular[2] = spin.z, pAngular[3] = 0.f;
+        }
+
+        // This step leaves it at the target.
+        {
+            std::lock_guard targetsLock(s_targetsLock);
+            for (WeaponTarget& stored : s_targets)
+                if (stored.pHavok == pHavok)
+                {
+                    std::copy_n(target.Position, 4, stored.StepPosition);
+                    std::copy_n(target.Rotation, 4, stored.StepRotation);
+                    stored.HasStep = true;
+                }
+        }
+        ++s_stepDrives;
+    }
+    s_lastStepSeconds = aSeconds;
+}
+
+// The call to ahkpWorld::stepDeltaTime in bhkWorld::Update, VR 0xDFB722 (HIGGS's src/hooks.cpp, prePhysicsStepHookLoc:
+// it hooks the same call, and whichever of the two patches second calls the other). The call is replaced only if it
+// is a call; whatever it called is called after the drive.
+
+// Right after the step: how far each weapon body ended from where the step was to take it.
+void MeasureWeaponBodiesAfterStep(void* apHkpWorld) noexcept
+{
+    POINTER_SKYRIMSE(float, s_havokScale, 231896, 231896);
+    if (!s_havokScale.Get() || !(*s_havokScale.Get() > 0.f))
+        return;
+    void* pBhkWorld = At<void*>(apHkpWorld, kBhkWorldOfHkpWorldOffset);
+    {
+        std::lock_guard targetsLock(s_targetsLock);
+        if (!pBhkWorld || std::none_of(s_targets.begin(), s_targets.end(), [pBhkWorld](const WeaponTarget& acTarget) { return acTarget.pBhkWorld == pBhkWorld; }))
+            return;
+    }
+    const auto* pLock = reinterpret_cast<const volatile uint32_t*>(static_cast<uint8_t*>(pBhkWorld) + kWorldLockOffset);
+    if (pLock[0] != GetCurrentThreadId() && pLock[1] != 0)
+        return;
+    WorldWriteLock lock(pBhkWorld);
+    if (!lock.Held())
+        return;
+    std::lock_guard targetsLock(s_targetsLock);
+    for (const WeaponTarget& target : s_targets)
+    {
+        if (!target.HasStep || target.pBhkWorld != pBhkWorld || At<void*>(target.pHavok, kHkWorldOffset) != apHkpWorld)
+            continue;
+        const float* pColumns = reinterpret_cast<const float*>(target.pHavok + kBodyTransformOffset);
+        const glm::mat3 bodyRotation{glm::vec3{pColumns[0], pColumns[1], pColumns[2]}, glm::vec3{pColumns[4], pColumns[5], pColumns[6]},
+                                     glm::vec3{pColumns[8], pColumns[9], pColumns[10]}};
+        const glm::mat3 stepRotation = glm::mat3_cast(glm::quat{target.StepRotation[3], target.StepRotation[0], target.StepRotation[1], target.StepRotation[2]});
+        glm::quat off = glm::normalize(glm::quat_cast(bodyRotation * glm::transpose(stepRotation)));
+        const float offDegrees = glm::degrees(glm::angle(off.w < 0.f ? -off : off));
+        const float offUnits = glm::length(glm::vec3{pColumns[12], pColumns[13], pColumns[14]} - glm::vec3{target.StepPosition[0], target.StepPosition[1], target.StepPosition[2]}) /
+                               *s_havokScale.Get();
+        std::lock_guard statsLock(s_stepStatsLock);
+        s_worstAfterStepUnits = std::max(s_worstAfterStepUnits, offUnits);
+        s_worstAfterStepDegrees = std::max(s_worstAfterStepDegrees, offDegrees);
+    }
+}
+
+int HookStepDeltaTime(void* apHkpWorld, float aSeconds)
+{
+    DriveWeaponBodiesBeforeStep(apHkpWorld, aSeconds);
+    const int result = s_stepDeltaTime(apHkpWorld, aSeconds);
+    MeasureWeaponBodiesAfterStep(apHkpWorld);
+    return result;
+}
+
+#ifdef SKYRIMVR
+TiltedPhoques::Initializer s_stepHook(
+    []()
+    {
+        VersionDbPtr<uint8_t> callSite(9000009);
+        uint8_t* pCall = callSite.Get();
+        if (!pCall || *pCall != 0xE8)
+        {
+            spdlog::error("VRWeaponBody: the call to Havok's step is not where it was expected; weapons stay out of the world");
+            return;
+        }
+        TiltedPhoques::SwapCall(pCall, s_stepDeltaTime, &HookStepDeltaTime);
+        spdlog::info("VRWeaponBody: weapon bodies are driven right before Havok's step (call at {}, which called {})", fmt::ptr(pCall), fmt::ptr(s_stepDeltaTime));
+    });
+#endif
+
+// Physics queue P2 (2026-10-06): the copy's ragdoll driven toward its drawn pose, not its animation. Its ragdoll bodies
+// are what everything collides with, and they were 83-98 units from where its hands are drawn and 2-3 from where its
+// own animation had them ("VRRagdoll" lines, the rig). The behaviour graph hands the ragdoll driver the animation pose
+// in the generator output's pose track just before hkbRagdollDriver::driveToPose; PLANCK hooks the same call to steer
+// its active ragdolls. For a remote player's copy that track gets, bone by bone, the pose drawn at the last frame end.
+//
+// The frame end records, per copy, the drawn world transform of every animation-skeleton bone that has a node of the
+// same name; the hook turns those into the track's parent-relative transforms, parents first, so each such bone's
+// model-space transform is the drawn one. Bones with no node keep the animation's. Units are measured once per copy
+// (the track's model-to-world against the copy's position), never assumed; anything unexpected and the track is left
+// as the game made it.
+constexpr uint32_t kDriverCharacterOffset = 0x80;     // hkbRagdollDriver::character (PLANCK's static_assert)
+constexpr uint32_t kCharacterSetupOffset = 0x50;      // hkbCharacter::setup
+constexpr uint32_t kCharacterWorldFromModel = 0x88;   // hkbCharacter::worldFromModel (hkQsTransform*)
+constexpr uint32_t kSetupAnimationSkeleton = 0x20;    // hkbCharacterSetup::m_animationSkeleton
+constexpr uint32_t kSkeletonParents = 0x18;           // hkaSkeleton::parentIndices (hkArray<int16>: data, size)
+constexpr uint32_t kSkeletonBones = 0x28;             // hkaSkeleton::bones (hkArray<hkaBone>, 0x10 each, name first)
+constexpr uint32_t kQsTransformSize = 0x30;           // hkQsTransform: translation, rotation (x, y, z, w), scale
+
+struct DrawnPose
+{
+    std::vector<NiTransform> World;  // by animation bone
+    std::vector<uint8_t> Has;        // 1 where the bone has a drawn node
+    glm::vec3 ActorAt{};             // the copy's own position (the game's), for the units
+    uint32_t FormId = 0;
+    std::chrono::steady_clock::time_point At{};
+};
+std::mutex s_drawnPosesLock;
+std::unordered_map<const void*, DrawnPose> s_drawnPoses; // by hkbCharacter
+std::atomic<uint32_t> s_drawnPoseCount{0};
+// hkbRagdollDriver::postPhysics as called before our hook went on its call (null until then; see HookPostPhysicsOnce).
+using TPostPhysics = bool(void* apDriver, const void* apContext, void* apInOut);
+TPostPhysics* s_postPhysicsNext = nullptr;
+
+// Per copy, on the frame-end thread only: which hkbCharacter is its, and the node of each of its animation bones.
+struct CharacterLink
+{
+    void* pRoot = nullptr;
+    void* pCharacter = nullptr;
+    std::vector<void*> BoneNodes;
+};
+std::unordered_map<uint32_t, CharacterLink> s_characterLinks;
+
+void* CharacterOf(Actor* apActor) noexcept
+{
+    BSAnimationGraphManager* pManager = nullptr;
+    void* pCharacter = nullptr;
+    if (apActor->animationGraphHolder.GetBSAnimationGraph(&pManager) && pManager)
+    {
+        const uint32_t index = pManager->ResolveGraphIndex();
+        if (index < pManager->animationGraphs.size)
+            if (BShkbAnimationGraph* pGraph = pManager->animationGraphs.Get(index))
+                pCharacter = &pGraph->character;
+    }
+    if (pManager)
+        pManager->Release();
+    return pCharacter;
+}
+
+void HookPostPhysicsOnce() noexcept;
+
+void RecordDrawnPose(const uint32_t aFormId, Actor* apActor, const Rig& acRig) noexcept
+{
+#ifdef SKYRIMVR
+    HookPostPhysicsOnce();
+    if (!s_postPhysicsNext)
+        return;
+#else
+    return;
+#endif
+    CharacterLink& link = s_characterLinks[aFormId];
+    if (link.pRoot != acRig.pRoot || !link.pCharacter)
+    {
+        // Once per 3D: the slow lookups (a search of the skeleton per bone) are not for every frame.
+        link = {};
+        link.pRoot = acRig.pRoot;
+        link.pCharacter = CharacterOf(apActor);
+        void* pSetup = link.pCharacter ? At<void*>(link.pCharacter, kCharacterSetupOffset) : nullptr;
+        void* pSkeleton = pSetup ? At<void*>(pSetup, kSetupAnimationSkeleton) : nullptr;
+        if (!pSkeleton || !IsReadable(static_cast<uint8_t*>(pSkeleton) + kSkeletonBones, 0x10))
+        {
+            link.pCharacter = nullptr;
+            return;
+        }
+        const int32_t count = At<int32_t>(pSkeleton, kSkeletonBones + 0x8);
+        const uint8_t* pBones = At<uint8_t*>(pSkeleton, kSkeletonBones);
+        if (count <= 0 || count > 512 || !pBones || !IsReadable(pBones, static_cast<size_t>(count) * 0x10))
+        {
+            link.pCharacter = nullptr;
+            return;
+        }
+        uint32_t matched = 0;
+        link.BoneNodes.assign(count, nullptr);
+        for (int32_t i = 0; i < count; ++i)
+        {
+            const auto* pName = reinterpret_cast<const char*>(*reinterpret_cast<const uintptr_t*>(pBones + i * 0x10) & ~uintptr_t{1});
+            if (pName && IsReadable(pName, 2))
+                if ((link.BoneNodes[i] = FindShallowest(acRig.pRoot, pName)) != nullptr)
+                    ++matched;
+        }
+        spdlog::info("VRRagdoll: actor {:X}: {} of its {} animation bones have a node to take the drawn pose from", aFormId, matched, count);
+    }
+
+    DrawnPose pose;
+    pose.World.resize(link.BoneNodes.size());
+    pose.Has.resize(link.BoneNodes.size());
+    for (size_t i = 0; i < link.BoneNodes.size(); ++i)
+        if (void* pNode = link.BoneNodes[i])
+        {
+            pose.World[i] = At<NiTransform>(pNode, kWorldOffset);
+            pose.Has[i] = 1;
+        }
+    pose.ActorAt = glm::vec3{apActor->position.x, apActor->position.y, apActor->position.z};
+    pose.FormId = aFormId;
+    const auto cNow = std::chrono::steady_clock::now();
+    pose.At = cNow;
+
+    std::lock_guard lock(s_drawnPosesLock);
+    s_drawnPoses[link.pCharacter] = std::move(pose);
+    // Old ones go: a copy no longer posed leaves its entry to age out here.
+    for (auto it = s_drawnPoses.begin(); it != s_drawnPoses.end();)
+        it = cNow - it->second.At > std::chrono::seconds(2) ? s_drawnPoses.erase(it) : std::next(it);
+    s_drawnPoseCount = static_cast<uint32_t>(s_drawnPoses.size());
+}
+
+struct QsPose
+{
+    glm::quat Rotation{1.f, 0.f, 0.f, 0.f};
+    glm::vec3 Translation{};
+    float Scale = 1.f;
+};
+
+QsPose Compose(const QsPose& acParent, const QsPose& acLocal) noexcept
+{
+    return QsPose{acParent.Rotation * acLocal.Rotation, acParent.Translation + acParent.Rotation * (acLocal.Translation * acParent.Scale), acParent.Scale * acLocal.Scale};
+}
+
+QsPose Inverse(const QsPose& acPose) noexcept
+{
+    const glm::quat inverse = glm::inverse(acPose.Rotation);
+    const float inverseScale = acPose.Scale != 0.f ? 1.f / acPose.Scale : 1.f;
+    return QsPose{inverse, inverse * (-acPose.Translation) * inverseScale, inverseScale};
+}
+
+QsPose ReadQs(const float* apQs) noexcept
+{
+    return QsPose{glm::normalize(glm::quat{apQs[7], apQs[4], apQs[5], apQs[6]}), glm::vec3{apQs[0], apQs[1], apQs[2]}, apQs[8]};
+}
+
+std::atomic<uint32_t> s_ragdollPosesWritten{0};
+
+// The generator output's pose track (track 2) when it is dense hkQsTransforms, one per bone; null otherwise.
+float* PoseTrackOf(void* apGeneratorOutput, int16_t& aCount) noexcept
+{
+    aCount = 0;
+    auto* pTracks = apGeneratorOutput ? At<uint8_t*>(apGeneratorOutput, 0) : nullptr;
+    if (!pTracks || At<int32_t>(pTracks, 0x4) <= 2)
+        return nullptr;
+    const uint8_t* pHeader = pTracks + 0x10 + 2 * 0x10;
+    const int16_t numData = *reinterpret_cast<const int16_t*>(pHeader + 0x2);
+    const int16_t dataOffset = *reinterpret_cast<const int16_t*>(pHeader + 0x4);
+    const int16_t elementSize = *reinterpret_cast<const int16_t*>(pHeader + 0x6);
+    const int8_t flags = *reinterpret_cast<const int8_t*>(pHeader + 0xC);
+    const int8_t type = *reinterpret_cast<const int8_t*>(pHeader + 0xD);
+    if (type != 1 || (flags & 0x6) || elementSize != kQsTransformSize || numData <= 0 || numData > 512)
+        return nullptr;
+    aCount = numData;
+    return reinterpret_cast<float*>(pTracks + dataOffset);
+}
+
+// Whether this ragdoll driver's character is a copy whose drawn pose is being fed to its ragdoll.
+bool IsDrivenCharacter(const void* apDriver) noexcept
+{
+    if (s_drawnPoseCount == 0 || !apDriver)
+        return false;
+    const void* pCharacter = At<void*>(const_cast<void*>(apDriver), kDriverCharacterOffset);
+    std::lock_guard lock(s_drawnPosesLock);
+    const auto it = s_drawnPoses.find(pCharacter);
+    return it != s_drawnPoses.end() && std::chrono::steady_clock::now() - it->second.At <= std::chrono::milliseconds(250);
+}
+
+// Puts the drawn pose in the track; what was there before goes into aSaved, to be put back once the ragdoll is driven.
+bool PutDrawnPoseIntoTrack(void* apDriver, void* apGeneratorOutput, std::vector<uint8_t>& aSaved) noexcept
+{
+    if (s_drawnPoseCount == 0 || !apDriver || !apGeneratorOutput)
+        return false;
+    void* pCharacter = At<void*>(apDriver, kDriverCharacterOffset);
+    if (!pCharacter)
+        return false;
+    DrawnPose drawn;
+    {
+        std::lock_guard lock(s_drawnPosesLock);
+        const auto it = s_drawnPoses.find(pCharacter);
+        if (it == s_drawnPoses.end() || std::chrono::steady_clock::now() - it->second.At > std::chrono::milliseconds(250))
+            return false;
+        drawn = it->second;
+    }
+
+    // The tracks: the pose (2) must be dense hkQsTransforms, one per animation bone; model-to-world (0) as well.
+    auto* pTracks = At<uint8_t*>(apGeneratorOutput, 0);
+    if (!pTracks || At<int32_t>(pTracks, 0x4) <= 2)
+        return false;
+    const auto header = [pTracks](const int aTrack) { return pTracks + 0x10 + aTrack * 0x10; };
+    const uint8_t* pPoseHeader = header(2);
+    const int16_t numData = *reinterpret_cast<const int16_t*>(pPoseHeader + 0x2);
+    const int16_t dataOffset = *reinterpret_cast<const int16_t*>(pPoseHeader + 0x4);
+    const int16_t elementSize = *reinterpret_cast<const int16_t*>(pPoseHeader + 0x6);
+    const float onFraction = *reinterpret_cast<const float*>(pPoseHeader + 0x8);
+    const int8_t flags = *reinterpret_cast<const int8_t*>(pPoseHeader + 0xC);
+    const int8_t type = *reinterpret_cast<const int8_t*>(pPoseHeader + 0xD);
+    void* pSetup = At<void*>(pCharacter, kCharacterSetupOffset);
+    void* pSkeleton = pSetup ? At<void*>(pSetup, kSetupAnimationSkeleton) : nullptr;
+    if (!pSkeleton || type != 1 || (flags & 0x6) || elementSize != kQsTransformSize || !(onFraction > 0.f) || numData != static_cast<int16_t>(drawn.World.size()) ||
+        At<int32_t>(pSkeleton, kSkeletonParents + 0x8) != numData)
+        return false;
+    auto* pPose = reinterpret_cast<float*>(pTracks + dataOffset);
+    const auto* pParents = At<const int16_t*>(pSkeleton, kSkeletonParents);
+
+    const uint8_t* pWorldHeader = header(0);
+    const float* pWorldFromModel = nullptr;
+    if (*reinterpret_cast<const int8_t*>(pWorldHeader + 0xD) == 1 && *reinterpret_cast<const float*>(pWorldHeader + 0x8) > 0.f)
+        pWorldFromModel = reinterpret_cast<const float*>(pTracks + *reinterpret_cast<const int16_t*>(pWorldHeader + 0x4));
+    else
+        pWorldFromModel = At<const float*>(pCharacter, kCharacterWorldFromModel);
+    if (!pWorldFromModel || !pParents)
+        return false;
+    const QsPose worldFromModel = ReadQs(pWorldFromModel);
+
+    // The track's units, from where it has the copy against where the game does.
+    POINTER_SKYRIMSE(float, s_havokScale, 231896, 231896);
+    const float havokScale = s_havokScale.Get() ? *s_havokScale.Get() : 0.f;
+    float scale = 0.f;
+    if (glm::length(worldFromModel.Translation - drawn.ActorAt) < 64.f)
+        scale = 1.f;
+    else if (havokScale > 0.f && glm::length(worldFromModel.Translation / havokScale - drawn.ActorAt) < 64.f)
+        scale = havokScale;
+    static std::unordered_set<uint32_t> s_saidUnits;
+    if (scale == 0.f)
+    {
+        if (s_saidUnits.insert(drawn.FormId).second)
+            spdlog::warn("VRRagdoll: actor {:X}: its ragdoll's model-to-world ({:.1f}, {:.1f}, {:.1f}) is not where the copy is ({:.1f}, {:.1f}, {:.1f}) in either unit; "
+                         "left to its animation",
+                         drawn.FormId, worldFromModel.Translation.x, worldFromModel.Translation.y, worldFromModel.Translation.z, drawn.ActorAt.x, drawn.ActorAt.y, drawn.ActorAt.z);
+        return false;
+    }
+    if (s_saidUnits.insert(drawn.FormId).second)
+        spdlog::info("VRRagdoll: actor {:X}: its ragdoll is driven toward its drawn pose from now on ({} bones, the track in {} units)", drawn.FormId, numData,
+                     scale == 1.f ? "game" : "Havok");
+
+    aSaved.assign(reinterpret_cast<const uint8_t*>(pPose), reinterpret_cast<const uint8_t*>(pPose) + static_cast<size_t>(numData) * kQsTransformSize);
+    const QsPose modelFromWorld = Inverse(worldFromModel);
+    std::vector<QsPose> model(numData);
+    for (int16_t i = 0; i < numData; ++i)
+    {
+        float* pLocal = pPose + i * (kQsTransformSize / sizeof(float));
+        const int16_t parent = pParents[i];
+        const QsPose parentModel = parent >= 0 && parent < i ? model[parent] : QsPose{};
+        if (!drawn.Has[i])
+        {
+            model[i] = Compose(parentModel, ReadQs(pLocal));
+            continue;
+        }
+        const NiTransform& world = drawn.World[i];
+        QsPose drawnWorld{glm::normalize(glm::quat_cast(ToGlm(world.rotate))), ToGlm(world.translate) * scale, world.scale};
+        QsPose target = Compose(modelFromWorld, drawnWorld);
+        const QsPose local = Compose(Inverse(parentModel), target);
+        if (!std::isfinite(local.Translation.x) || !std::isfinite(local.Translation.y) || !std::isfinite(local.Translation.z) || !std::isfinite(local.Rotation.w))
+        {
+            model[i] = Compose(parentModel, ReadQs(pLocal));
+            continue;
+        }
+        pLocal[0] = local.Translation.x, pLocal[1] = local.Translation.y, pLocal[2] = local.Translation.z;
+        pLocal[4] = local.Rotation.x, pLocal[5] = local.Rotation.y, pLocal[6] = local.Rotation.z, pLocal[7] = local.Rotation.w;
+        // Scale stays the animation's.
+        target.Scale = parentModel.Scale * pLocal[8];
+        model[i] = target;
+    }
+    ++s_ragdollPosesWritten;
+    return true;
+}
+
+// The call to hkbRagdollDriver::driveToPose, VR 0xB266AB (PLANCK's driveToPoseHookLoc; it hooks the same call, and
+// whichever of the two patches second calls the other). Replaced only if it is a call.
+using TDriveToPose = void(void* apDriver, float aDeltaTime, const void* apContext, void* apGeneratorOutput);
+TDriveToPose* s_driveToPose = nullptr;
+
+// The track is also the animation the game poses the copy's skeleton from, so it is the drawn pose only while the
+// ragdoll is driven, and the game's own again straight after. Left in (2026-10-06), it fed the drawn pose into itself:
+// the copy's drawn hands went from a median 65 to 131 units off its owner's ("hands within 80", live-weapon-grip).
+void HookDriveToPose(void* apDriver, float aDeltaTime, const void* apContext, void* apGeneratorOutput)
+{
+    thread_local std::vector<uint8_t> t_saved;
+    const bool cWrote = PutDrawnPoseIntoTrack(apDriver, apGeneratorOutput, t_saved);
+    s_driveToPose(apDriver, aDeltaTime, apContext, apGeneratorOutput);
+    if (cWrote)
+    {
+        int16_t count = 0;
+        if (float* pPose = PoseTrackOf(apGeneratorOutput, count); pPose && static_cast<size_t>(count) * kQsTransformSize == t_saved.size())
+            std::memcpy(pPose, t_saved.data(), t_saved.size());
+    }
+}
+
+// After the step the game writes the ragdoll's pose back into the animation, and PLANCK blends it in: for a driven copy
+// the animation is put back as it was, so the ragdoll never moves what is drawn. Outside PLANCK's hook on that call
+// (moved there once the game runs), so its blend is undone too.
+
+bool HookPostPhysicsOutside(void* apDriver, const void* apContext, void* apInOut)
+{
+    if (!IsDrivenCharacter(apDriver))
+        return s_postPhysicsNext(apDriver, apContext, apInOut);
+    thread_local std::vector<uint8_t> t_saved;
+    int16_t count = 0;
+    float* pPose = PoseTrackOf(apInOut, count);
+    if (pPose)
+        t_saved.assign(reinterpret_cast<const uint8_t*>(pPose), reinterpret_cast<const uint8_t*>(pPose) + static_cast<size_t>(count) * kQsTransformSize);
+    const bool cResult = s_postPhysicsNext(apDriver, apContext, apInOut);
+    int16_t countAfter = 0;
+    if (pPose && PoseTrackOf(apInOut, countAfter) == pPose && countAfter == count)
+        std::memcpy(pPose, t_saved.data(), t_saved.size());
+    return cResult;
+}
+
+// Once the game runs (every plugin loaded): the call to hkbRagdollDriver::postPhysics, VR 0xB268DC (PLANCK's
+// postPhysicsHookLoc), goes to the hook above first. Only if it is a call.
+void HookPostPhysicsOnce() noexcept
+{
+    static bool s_done = false;
+    if (s_done)
+        return;
+    s_done = true;
+    VersionDbPtr<uint8_t> callSite(9000012);
+    uint8_t* pCall = callSite.Get();
+    if (!pCall || *pCall != 0xE8)
+    {
+        spdlog::error("VRRagdoll: the call to postPhysics is not where it was expected; the drawn pose is not fed to ragdolls");
+        s_drawnPoseCount = 0;
+        return;
+    }
+    s_postPhysicsNext = TiltedPhoques::GetCall<TPostPhysics*>(pCall);
+    TiltedPhoques::PutCall(pCall, &HookPostPhysicsOutside);
+    spdlog::info("VRRagdoll: after the step a driven copy's animation is put back as it was (call at {}, which called {})", fmt::ptr(pCall), fmt::ptr(s_postPhysicsNext));
+}
+
+#ifdef SKYRIMVR
+TiltedPhoques::Initializer s_driveToPoseHook(
+    []()
+    {
+        VersionDbPtr<uint8_t> callSite(9000011);
+        uint8_t* pCall = callSite.Get();
+        if (!pCall || *pCall != 0xE8)
+        {
+            spdlog::error("VRRagdoll: the call to driveToPose is not where it was expected; ragdolls follow their animation");
+            return;
+        }
+        TiltedPhoques::SwapCall(pCall, s_driveToPose, &HookDriveToPose);
+        spdlog::info("VRRagdoll: remote players' ragdolls are driven toward their drawn pose (call at {}, which called {})", fmt::ptr(pCall), fmt::ptr(s_driveToPose));
+    });
+#endif
+
+// What the weapon bodies touched since the last frame end: each body touched said once, and again ten seconds later.
+void SayWeaponContacts() noexcept
+{
+    std::array<WeaponContact, 64> contacts;
+    size_t count = 0;
+    {
+        std::lock_guard lock(s_contactsLock);
+        count = s_contactCount;
+        std::copy_n(s_contacts.begin(), count, contacts.begin());
+        s_contactCount = 0;
+    }
+    if (count == 0)
+        return;
+
+    POINTER_SKYRIMSE(float, s_havokScale, 231896, 231896);
+    const float havokScale = s_havokScale.Get() ? *s_havokScale.Get() : 0.f;
+    static std::unordered_map<const void*, std::chrono::steady_clock::time_point> s_lastSaid; // by the other body
+    static uint64_t s_total = 0;
+    const auto cNow = std::chrono::steady_clock::now();
+    for (size_t i = 0; i < count; ++i)
+    {
+        const WeaponContact& contact = contacts[i];
+        // Which of the two is the weapon: the listener is only on weapon bodies, but both could be.
+        uint64_t key = 0;
+        size_t ours = 2;
+        for (const auto& [bodyKey, body] : s_weaponBodies)
+            for (size_t side = 0; side < 2 && ours == 2; ++side)
+                if (contact.pBodies[side] == body.pHavok)
+                {
+                    key = bodyKey;
+                    ours = side;
+                }
+        if (ours == 2)
+            continue;
+        ++s_total;
+        const size_t other = 1 - ours;
+        // One of the local player's HIGGS bodies, or held by one: a clash when the two start touching, after a quarter
+        // second apart, and at most one every quarter second per weapon. A hand resting on the blade touches it every
+        // step: counted every quarter second, that was ~45 clashes in a run, each a sound and a pulse, at 1-15 units a
+        // second (rig, 2026-10-06).
+        if (contact.HiggsKind[other] != 0 && havokScale > 0.f)
+        {
+            static std::map<std::pair<uint64_t, const void*>, std::chrono::steady_clock::time_point> s_lastTouch;
+            static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> s_nextClash;
+            if (s_lastTouch.size() > 256)
+                std::erase_if(s_lastTouch, [cNow](const auto& acEntry) { return cNow - acEntry.second > std::chrono::seconds(5); });
+            auto& lastTouch = s_lastTouch[{key, contact.pBodies[other]}];
+            const bool cStarts = cNow - lastTouch >= std::chrono::milliseconds(250);
+            lastTouch = cNow;
+            auto& nextClash = s_nextClash[key];
+            if (cStarts && cNow >= nextClash)
+            {
+                nextClash = cNow + std::chrono::milliseconds(250);
+                const float speed = glm::length(contact.Velocities[0] - contact.Velocities[1]) / havokScale;
+                std::lock_guard clashesLock(s_clashesLock);
+                if (s_clashes.size() < 16)
+                    s_clashes.push_back({static_cast<uint32_t>(key >> 1), static_cast<uint8_t>(key & 1), contact.Point / havokScale, speed, contact.HiggsAt[other] / havokScale, true});
+            }
+            else
+            {
+                // Still touching: a blade resting on his blocks it all the same (the defender's rule), said every
+                // tenth of a second, neither felt nor heard nor sent.
+                static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> s_nextTouch;
+                auto& nextTouch = s_nextTouch[key];
+                if (cNow >= nextTouch)
+                {
+                    nextTouch = cNow + std::chrono::milliseconds(100);
+                    std::lock_guard clashesLock(s_clashesLock);
+                    if (s_clashes.size() < 16)
+                        s_clashes.push_back({static_cast<uint32_t>(key >> 1), static_cast<uint8_t>(key & 1), contact.Point / havokScale, 0.f, contact.HiggsAt[other] / havokScale, false});
+                }
+            }
+        }
+        auto& lastSaid = s_lastSaid[contact.pBodies[other]];
+        if (cNow - lastSaid < std::chrono::seconds(10))
+            continue;
+        lastSaid = cNow;
+        const glm::vec3 point = havokScale > 0.f ? contact.Point / havokScale : glm::vec3{};
+        spdlog::info("VRWeaponBody: actor {:X} {} weapon touches a body on layer {} (group {}, motion type {}{}) at ({:.1f}, {:.1f}, {:.1f}); {} contacts so far",
+                     static_cast<uint32_t>(key >> 1), (key & 1) ? "right" : "left", contact.Filters[other] & 0x7F, contact.Filters[other] >> 16, contact.MotionTypes[other],
+                     contact.HiggsKind[other] == 1 ? ", one of the player's HIGGS bodies" : contact.HiggsKind[other] == 2 ? ", held by the player's HIGGS hand" : "", point.x, point.y,
+                     point.z, s_total);
+    }
+}
+
+// Physics queue P2 (2026-10-06): where the copy's ragdoll hands are -- the bodies Havok collides with -- against its hands
+// as drawn (the owner's VR pose) and as its own animation had them this frame. The ragdoll is driven toward the
+// animation (PLANCK, at driveToPose), and the VR pose is only drawn at the frame end, so the bodies are expected at the
+// animation. Every five seconds per copy.
+void LogRagdollHands(const uint32_t aFormId, const Rig& acRig, const std::array<glm::vec3, 2>& acAnimatedHands) noexcept
+{
+    static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextLog;
+    const auto cNow = std::chrono::steady_clock::now();
+    auto& nextLog = s_nextLog[aFormId];
+    if (cNow < nextLog)
+        return;
+    nextLog = cNow + std::chrono::seconds(5);
+    POINTER_SKYRIMSE(float, s_havokScale, 231896, 231896);
+    if (!s_havokScale.Get() || !(*s_havokScale.Get() > 0.f))
+        return;
+
+    std::string text;
+    for (size_t side = 0; side < 2; ++side)
+    {
+        const RigBone& hand = acRig.Bones[side == 0 ? VRPose::kLeftHand : VRPose::kRightHand];
+        uint8_t* pBody = hand.pNode ? HavokBodyOfLive(hand.pNode) : nullptr;
+        if (!pBody)
+        {
+            text += fmt::format("{} no body; ", side == 0 ? "left" : "right");
+            continue;
+        }
+        const glm::vec3 body = BodyPosition(pBody, *s_havokScale.Get());
+        const glm::vec3 drawn = ToGlm(hand.World().translate);
+        text += fmt::format("{} {:.1f} units from where it is drawn and {:.1f} from where the animation had it ({}, motion type {}); ", side == 0 ? "left" : "right",
+                            glm::length(body - drawn), glm::length(body - acAnimatedHands[side]), At<void*>(pBody, kHkWorldOffset) ? "in the world" : "not in the world",
+                            pBody[kMotionTypeOffset]);
+    }
+    spdlog::info("VRRagdoll: actor {:X} ragdoll hands: {}{} poses written into ragdoll tracks since the last line", aFormId, text, s_ragdollPosesWritten.exchange(0));
+}
+
+// Bodies of copies not posed at this frame end leave the world.
+void ReleaseUnseenWeaponBodies() noexcept
+{
+    FrameEndTimer timer;
+    SayWeaponContacts();
+    for (auto it = s_weaponBodies.begin(); it != s_weaponBodies.end();)
+    {
+        if (!it->second.Seen)
+        {
+            ReleaseWeaponBody(it->first, it->second, "its copy was not posed");
+            it = s_weaponBodies.erase(it);
+            continue;
+        }
+        it->second.Seen = false;
+        ++it;
+    }
+}
+
 TiltedPhoques::Vector<uint32_t> s_touchCandidates;
 
 // When the owner's bones last moved a dead body here (ApplyRemotePoses). See ObserveRemoteBodyMotion.
@@ -1887,6 +3460,42 @@ void EndWeaponTouch() noexcept
     if (!ResolveHolding(pPlayer, mine))
         return;
 
+    // Measurement: what this check reads of the other body, against where it was last drawn. Near zero means it
+    // measures what is on screen; tens of units mean it measures the copy's own animation instead.
+    static std::chrono::steady_clock::time_point s_nextGapLog{};
+    if (const auto gapNow = std::chrono::steady_clock::now(); gapNow >= s_nextGapLog)
+    {
+        for (const uint32_t formId : candidates)
+        {
+            Actor* pOther = Cast<Actor>(TESForm::GetById(formId));
+            Holding theirs;
+            if (!pOther || !ResolveHolding(pOther, theirs))
+                continue;
+            DrawnGrip drawn;
+            {
+                std::lock_guard drawnLock(s_drawnLock);
+                const auto it = s_drawn.find(formId);
+                if (it == s_drawn.end())
+                    continue;
+                drawn = it->second;
+            }
+            const auto handGap = [&drawn](const Segment& acHand, const size_t aSide)
+            { return acHand.Valid && drawn.HasHand[aSide] ? glm::distance(acHand.A, drawn.Hand[aSide]) : -1.f; };
+            const auto attachGap = [&drawn](const HeldSide& acSide, const size_t aSide)
+            {
+                if (!drawn.HasAttach[aSide] || !StillTheSame(acSide.pAttach, acSide.pAttachVTable))
+                    return -1.f;
+                return glm::distance(ToGlm(At<NiTransform>(acSide.pAttach, kWorldOffset).translate), drawn.Attach[aSide]);
+            };
+            s_nextGapLog = gapNow + std::chrono::seconds(5);
+            spdlog::info("VRWeaponTouch: {:X} as this check reads it, against where it was drawn {} ms before: right hand {:.1f} units away, left hand {:.1f}, "
+                         "right weapon {:.1f}, left weapon {:.1f} (-1: nothing to compare)",
+                         formId, std::chrono::duration_cast<std::chrono::milliseconds>(gapNow - drawn.At).count(), handGap(theirs.RightHand, 1), handGap(theirs.LeftHand, 0),
+                         attachGap(theirs.Right, 1), attachGap(theirs.Left, 0));
+            break;
+        }
+    }
+
     // How close counts as contact. A weapon mesh is thinner than this, but the segment is a line down its middle
     // and both blades have width; 10 units is about 14 cm, which is a touch rather than a near miss.
     constexpr float cTouch = 10.f;
@@ -1983,7 +3592,10 @@ void OnFrameEnd() noexcept
     }
 
     if (poses.empty())
+    {
+        ReleaseUnseenWeaponBodies();
         return;
+    }
 
     PerfCounterScope perfScope(PerfCounter::kVRPoseApply);
     const auto now = std::chrono::steady_clock::now();
@@ -2120,6 +3732,9 @@ void OnFrameEnd() noexcept
 
         if (!IsInView(ToGlm(rig.Bones[VRPose::kSpine2].World().translate)))
         {
+            // Its weapon stays a body behind your back too, where the game's own animation has it: out of the world
+            // and back in every time he leaves your view would be churn for nothing.
+            UpdateWeaponBodies(formId, pActor, rig);
             whyNotPosed("out of view");
             continue;
         }
@@ -2222,9 +3837,57 @@ void OnFrameEnd() noexcept
             }
         }
 
+        const AnimatedWeapons animatedWeapons = WeaponsAsAnimated(rig);
+        const auto animatedAt = [&rig](const uint32_t aBone)
+        {
+            const RigBone& bone = rig.Bones[aBone];
+            return bone.pNode || bone.pEntry ? ToGlm(bone.World().translate) : glm::vec3{std::numeric_limits<float>::quiet_NaN()};
+        };
+        const std::array<glm::vec3, 2> animatedHands{animatedAt(VRPose::kLeftHand), animatedAt(VRPose::kRightHand)};
         PoseActor(rig, pose, worldOffset);
         ReachHands(rig, pose);
         PlaceWeapons(rig, pose, formId, now);
+        {
+            DrawnGrip drawn;
+            drawn.At = now;
+            for (size_t side = 0; side < 2; ++side)
+            {
+                const RigBone& hand = rig.Bones[side == 0 ? VRPose::kLeftHand : VRPose::kRightHand];
+                if (hand.pNode || hand.pEntry)
+                {
+                    drawn.HasHand[side] = true;
+                    drawn.Hand[side] = ToGlm(hand.World().translate);
+                }
+                if (rig.Attach[side].pNode)
+                {
+                    drawn.HasAttach[side] = true;
+                    drawn.Attach[side] = ToGlm(rig.Attach[side].World().translate);
+                }
+            }
+            std::lock_guard drawnLock(s_drawnLock);
+            s_drawn[formId] = drawn;
+        }
+        LogPhysicsOnce(formId, rig);
+        UpdateWeaponBodies(formId, pActor, rig, &animatedWeapons);
+        LogRagdollHands(formId, rig, animatedHands);
+        if (!isBody && pActor->GetExtension() && pActor->GetExtension()->IsRemotePlayer())
+            RecordDrawnPose(formId, pActor, rig);
+        // Where the drawn weapon is, for the rig's physics tests (live-check "DO drop ... onto copy weapon"), with its
+        // axes: which of them runs along the blade is not known yet.
+        if (rig.Attach[1].pNode && !rig.AttachBelow[1].empty())
+        {
+            static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> s_nextWeaponLog;
+            auto& nextWeaponLog = s_nextWeaponLog[formId];
+            if (now >= nextWeaponLog)
+            {
+                nextWeaponLog = now + std::chrono::seconds(5);
+                const NiTransform& weapon = rig.Attach[1].World();
+                const glm::mat3 axes = ToGlm(weapon.rotate);
+                spdlog::info("PhysicsProbe: actor {:X} right weapon drawn at ({:.1f}, {:.1f}, {:.1f}); its x axis ({:.2f}, {:.2f}, {:.2f}), y ({:.2f}, {:.2f}, {:.2f}), z ({:.2f}, {:.2f}, {:.2f})",
+                             formId, weapon.translate.x, weapon.translate.y, weapon.translate.z, axes[0].x, axes[0].y, axes[0].z, axes[1].x, axes[1].y, axes[1].z, axes[2].x,
+                             axes[2].y, axes[2].z);
+            }
+        }
         ++tally["posed"];
 
         // Hands, measured after posing so it reports what is actually being shown, and against the owner's own
@@ -2249,6 +3912,8 @@ void OnFrameEnd() noexcept
             }
         }
     }
+
+    ReleaseUnseenWeaponBodies();
 }
 
 float HeadsetAngleTo(const NiPoint3& acPosition) noexcept
@@ -2429,6 +4094,99 @@ void* FirstPersonHand(PlayerCharacter* apPlayer, const size_t aSide) noexcept
     }
 
     return GetName(pHand) == s_name[aSide] ? pHand : nullptr;
+}
+
+bool TakeClash(Clash& aOut) noexcept
+{
+    PendingClash pending{};
+    {
+        std::lock_guard lock(s_clashesLock);
+        if (s_clashes.empty())
+            return false;
+        pending = s_clashes.front();
+        s_clashes.erase(s_clashes.begin());
+    }
+    aOut.FormId = pending.FormId;
+    aOut.Side = pending.Side;
+    aOut.Point = pending.Point;
+    aOut.Speed = pending.Speed;
+    aOut.Start = pending.Start;
+    aOut.Heard = false;
+    if (!pending.Start)
+        return true;
+
+    // Which of the local hands it was: the one nearer the HIGGS body (the hand, or the hand holding what met it). Every
+    // HIGGS body is one of the two hands', so there is no limit: a hand moved 84 units in one frame left its body more
+    // than 40 units from both hand nodes (rig, 2026-10-06), and the nearer one was still the right one.
+    aOut.OwnSide = 2;
+    float nearest = std::numeric_limits<float>::max();
+    if (PlayerCharacter* pPlayer = PlayerCharacter::Get())
+        for (uint8_t side = 0; side < 2; ++side)
+            if (void* pHand = FirstPersonHand(pPlayer, side))
+            {
+                const float distance = glm::length(ToGlm(At<NiTransform>(pHand, kWorldOffset).translate) - pending.Hand);
+                if (distance < nearest)
+                {
+                    nearest = distance;
+                    aOut.OwnSide = side;
+                    aOut.HandDistance = distance;
+                }
+            }
+    FeelClash(aOut.OwnSide);
+    aOut.Heard = SoundClash(aOut.Point);
+    return true;
+}
+
+void FeelClash(const uint8_t aSide) noexcept
+{
+    if (aSide < 2)
+        VRHaptics::Pulse(aSide == 1, 3999);
+}
+
+bool SoundClash(const glm::vec3& acPoint) noexcept
+{
+    // Skyrim.esm WPNBlockBlade1HandVsOtherSD: the game's own sound for a one-handed blade blocked by a weapon (what the
+    // sound marker WPNBlockBladeVsOther, 0x137D0, plays).
+    constexpr uint32_t kBladeBlockSound = 0x3C73C;
+    constexpr uint8_t kSoundDescriptorType = 0x80; // FormType SNDR (CommonLibVR-NG FormTypes.h)
+    constexpr uint32_t kSoundDescriptorInterface = 0x20; // BGSSoundDescriptorForm's BSISoundDescriptor
+
+    // BSSoundHandle (CommonLibVR-NG): sound id, "assume success", state.
+    struct SoundHandle
+    {
+        uint32_t SoundId = 0xFFFFFFFF;
+        bool AssumeSuccess = false;
+        uint8_t Pad05 = 0;
+        uint16_t Pad06 = 0;
+        uint32_t State = 0;
+    };
+    using TGetAudioManager = void*();
+    using TGetSoundHandle = bool(void* apManager, SoundHandle& aHandle, void* apDescriptor, uint32_t aFlags);
+    using TSetPosition = bool(SoundHandle* apHandle, NiPoint3 aPosition);
+    using TPlay = bool(SoundHandle* apHandle);
+    POINTER_SKYRIMSE(TGetAudioManager, s_getAudioManager, 66391, 66391);
+    POINTER_SKYRIMSE(TGetSoundHandle, s_getSoundHandle, 66404, 66404);
+    POINTER_SKYRIMSE(TSetPosition, s_setPosition, 66370, 66370);
+    POINTER_SKYRIMSE(TPlay, s_play, 66355, 66355);
+    if (!s_getAudioManager.Get() || !s_getSoundHandle.Get() || !s_setPosition.Get() || !s_play.Get())
+        return false;
+
+    TESForm* pForm = TESForm::GetById(kBladeBlockSound);
+    if (!pForm || static_cast<uint8_t>(pForm->formType) != kSoundDescriptorType)
+        return false;
+    void* pManager = s_getAudioManager.Get()();
+    if (!pManager)
+        return false;
+    SoundHandle handle{};
+    // 0x1A: the flags CommonLibVR-NG's BSAudioManager::Play passes.
+    if (!s_getSoundHandle.Get()(pManager, handle, reinterpret_cast<uint8_t*>(pForm) + kSoundDescriptorInterface, 0x1A))
+        return false;
+    NiPoint3 position;
+    position.x = acPoint.x;
+    position.y = acPoint.y;
+    position.z = acPoint.z;
+    s_setPosition.Get()(&handle, position);
+    return s_play.Get()(&handle);
 }
 
 // Where this player's weapons are held, relative to the third-person hands the rest of the pose is read from

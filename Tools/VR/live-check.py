@@ -110,6 +110,27 @@ def papyrus(script, function, form, args=None):
         return 'ERR ' + type(e).__name__
 
 
+def papyrus_global(script, function, args=None):
+    """A global (static) Papyrus function, e.g. HiggsVR.GrabObject: no self."""
+    body = {'action': 'call', 'script': script, 'function': function}
+    if args is not None:
+        body['args'] = args
+    try:
+        return tool('papyrus', body).get('returned')
+    except Exception as e:
+        return 'ERR ' + type(e).__name__
+
+
+def latest_blade_centre(lines, copy_form):
+    """Where the copy's sword body's centre of mass is held, from the client's VRWeaponBody line."""
+    centre = None
+    for l in lines:
+        m = re.search(r'VRWeaponBody: actor ([0-9A-F]+) right weapon body .* centre of mass at \((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\)', l)
+        if m and (not copy_form or m.group(1).upper() == copy_form.upper()):
+            centre = tuple(float(m.group(i)) for i in (2, 3, 4))
+    return centre
+
+
 def session_lines():
     """This game session's part of the client log."""
     with io.open(CLIENT_LOG, encoding='utf-8', errors='replace') as f:
@@ -274,6 +295,34 @@ class Run:
                     at_menu = [m for m in menus if m in ('Main Menu', 'Loading Menu')]
                     ok = bool(loaded) and not at_menu
                     detail += ', player loaded %s, menus %s' % (loaded, menus)
+            elif who == 'drop' and words[1:4] == ['on', 'copy', 'weapon']:
+                # "drop on copy weapon <units>": the item put above the copy's weapon by "DO drop" is still no more than
+                # that far below the weapon -- something physical held it -- rather than lying on the ground.
+                units = float(words[4]) if len(words) > 4 else 20.0
+                if not getattr(self, 'drop_test', None):
+                    detail = 'nothing was dropped onto the weapon'
+                else:
+                    ref, drawn = self.drop_test
+                    at = position(ref)
+                    if not at:
+                        detail = 'the dropped item %s has no position' % ref
+                    else:
+                        ok = at[2] >= drawn[2] - units
+                        detail = 'item %s at z %.0f, the weapon at z %.0f: %.0f units %s it' % (ref, at[2], drawn[2], abs(at[2] - drawn[2]), 'above' if at[2] >= drawn[2] else 'below')
+            elif who == 'drop' and words[1] == 'fell':
+                # "drop fell <units>": the item put by "DO drop" fell more than that far below where it was aimed --
+                # nothing physical there (the control for "drop on copy weapon").
+                units = float(words[2]) if len(words) > 2 else 20.0
+                if not getattr(self, 'drop_test', None):
+                    detail = 'nothing was dropped'
+                else:
+                    ref, drawn = self.drop_test
+                    at = position(ref)
+                    if not at:
+                        detail = 'the dropped item %s has no position' % ref
+                    else:
+                        ok = at[2] < drawn[2] - units
+                        detail = 'item %s at z %.0f, aimed at z %.0f: %.0f units %s it' % (ref, at[2], drawn[2], abs(at[2] - drawn[2]), 'above' if at[2] >= drawn[2] else 'below')
             elif who == 'distinct':
                 # "distinct <most> <regular expression with one group>": how many different things the client has
                 # logged since the script began -- "Spawn Actor: (\w+), and NPC Seeker" counts the Seekers it has seen.
@@ -548,7 +597,7 @@ class Run:
             m = re.search(r'NPC registered as actor ([0-9A-Fa-f]+)', line)
             if m:
                 self.npc_id = m.group(1)
-            m = re.search(r'\[script\] (CHECK .*|DO face .*|DO console .*|DO key .*|DO load last|DO server restart.*|DO sleep \d+|DO papyrus .*|DO pickup own|DO menu .*|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
+            m = re.search(r'\[script\] (CHECK .*|DO face .*|DO console .*|DO key .*|DO load last|DO server restart.*|DO sleep \d+|DO papyrus .*|DO pickup own|DO drop .*|DO grab .*|DO bring .*|DO sample .*|DO menu .*|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
             if m:
                 text = m.group(1)
                 if text.startswith('CHECK '):
@@ -637,6 +686,118 @@ class Run:
                     else:
                         result = papyrus('ObjectReference', 'Activate', refs[-1], [{'form': '0x14'}])
                         print('   (picked up %s: %s)' % (refs[-1], result), flush=True)
+                elif text.startswith('DO drop ') and text.split()[3:4] == ['here']:
+                    # "DO drop <base hex> here": the player drops one of that item where it stands (to be grabbed).
+                    base = text.split()[2]
+                    tool('console', {'action': 'exec', 'command': 'player.additem %s 1' % base})
+                    time.sleep(0.5)
+                    tool('console', {'action': 'exec', 'command': 'player.drop %s 1' % base})
+                    ref = None
+                    for _ in range(20):
+                        time.sleep(0.25)
+                        refs = [m2.group(1) for m2 in (re.search(r'DroppedItem: dropped \S+ x\d+ as ([0-9A-Fa-f]+)', l) for l in session_lines()[self.log_start:]) if m2]
+                        if refs:
+                            ref = refs[-1]
+                            break
+                    self.dropped_here = ref
+                    print('   (dropped %s here as %s)' % (base, ref), flush=True)
+                    if not ref:
+                        self.results.append((False, text.strip(), 'the drop was never announced by the client'))
+                elif text.startswith('DO grab dropped '):
+                    # "DO grab dropped left|right": HIGGS's hand takes what "DO drop ... here" dropped (HiggsVR.GrabObject;
+                    # no controllers needed).
+                    is_left = text.split()[3] == 'left'
+                    ref = getattr(self, 'dropped_here', None)
+                    # Why a hand would refuse: HIGGS grabs only with an idle (or selecting) hand that is not disabled and
+                    # not the hand of a drawn weapon.
+                    for side in (False, True):
+                        print('   (HIGGS %s hand: can grab %s, disabled %s)' % ('left' if side else 'right', papyrus_global('HiggsVR', 'CanGrabObject', [side]),
+                                                                            papyrus_global('HiggsVR', 'IsDisabled', [side])), flush=True)
+                    can = papyrus_global('HiggsVR', 'CanGrabObject', [is_left])
+                    if can is False and papyrus_global('HiggsVR', 'CanGrabObject', [not is_left]) is True:
+                        is_left = not is_left
+                        print('   (the other hand can: grabbing with the %s)' % ('left' if is_left else 'right'), flush=True)
+                        can = True
+                    grab = papyrus_global('HiggsVR', 'GrabObject', [{'form': '0x' + ref}, is_left]) if ref else 'nothing dropped'
+                    time.sleep(1.0)
+                    held = papyrus_global('HiggsVR', 'GetGrabbedObject', [is_left])
+                    held_id = held.get('formId', '') if isinstance(held, dict) else str(held)
+                    ok = bool(ref) and isinstance(held, dict) and int(held_id, 16) & 0xFFFFFFFF == int(ref, 16) & 0xFFFFFFFF
+                    print('   (HIGGS: can grab %s, grab %s, now holds %s)' % (can, grab, held), flush=True)
+                    self.results.append((ok, text.strip(), 'holds %s' % held))
+                elif text.strip() == 'DO bring held to copy weapon':
+                    # Moves the player by however far the held item is from the centre of the copy's sword body, so the
+                    # hand -- and what it holds -- goes there.
+                    copy_form, _ = self.subject('copy')
+                    ref = getattr(self, 'dropped_here', None)
+                    centre = latest_blade_centre(session_lines()[self.log_start:], copy_form)
+                    held_at = position(ref) if ref else None
+                    player_at = position('14')
+                    if not (centre and held_at and player_at):
+                        self.results.append((False, text.strip(), 'blade %s, held %s, player %s' % (centre, held_at, player_at)))
+                    else:
+                        delta = [centre[i] - held_at[i] for i in range(3)]
+                        papyrus('ObjectReference', 'SetPosition', '14', [player_at[0] + delta[0], player_at[1] + delta[1], player_at[2] + delta[2]])
+                        self.bring = (centre, ref)
+                        print('   (player moved by (%.0f, %.0f, %.0f) so the held item meets the blade at (%.0f, %.0f, %.0f))' % (delta[0], delta[1], delta[2], centre[0], centre[1], centre[2]), flush=True)
+                elif text.startswith('DO sample held '):
+                    # "DO sample held <seconds>": where the held item is against the blade centre and the player, every half second.
+                    seconds = float(text.split()[3])
+                    centre, ref = getattr(self, 'bring', (None, getattr(self, 'dropped_here', None)))
+                    t0 = time.time()
+                    while time.time() - t0 < seconds:
+                        at = position(ref) if ref else None
+                        me = position('14')
+                        if at and me:
+                            print('   (held at (%.0f, %.0f, %.0f): %s from the blade centre, %.0f from the player)' % (
+                                at[0], at[1], at[2], '%.0f' % math.dist(at, centre) if centre else '?', math.dist(at, me)), flush=True)
+                        time.sleep(0.5)
+                elif text.startswith('DO drop '):
+                    # "DO drop <base hex> onto copy weapon <units>": the player drops one of that item and it is put that
+                    # far above where the copy's drawn weapon is (the client's "PhysicsProbe: ... right weapon drawn at"
+                    # line), to see whether anything physical is there to catch it ("CHECK drop on copy weapon").
+                    # "DO drop <base hex> onto copy weapon body <units>": above the centre of mass of the weapon's body
+                    # instead ("VRWeaponBody: ... centre of mass at"), mid-blade rather than the grip.
+                    # "DO drop <base hex> again <units>": above the same place as the last drop, e.g. once the weapon is
+                    # sheathed, where nothing should catch it ("CHECK drop fell").
+                    words = text.split()
+                    base = words[2]
+                    up = float(words[-1]) if len(words) > 3 and re.match(r'^-?[\d.]+$', words[-1]) else 10.0
+                    try:
+                        copy_form, _ = self.subject('copy')
+                        drawn = None
+                        if words[3] == 'again':
+                            if not getattr(self, 'drop_test', None):
+                                raise RuntimeError('nothing was dropped before')
+                            drawn = self.drop_test[1]
+                        else:
+                            pattern = (r'VRWeaponBody: actor ([0-9A-F]+) right weapon body .* centre of mass at \((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\)'
+                                       if 'body' in words[3:7] else
+                                       r'PhysicsProbe: actor ([0-9A-F]+) right weapon drawn at \((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\)')
+                            for l in session_lines()[self.log_start:]:
+                                m2 = re.search(pattern, l)
+                                if m2 and (not copy_form or m2.group(1).upper() == copy_form.upper()):
+                                    drawn = tuple(float(m2.group(i)) for i in (2, 3, 4))
+                        if not drawn:
+                            raise RuntimeError("the client has not said where the copy's weapon is")
+                        tool('console', {'action': 'exec', 'command': 'player.additem %s 1' % base})
+                        time.sleep(0.5)
+                        tool('console', {'action': 'exec', 'command': 'player.drop %s 1' % base})
+                        ref = None
+                        for _ in range(20):
+                            time.sleep(0.25)
+                            refs = [m2.group(1) for m2 in (re.search(r'DroppedItem: dropped \S+ x\d+ as ([0-9A-Fa-f]+)', l) for l in session_lines()[self.log_start:]) if m2]
+                            if refs:
+                                ref = refs[-1]
+                                break
+                        if not ref:
+                            raise RuntimeError('the drop was never announced by the client')
+                        papyrus('ObjectReference', 'SetPosition', ref, [drawn[0], drawn[1], drawn[2] + up])
+                        self.drop_test = (ref, drawn)
+                        print("   (dropped %s as %s, put %.0f units above the copy's weapon at (%.0f, %.0f, %.0f))" % (base, ref, up, drawn[0], drawn[1], drawn[2]), flush=True)
+                    except Exception as e:
+                        print('   FAIL  drop onto weapon: %s' % e, flush=True)
+                        self.results.append((False, text.strip(), str(e)))
                 elif text.strip().startswith('DO server restart'):
                     try:
                         rest = text.strip()[len('DO server restart'):].strip()

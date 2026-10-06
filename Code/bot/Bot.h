@@ -171,7 +171,7 @@ private:
     void SendMovement() noexcept;
     void SendHealth(float aHealth) noexcept;
     void SendDeath(bool aDead) noexcept;
-    void SendHit(uint32_t aTargetId, float aDelta) noexcept;
+    void SendHit(uint32_t aTargetId, float aDelta, uint64_t aTick = 0) noexcept;
     void SendEquip(uint32_t aBaseId, uint32_t aSlot, bool aUnequip, bool aSpell) noexcept;
 
     void HandleMessage(const ServerMessage& acMessage) noexcept;
@@ -241,6 +241,11 @@ private:
     glm::vec3 m_position{};
     float m_yaw{};
     GameId m_cell{};
+    // Where "teleport away" left from, for "teleport back".
+    glm::vec3 m_awayFrom{};
+    GameId m_awayFromCell{};
+    bool m_awayFromStandalone{false};
+    bool m_isAway{false};
     GameId m_worldSpace{};
     float m_health = 100.f;
     float m_maxHealth = 100.f;
@@ -267,6 +272,8 @@ private:
     std::map<uint32_t, glm::vec3> m_dropFirstPlaces;
     //! Moves relayed to this bot by the server, which only sends them to players in range.
     uint32_t m_dropMoves{};
+    uint32_t m_clashes{}; //!< clashes relayed to this bot (NotifyClash)
+    uint64_t m_lastClashTick{}; //!< when the last of them was seen, on the server's clock
     uint32_t m_objectMoves{}; //!< world-object moves relayed to this bot
     uint32_t m_activationsBack{}; //!< activations relayed to this bot in its own name: its own, sent back by a game
     std::vector<std::pair<uint32_t, std::string>> m_names; // player id -> username
@@ -298,6 +305,10 @@ private:
     //! recorded ones -- the rig's headset has no real controllers, so a recorded pose has the hands on the floor.
     bool m_hasHandTargets{false};
     glm::vec3 m_handTargets[2]{};
+    //! `holdpose on`: the last VR pose a replay sent as this bot's own goes on being sent with every movement after the
+    //! replay ends, so the copy stays posed (a stream without a pose hands the copy back to its animation).
+    bool m_holdPose{false};
+    VRPose m_lastReplayedPose{};
     //! Where the NPC this bot registered stands, which is where a replay for it starts from.
     glm::vec3 m_npcPosition{};
     //! The base form of the last character captured, as the server names it: what "npc captured" registers a

@@ -13,6 +13,8 @@
 
 #include <Game/OwnerView.h>
 
+#include <Messages/ClashRequest.h>
+#include <Messages/NotifyClash.h>
 #include <Messages/AssignCharacterRequest.h>
 #include <Messages/AssignCharacterResponse.h>
 #include <Messages/ServerReferencesMoveRequest.h>
@@ -60,6 +62,7 @@ CharacterService::CharacterService(World& aWorld, entt::dispatcher& aDispatcher)
     , m_mountConnection(aDispatcher.sink<PacketEvent<MountRequest>>().connect<&CharacterService::OnMountRequest>(this))
     , m_newPackageConnection(aDispatcher.sink<PacketEvent<NewPackageRequest>>().connect<&CharacterService::OnNewPackageRequest>(this))
     , m_requestRespawnConnection(aDispatcher.sink<PacketEvent<RequestRespawn>>().connect<&CharacterService::OnRequestRespawn>(this))
+    , m_clashConnection(aDispatcher.sink<PacketEvent<ClashRequest>>().connect<&CharacterService::OnClashRequest>(this))
     , m_syncExperienceConnection(aDispatcher.sink<PacketEvent<SyncExperienceRequest>>().connect<&CharacterService::OnSyncExperienceRequest>(this))
     , m_dialogueConnection(aDispatcher.sink<PacketEvent<DialogueRequest>>().connect<&CharacterService::OnDialogueRequest>(this))
     , m_subtitleConnection(aDispatcher.sink<PacketEvent<SubtitleRequest>>().connect<&CharacterService::OnSubtitleRequest>(this))
@@ -1227,4 +1230,25 @@ void CharacterService::ProcessMovementChanges() const noexcept
         if (!message.Updates.empty())
             pPlayer->Send(message);
     }
+}
+
+void CharacterService::OnClashRequest(const PacketEvent<ClashRequest>& acMessage) const noexcept
+{
+    const ClashRequest& packet = acMessage.Packet;
+    const auto character = acMessage.pPlayer->GetCharacter();
+    const auto other = static_cast<entt::entity>(packet.OtherId);
+    if (!character || !m_world.valid(other))
+        return;
+
+    NotifyClash notify{};
+    notify.FromId = World::ToInteger(*character);
+    notify.OtherId = packet.OtherId;
+    notify.OtherSide = packet.OtherSide;
+    notify.OwnSide = packet.OwnSide;
+    notify.Point = packet.Point;
+    notify.Speed = packet.Speed;
+    notify.Tick = packet.Tick;
+    // To everyone near the weapon that was met -- its owner first among them -- but not back to the sender.
+    if (!GameServer::Get()->SendToPlayersInRange(notify, other, acMessage.pPlayer))
+        spdlog::error("{}: SendToPlayersInRange failed", __FUNCTION__);
 }
