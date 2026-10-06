@@ -183,6 +183,35 @@ the world (PLANCK 0.7.0 notes). Sources: github.com/adamhynek/activeragdoll (PLA
       weapon met theirs 0 ms before it was seen here", health 335 -> 335; the control hit "lands, 340 ms after it
       happened", 335 -> 305; 15 of 15. The 18:54 run never started (the test save timed out loading). **One more
       green run owed.** The 300/100 ms windows are first values: see "Needs Emma (physics)".
+- [ ] **First fight between two headsets (2026-10-06, 19:47-20:11), and what it changed.** Emma: the buzz matched
+      where the sword was, a hand on his sword felt it too; no blocking, no block reaction or sparks; hitting his sword
+      hurt him. Measured from both logs (Seen's clock runs 2.5 s ahead of Emma's):
+      - **His sword counted as his body:** PLANCK takes a swing into any body of an actor as a hit on it, and the copy's
+        weapon body (P1) belongs to the copy: 22 of Emma's 56 hits on Seen and 10 of his 29 on her came with the swords
+        touching ("PvP: hit remote player FF001224 for 79" 7 ms before her sword's contact with his). Fixed where the hit
+        is sent: PLANCK writes the hit point into the player (+0x6BC) before the game's hit code runs, and a hit at a
+        point where the copy's weapon body was just touched by the player's side is not sent ("PvP: a hit of N on remote
+        player X's weapon, not on X; not sent"). Cannot be tested in the rig (PLANCK hits need real controller speed);
+        **owed: the next fight.**
+      - **The defender's rule blocked 28 hits and let 109 through.** Where a landed hit had a clash on the defender's
+        screen near it, the clash came 120-290 ms before the hit's own tick (6 of 8; the window started 75 ms before).
+        The window now starts 300 ms before the hit. `live-defender` 15 of 15 (20:4x).
+      - **A resting blade made clashes:** counted per pair of bodies, a hand lifting off while the held sword stayed on
+        the blade was a new meeting each time (6 in a run, four at 1-4 units a second). Now per weapon; 15 of 15.
+      - Sparks at a clash: the game's own `FXMetalSparkImpactSlice.nif` through `BSTempEffectParticle::Spawn` (SE
+        29218, in the VR database), written, not built yet. A *block reaction* (the swords bouncing apart) is the
+        equipped-sword design question above.
+- [ ] **Dragging (same session, 20:03): Seen saw Emma's drag; Emma never saw Seen's.**
+      - Emma's drags reached Seen, but his game skipped the pose "out of view" (1018F9: out of view 46, posed 5 in
+        30 s), judging by where the body lay before the drag; when that spot left his view the body showed there ("it
+        disappeared for a brief moment"). Now judged where its owner has it. Built, not yet seen in a session.
+      - When she let go, the body went back to its own ragdoll on his side, 627 units from hers ("CorpseDiag"): the
+        open "nothing we do moves a corpse" entry.
+      - Seen's game never noticed a body moving under his hand: no hand-off line of any kind all evening. In the rig
+        (`live-body-grab`, new: HIGGS grabs the bot's dead bear, the player walks off with it) the player's game does
+        notice and asks for the body 15 times, but the server never grants it: dead bodies go only to a party member,
+        and the bot cannot join a party (rejections are logged at debug level only). So the rig shows a second gap,
+        not his. Next: the server's refusals at info level, and party support in the bot.
 - [ ] Less delay for hands and weapons, measured: send rate and playback delay for them, from the `InterpDiag` numbers.
       Known (2026-10-06): the player is sent every 33 ms and played 225 ms late (VR). The real sessions kept on the
       desktop (2026-09-19..27, then 300 ms) say a median 150-175 ms ahead of playback, but `InterpDiag` mixes every NPC

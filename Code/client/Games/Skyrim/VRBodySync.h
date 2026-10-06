@@ -40,6 +40,9 @@ struct Clash
 bool TakeClash(Clash& aOut) noexcept;
 //! A clash the other player saw on one of this player's weapons: felt on the hand holding it (0 left, 1 right).
 void FeelClash(uint8_t aSide) noexcept;
+//! Whether this player's HIGGS bodies, or what they hold, touched another player's weapon body at that point (game
+//! units) in the last half second: a hit landed there landed on the weapon, not on its owner.
+bool IsWeaponTouchAt(const glm::vec3& acPoint) noexcept;
 //! The game's blade-block sound, at a clash's point; false when it could not be played.
 bool SoundClash(const glm::vec3& acPoint) noexcept;
 

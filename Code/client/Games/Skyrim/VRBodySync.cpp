@@ -2089,6 +2089,17 @@ std::mutex s_contactsLock;
 std::array<WeaponContact, 64> s_contacts{};
 size_t s_contactCount = 0;
 
+// Where the other players' weapon bodies were touched by this player's HIGGS bodies or by what they hold, lately
+// (Havok units), under s_contactsLock: a hit this player lands at one of these points landed on a weapon, not on its
+// owner (IsWeaponTouchAt).
+struct WeaponTouch
+{
+    glm::vec3 Point{};
+    std::chrono::steady_clock::time_point At{};
+};
+std::array<WeaponTouch, 32> s_recentTouches{};
+size_t s_nextRecentTouch = 0;
+
 std::atomic<uint32_t> s_contactCallbackCount{0};
 
 void OnWeaponContactPoint(void*, const uint8_t* apEvent) noexcept
@@ -2121,6 +2132,8 @@ void OnWeaponContactPoint(void*, const uint8_t* apEvent) noexcept
         contact.Point = {pPoint[0], pPoint[1], pPoint[2]};
 
     std::lock_guard lock(s_contactsLock);
+    if (contact.HiggsKind[0] != 0 || contact.HiggsKind[1] != 0)
+        s_recentTouches[s_nextRecentTouch++ % s_recentTouches.size()] = {contact.Point, std::chrono::steady_clock::now()};
     for (size_t i = 0; i < s_contactCount; ++i)
         if (s_contacts[i].pBodies[0] == contact.pBodies[0] && s_contacts[i].pBodies[1] == contact.pBodies[1])
         {
@@ -3257,17 +3270,17 @@ void SayWeaponContacts() noexcept
             continue;
         ++s_total;
         const size_t other = 1 - ours;
-        // One of the local player's HIGGS bodies, or held by one: a clash when the two start touching, after a quarter
-        // second apart, and at most one every quarter second per weapon. A hand resting on the blade touches it every
-        // step: counted every quarter second, that was ~45 clashes in a run, each a sound and a pulse, at 1-15 units a
-        // second (rig, 2026-10-06).
+        // One of the local player's HIGGS bodies, or held by one: a clash when this weapon starts being touched by the
+        // player's side -- nothing of the player's on it for a quarter second before -- and at most one every quarter
+        // second per weapon. A hand resting on the blade touches it every step: counted every quarter second, that was
+        // ~45 clashes in a run, each a sound and a pulse, at 1-15 units a second (rig, 2026-10-06). Counted per pair
+        // of bodies, a hand lifting off for a moment while the held sword stayed on the blade was a new meeting each
+        // time it came back: 6 clashes, four at 1-4 units a second, during 96 touches every 5 s (rig, 20:33).
         if (contact.HiggsKind[other] != 0 && havokScale > 0.f)
         {
-            static std::map<std::pair<uint64_t, const void*>, std::chrono::steady_clock::time_point> s_lastTouch;
+            static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> s_lastTouch;
             static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> s_nextClash;
-            if (s_lastTouch.size() > 256)
-                std::erase_if(s_lastTouch, [cNow](const auto& acEntry) { return cNow - acEntry.second > std::chrono::seconds(5); });
-            auto& lastTouch = s_lastTouch[{key, contact.pBodies[other]}];
+            auto& lastTouch = s_lastTouch[key];
             const bool cStarts = cNow - lastTouch >= std::chrono::milliseconds(250);
             lastTouch = cNow;
             auto& nextClash = s_nextClash[key];
@@ -3730,7 +3743,14 @@ void OnFrameEnd() noexcept
             rig.RestructureAt = now + std::chrono::milliseconds(200);
         }
 
-        if (!IsInView(ToGlm(rig.Bones[VRPose::kSpine2].World().translate)))
+        // A body being moved over there is looked for where its owner has it. Its own bones are where its ragdoll left
+        // it here -- where it lay before the drag -- so checked there, a dragged body was skipped whenever that old spot
+        // was out of view, and showed at it: Seen, 2026-10-06 20:03, "the npc disappeared for a brief moment" while Emma
+        // dragged 1018F9 ("out of view 46, posed 5" in 30 s, "not posed this time: out of view" every few seconds).
+        glm::vec3 viewPoint = ToGlm(rig.Bones[VRPose::kSpine2].World().translate);
+        if (isBody && pose.HasRootPosition && std::isfinite(pose.RootPosition.x) && std::isfinite(pose.RootPosition.y) && std::isfinite(pose.RootPosition.z))
+            viewPoint += pose.RootPosition - ToGlm(At<NiTransform>(pRoot, kWorldOffset).translate);
+        if (!IsInView(viewPoint))
         {
             // Its weapon stays a body behind your back too, where the game's own animation has it: out of the world
             // and back in every time he leaves your view would be churn for nothing.
@@ -4141,6 +4161,23 @@ void FeelClash(const uint8_t aSide) noexcept
 {
     if (aSide < 2)
         VRHaptics::Pulse(aSide == 1, 3999);
+}
+
+bool IsWeaponTouchAt(const glm::vec3& acPoint) noexcept
+{
+    POINTER_SKYRIMSE(float, s_havokScale, 231896, 231896);
+    if (!s_havokScale.Get() || !(*s_havokScale.Get() > 0.f))
+        return false;
+    const float cScale = *s_havokScale.Get();
+    const glm::vec3 cHavokPoint = acPoint * cScale;
+    // The same contact point PLANCK reads, so it matches to a rounding; 3 units of slack.
+    const float cTolerance = 3.f * cScale;
+    const auto cNow = std::chrono::steady_clock::now();
+    std::lock_guard lock(s_contactsLock);
+    for (const auto& touch : s_recentTouches)
+        if (touch.At.time_since_epoch().count() && cNow - touch.At < std::chrono::milliseconds(500) && glm::distance(touch.Point, cHavokPoint) <= cTolerance)
+            return true;
+    return false;
 }
 
 bool SoundClash(const glm::vec3& acPoint) noexcept

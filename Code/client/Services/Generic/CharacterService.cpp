@@ -865,7 +865,18 @@ void CharacterService::OnConnected(const ConnectedEvent& acConnectedEvent) const
     for (auto entity : entities)
     {
         auto& formIdComponent = m_world.get<FormIdComponent>(entity);
-        // Delete all temporary actors on connect
+        // Delete this client's own copies left from an earlier connection. A temporary actor the game made itself (loaded
+        // with the save, or placed by a mod's script) is the game's, and is taken like one it makes after connecting:
+        // deleting it here, while the game's AI threads were still running it, crashed Emma's game 43 ms later
+        // (2026-10-06 19:38:42: FF0011DD "Aspiring Mage", spawned 6 s before the first connection, deleted with 5
+        // handles on it; SkyrimVR.exe+0x683850 in GetCurrentlyEquippedWeapon, the deleted actor in RSI). See s_ownCopies.
+        if (formIdComponent.Id > 0xFF000000 && s_ownCopies.find(formIdComponent.Id) == s_ownCopies.end())
+        {
+            spdlog::info("Temporary actor {:X} was made by the game, not by this client; kept on connect", formIdComponent.Id);
+            ProcessNewEntity(entity);
+            continue;
+        }
+
         if (formIdComponent.Id > 0xFF000000)
         {
             Actor* pActor = Cast<Actor>(TESForm::GetById(formIdComponent.Id));

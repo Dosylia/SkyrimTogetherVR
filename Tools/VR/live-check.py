@@ -597,7 +597,7 @@ class Run:
             m = re.search(r'NPC registered as actor ([0-9A-Fa-f]+)', line)
             if m:
                 self.npc_id = m.group(1)
-            m = re.search(r'\[script\] (CHECK .*|DO face .*|DO console .*|DO key .*|DO load last|DO server restart.*|DO sleep \d+|DO papyrus .*|DO pickup own|DO drop .*|DO grab .*|DO bring .*|DO sample .*|DO menu .*|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
+            m = re.search(r'\[script\] (CHECK .*|DO face .*|DO console .*|DO key .*|DO load last|DO server restart.*|DO sleep \d+|DO papyrus .*|DO pickup own|DO drop .*|DO grab .*|DO walk .*|DO bring .*|DO sample .*|DO menu .*|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
             if m:
                 text = m.group(1)
                 if text.startswith('CHECK '):
@@ -703,11 +703,22 @@ class Run:
                     print('   (dropped %s here as %s)' % (base, ref), flush=True)
                     if not ref:
                         self.results.append((False, text.strip(), 'the drop was never announced by the client'))
-                elif text.startswith('DO grab dropped '):
+                elif text.startswith('DO walk '):
+                    # "DO walk <dx> <dy> <dz> <steps>": the player moves by that much, five steps a second, and drags
+                    # whatever a HIGGS hand holds along (a corpse grabbed with "DO grab npc").
+                    w = text.split()
+                    step = [float(w[2]), float(w[3]), float(w[4])]
+                    for _ in range(int(w[5])):
+                        me = position('14')
+                        if me:
+                            papyrus('ObjectReference', 'SetPosition', '14', [me[0] + step[0], me[1] + step[1], me[2] + step[2]])
+                        time.sleep(0.2)
+                    print('   (walked %d steps of (%.0f, %.0f, %.0f))' % (int(w[5]), step[0], step[1], step[2]), flush=True)
+                elif text.startswith('DO grab dropped ') or text.startswith('DO grab npc '):
                     # "DO grab dropped left|right": HIGGS's hand takes what "DO drop ... here" dropped (HiggsVR.GrabObject;
-                    # no controllers needed).
+                    # no controllers needed). "DO grab npc left|right": the game's copy of the bot's NPC (a corpse, say).
                     is_left = text.split()[3] == 'left'
-                    ref = getattr(self, 'dropped_here', None)
+                    ref = getattr(self, 'dropped_here', None) if text.startswith('DO grab dropped ') else self.subject('npc')[0]
                     # Why a hand would refuse: HIGGS grabs only with an idle (or selecting) hand that is not disabled and
                     # not the hand of a drawn weapon.
                     for side in (False, True):

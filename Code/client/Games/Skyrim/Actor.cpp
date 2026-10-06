@@ -19,6 +19,9 @@
 #include <Events/DialogueEvent.h>
 #include <Games/Misc/MenuTopicManager.h>
 #include <Events/HitEvent.h>
+#ifdef SKYRIMVR
+#include <Games/Skyrim/VRBodySync.h>
+#endif
 #include <Events/RemoveSpellEvent.h>
 #include <Events/DroppedItemEvents.h>
 
@@ -1161,6 +1164,19 @@ bool TP_MAKE_THISCALL(HookDamageActor, Actor, float aDamage, Actor* apHitter, bo
         const ActorExtension* pPvpHitterExtension = apHitter ? apHitter->GetExtension() : nullptr;
         if (World::Get().GetServerSettings().PvpEnabled && realDamage > 0.f && pPvpHitterExtension && pPvpHitterExtension->IsLocalPlayer())
         {
+#ifdef SKYRIMVR
+            // The other player's sword is a body in this world (VRBodySync), and PLANCK takes a swing into any body of an
+            // actor for a hit on that actor, so hitting his sword hurt him: 22 of Emma's 56 hits on Seen came with her
+            // sword touching his (2026-10-06, "just hitting the sword of the other player was damaging him"). PLANCK
+            // puts where the hit landed in the player (+0x6BC, its VR offset, read by the game's hit code) right before
+            // this runs; a hit at a point where his weapon body was just touched landed on the weapon, and is not sent.
+            const auto* pLastHit = reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(apHitter) + 0x6BC);
+            if (VRBodySync::IsWeaponTouchAt(glm::vec3{pLastHit[0], pLastHit[1], pLastHit[2]}))
+            {
+                spdlog::info("PvP: a hit of {:.0f} on remote player {:X}'s weapon, not on {:X}; not sent", realDamage, apThis->formID, apThis->formID);
+                return false;
+            }
+#endif
             if (realDamage >= 1.f)
                 spdlog::info("PvP: hit remote player {:X} for {:.0f}", apThis->formID, realDamage);
             World::Get().GetRunner().Trigger(HealthChangeEvent(apThis->formID, -realDamage));

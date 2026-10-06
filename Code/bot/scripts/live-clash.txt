@@ -55,8 +55,8 @@ log DO bring held to copy weapon
 wait 3
 log DO sample held 4
 wait 6
-log CHECK logged VRWeaponBody: actor \w+ right weapon touches a body .*held by the player's HIGGS hand
-log CHECK logged Clash: our (left|right) hand .*met the right weapon of \w+ .*felt and heard here, sent
+log CHECK logged VRWeaponBody: actor \w+ (left|right) weapon touches a body .*(held by the player's HIGGS hand|one of the player's HIGGS bodies)
+log CHECK logged Clash: our (left|right) hand .*met the (left|right) weapon of \w+ .*felt and heard here, sent
 waitfor clashes >= 1 10
 log SHOT held against copy of copy
 log CHECK game alive

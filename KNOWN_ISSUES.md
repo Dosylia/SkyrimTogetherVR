@@ -16,6 +16,7 @@ Git history has the full investigation notes behind each item.
 | EngineFixesVR loaded **by SKSE**, not by the `d3dx9_42` plugin preloader | Crash at startup, before any log. | `stubs/FileMapping.cpp` refuses the DLL until SKSE starts. |
 | Free address space within ±2GB of the game for plugin trampolines | DynDOLOD shows an invisible "failed to create trampoline" popup at data load, and the game hangs or closes. | 80MB game buffer (`TargetConfig.h`), plus a reserved pool in `memory/NearImageReserve.cpp`. |
 | `uGridsToLoad = 5` | The server refuses the connection. | Checked on connect. |
+| The **VR Address Library file that matches Community Shaders**: Emma's combined file (0.275.0 with every 0.158.0 id at its old address; section on it below) | Crash a second into the first load, before connecting, in shadow rendering: `SkyrimVR.exe+0x1354e5a`, which the crash logger names `100997+0x13A`. A plain newer library moves id 100997 to 0x1354D20 and the installed Community Shaders 0.8.7 patches there. Seen, twice on 2026-10-06 (19:41, 19:43), after installing Engine Fixes 7.10. | Not by the mod: give everyone the same library file. |
 
 ## 2b. Audit of 2026-09-18 (external, then re-checked here)
 
@@ -371,6 +372,16 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   `E:\FUS\mods\VR Address Library for SKSEVR` is 0.275.0 with every id from 0.158.0 kept at its old address
   (script: scratchpad `merge_addrlib.py`; the untouched 0.158.0 is beside it as `version-1-4-15-0.csv.0.158.0.bak`).
   Do not replace it with a plain newer release without updating Community Shaders to match.
+  Seen hit it on 2026-10-06 (19:41 and 19:43, twice out of two loads): his crash logger put 100997 at 0x1354D20, a
+  plain newer library, which came with his Engine Fixes 7.10; Emma's file has it at 0x90D400.
+- **The clean-up on connect deleted the game's own temporary actors (fixed 2026-10-06).** On connect
+  the client deleted every actor with an `FF` id, not only its own copies from an earlier connection. Emma's crash at
+  19:38:42 on 2026-10-06: FF0011DD "Aspiring Mage" (a Skyrim.esm base, made by the game while her save loaded, 6 s
+  before her first connection) was deleted with 5 handles on it, and 43 ms later a game worker thread read its
+  process: `SkyrimVR.exe+0x683850`, `GetCurrentlyEquippedWeapon`, the deleted actor in RSI. Now only ids in
+  `s_ownCopies` are deleted; a game-made temporary actor is taken like one made after connecting
+  (`CharacterService::OnConnected`, "kept on connect"). `live-temp-reconnect` 7 of 7 (20:2x): a creature placed by
+  console kept through two server restarts, the game alive and in the world.
 - **Engine Fixes VR 7.x (alandtse's unified build, `EngineFixes.dll`): black view, fixed in the launcher
   (2026-10-05).** It is a different mod from the 1.2.6 in FUS (`EngineFixesVR.dll`, `EngineFixesVR.ini`): settings in
   `EngineFixes.toml`, user overrides in `EngineFixesCustom.toml`, and it **must** be preloaded by FUS's `d3dx9_42.dll`

@@ -1,0 +1,36 @@
+# A dead body this bot owns, grabbed by the player's HIGGS hand and dragged: the player's game must ask for it and
+# send its bones, so the bot's side (the other player) sees it move.
+#
+#   python Tools\VR\live-check.py live-body-grab
+#
+# 2026-10-06 20:03: Seen dragged a body Emma's game owned and she did not see it move; his log has no line of the
+# hand-off at all (no "is being moved here; asking for it", no "BodyGrabDiag", no "no hand of this player's is on
+# it") -- his game never noticed the body moving. live-body-owner covers the other half (the owner dragging it past).
+log live body grab
+waitfor connected 45
+collect spawn health death ownership
+expect known me
+waitfor known other 40
+wait 5
+
+log -- a bear of this bot's, killed
+npc temp 23A8A
+waitfor owned == 1 20
+wait 8
+npclife dead 0
+wait 6
+log CHECK npc dead
+
+log -- the player takes it with the right hand and walks off with it: thirty steps of 15 units
+log DO papyrus Actor SheatheWeapon 14
+wait 3
+log DO grab npc right
+wait 4
+log DO walk 0 15 0 30
+wait 10
+log CHECK logged Body \w+ \(server id \w+\) is being moved here; asking for it
+log CHECK logged VRBodySync: body \w+ is being moved here
+log CHECK game alive
+wait 3
+log done
+stop

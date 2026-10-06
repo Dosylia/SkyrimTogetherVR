@@ -335,8 +335,10 @@ namespace
 // dropped if this player's hand, or what it held, met that player's weapon around that moment.
 constexpr uint64_t kHitSeenAfter = 225;
 // The blades meet before the hit would have landed (the blade still had to reach the body), and a contact is only
-// taken at the next frames. First values, to be measured in a fight between two headsets.
-constexpr uint64_t kBlockBefore = 300;
+// taken at the next frames. Measured in the first fight between two headsets (2026-10-06): where the defender's game
+// saw a clash near a hit that landed, it came 120-290 ms before the hit's own tick (6 hits out of 6 within 300 ms;
+// two more 420-460 ms before), so a clash from 300 ms before the hit happened up to 100 ms after it was seen here.
+constexpr uint64_t kBlockBefore = kHitSeenAfter + 300;
 constexpr uint64_t kBlockAfter = 100;
 } // namespace
 

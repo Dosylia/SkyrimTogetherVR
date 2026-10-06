@@ -4,9 +4,9 @@
 #   python Tools\VR\live-check.py live-defender
 #
 # The steps of live-clash give a clash in the player's game: the HIGGS-held sword meets the copy's sword, and the clash
-# reaches this bot with the server tick it was seen at. The bot then hits the player twice for 30: once stamped 225 ms
-# before that clash (the VR playback delay: the hit is seen on the player's screen just as the blades met), which the
-# player's game should drop, and once stamped now, long after any clash, which should land.
+# reaches this bot with the server tick it was seen at. The bot hits the player twice for 30: first before any clash,
+# which should land, then stamped 225 ms before the clash (the VR playback delay: the hit is seen on the player's
+# screen just as the blades met), which the player's game should drop.
 log live defender
 waitfor connected 45
 # Daylight, for a screenshot that shows something (the test game's clock; her saves are put back afterwards).
@@ -49,13 +49,22 @@ wait 5
 log DO sample held 2
 wait 4
 
+# A hit before anything of the player's has touched the copy's weapons: lands. (After, a hand left resting on a blade
+# blocks every hit, as the rule says: 20:33, "blocked ... 510 ms before it was seen here".)
+log CHECK player mark
+wait 1
+hit other -30
+wait 2
+log CHECK player dropped 30
+log CHECK logged Defender's rule: a hit of 30 from player \d+ lands
+
 # Onto the copy's blade.
 log DO bring held to copy weapon
 wait 3
 log DO sample held 4
 wait 6
-log CHECK logged VRWeaponBody: actor \w+ right weapon touches a body .*held by the player's HIGGS hand
-log CHECK logged Clash: our (left|right) hand .*met the right weapon of \w+ .*felt and heard here, sent
+log CHECK logged VRWeaponBody: actor \w+ (left|right) weapon touches a body .*(held by the player's HIGGS hand|one of the player's HIGGS bodies)
+log CHECK logged Clash: our (left|right) hand .*met the (left|right) weapon of \w+ .*felt and heard here, sent
 waitfor clashes >= 1 10
 log SHOT held against copy of copy
 log CHECK game alive
@@ -68,14 +77,6 @@ hit other -30 atclash
 wait 2
 log CHECK player dropped 0
 log CHECK logged Defender's rule: a hit of 30 from player \d+ is blocked
-
-# A hit with no clash near it: lands.
-log CHECK player mark
-wait 1
-hit other -30
-wait 2
-log CHECK player dropped 30
-log CHECK logged Defender's rule: a hit of 30 from player \d+ lands
 
 # One meeting, a clash or two -- not one every quarter second while the hand rests on the blade.
 expect clashes <= 4

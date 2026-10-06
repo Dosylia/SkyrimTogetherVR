@@ -35,6 +35,8 @@ log DO server restart
 log DO sleep 20
 log CHECK game alive
 log CHECK game inworld
+# The game's own creature is kept (deleting one the game's AI was still running crashed Emma's game, 2026-10-06).
+log CHECK logged Temporary actor \w+ was made by the game, not by this client; kept on connect
 
 log -- and once more, with whatever the first time left behind
 log DO console player.placeatme 0201EEC9 1
