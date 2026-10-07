@@ -1,12 +1,28 @@
 # Packages a Skyrim Together VR release zip: client tools folder, server, game files and the guide.
 #   powershell -ExecutionPolicy Bypass -File Tools\VR\make-release.ps1
+#   ... -ListOnly    shows which files of the client folder would go in, and stops (works on an uncommitted tree)
 param(
     [string]$ClientFolder = 'E:\FUS\tools\Skyrim Together VR',
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
-    [string]$OutputFolder = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path 'build\release')
+    [string]$OutputFolder = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path 'build\release'),
+    [switch]$ListOnly
 )
 
 $ErrorActionPreference = 'Stop'
+
+# What of the client folder goes into a release: the tools folder as it runs, minus anything local to one PC. The
+# 2026-10-05 zip carried a behaviours zip from Emma's folder and the linker's .map (the launcher's install test,
+# 2026-10-07): a .map and a stray .zip are never part of the client.
+$skip = @('logs', 'cache')
+$clientFiles = @(Get-ChildItem $ClientFolder | Where-Object {
+    $skip -notcontains $_.Name -and
+    $_.Name -notmatch '\.old|\.running|^crash_.*\.dmp$|\.threaddiag\.|\.map$|\.zip$'
+})
+if ($ListOnly) {
+    $clientFiles | ForEach-Object { $_.Name }
+    Write-Host ("{0} entries from {1}" -f $clientFiles.Count, $ClientFolder)
+    return
+}
 
 $buildFolder = Join-Path $RepoRoot 'build\windows\x64\release'
 # The build writes its version string to build\BuildVersion.txt (root xmake.lua, before_build). BuildInfo.h only
@@ -28,11 +44,7 @@ New-Item -ItemType Directory -Force $staging | Out-Null
 # release never ships a stale client.
 $client = Join-Path $staging 'Skyrim Together VR'
 New-Item -ItemType Directory -Force $client | Out-Null
-$skip = @('logs', 'cache')
-Get-ChildItem $ClientFolder | Where-Object {
-    $skip -notcontains $_.Name -and
-    $_.Name -notmatch '\.old|\.running|^crash_.*\.dmp$|\.threaddiag\.'
-} | ForEach-Object { Copy-Item $_.FullName (Join-Path $client $_.Name) -Recurse }
+$clientFiles | ForEach-Object { Copy-Item $_.FullName (Join-Path $client $_.Name) -Recurse }
 Copy-Item (Join-Path $buildFolder 'SkyrimTogetherVR.exe') $client -Force
 Copy-Item (Join-Path $buildFolder 'TPProcess.exe') $client -Force
 Copy-Item (Join-Path $PSScriptRoot 'collect-logs.*') $client

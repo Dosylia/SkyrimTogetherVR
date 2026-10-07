@@ -38,11 +38,10 @@ constexpr uint32_t kNiAVObjectSize = 0x138;
 constexpr uint32_t kChildrenOffset = 0x110;
 constexpr uint32_t kNiAVObjectSize = 0x110;
 #endif
-// NiAVObject::worldBound, straight after the world transform (0x7C + 0x34). A NiBound is a centre and a radius.
-// Read only with ValidWorldBound below, which refuses anything that is not the size and place of a weapon: the
-// offset is inferred from the two transforms either side of it rather than measured, and a wrong read must
-// announce itself rather than quietly put a blade through the floor.
-constexpr uint32_t kWorldBoundOffset = 0xB0;
+// NiAVObject::worldBound. A NiBound is a centre and a radius. 0xB0, straight after the world transform where SE keeps
+// it, is previousWorld on VR; measured on 2026-10-06, the visible blade's bound is at 0xE4 (VR_HISTORY.md, P1).
+// Read only with ReadWorldBound below, which refuses anything that is not the size and place of a weapon.
+constexpr uint32_t kWorldBoundOffset = 0xE4;
 
 constexpr uint32_t kVTableGetRttiSlot = 2; // NiObject::GetRTTI
 constexpr uint32_t kVTableAsNodeSlot = 3;  // NiObject::AsNode
@@ -4170,6 +4169,110 @@ void FeelClash(const uint8_t aSide) noexcept
 {
     if (aSide < 2)
         VRHaptics::Pulse(aSide == 1, 3999);
+}
+
+bool PlaceCorpse(Actor* apActor, const glm::vec3& acWanted) noexcept
+{
+    // A corpse is drawn from its ragdoll, and moving the reference (ForcePosition, MoveTo, SetPosition, the console)
+    // leaves the ragdoll where this game dropped it: the two screens showed a body in two places, and a body dragged
+    // over there fell back to its old spot here when the dragging stopped (2026-10-04, `live-corpse-place`; Seen,
+    // 2026-10-06 20:03). The ragdoll is its rigid bodies, so they are moved, every one by the same offset, as PLANCK
+    // warps a ragdoll (`rb->getRigidMotion()->setTransform`, `updateMovedBodyInfo`, velocities zeroed, its main.cpp).
+    struct Placed
+    {
+        std::chrono::steady_clock::time_point NextAt{};
+        std::chrono::steady_clock::time_point MovedAt{};
+        bool SayAfter = false;
+    };
+    static std::unordered_map<uint32_t, Placed> s_placed;
+    if (!apActor)
+        return false;
+    const auto cNow = std::chrono::steady_clock::now();
+    auto& placed = s_placed[apActor->formID];
+    if (cNow < placed.NextAt)
+        return false;
+    placed.NextAt = cNow + std::chrono::milliseconds(500);
+
+    POINTER_SKYRIMSE(float, s_havokScale, 231896, 231896);
+    POINTER_SKYRIMSE(THkpEntitySetPositionAndRotation, s_setPositionAndRotation, 9000002, 9000002);
+    POINTER_SKYRIMSE(THkpEntityActivate, s_activate, 60096, 60096);
+    const float cScale = s_havokScale.Get() ? *s_havokScale.Get() : 0.f;
+    void* pRoot = apActor->GetNiNode();
+    if (!(cScale > 0.f) || !pRoot || !s_setPositionAndRotation.Get())
+        return false;
+
+    // The ragdoll's bodies: a live tree, so no IsReadable (milliseconds a call here), only null checks. Dynamic and in
+    // a world only; the first found from the root is the ragdoll's root (pelvis or centre of mass).
+    TiltedPhoques::Vector<uint8_t*> bodies;
+    void* pHkpWorld = nullptr;
+    TiltedPhoques::Vector<void*> queue;
+    queue.push_back(pRoot);
+    for (size_t head = 0; head < queue.size() && head < 512; ++head)
+    {
+        void* pObject = queue[head];
+        if (uint8_t* pBody = HavokBodyOfLive(pObject))
+        {
+            const uint8_t motionType = pBody[kMotionTypeOffset];
+            void* pWorld = At<void*>(pBody, kHkWorldOffset);
+            if (pWorld && ((motionType >= 1 && motionType <= 3) || motionType == 6) && (!pHkpWorld || pWorld == pHkpWorld) && bodies.size() < 64)
+            {
+                pHkpWorld = pWorld;
+                bodies.push_back(pBody);
+            }
+        }
+        void* pNode = AsNode(pObject);
+        void** pChildren = pNode ? At<void**>(pNode, kChildrenOffset + 0x8) : nullptr;
+        const uint16_t capacity = pNode ? At<uint16_t>(pNode, kChildrenOffset + 0x10) : 0;
+        for (uint16_t i = 0; pChildren && i < capacity; ++i)
+            if (pChildren[i])
+                queue.push_back(pChildren[i]);
+    }
+    if (bodies.empty())
+        return false;
+
+    const float* pRootAt = reinterpret_cast<const float*>(bodies[0] + kBodyTranslationOffset);
+    const glm::vec3 cRagdollRoot = glm::vec3{pRootAt[0], pRootAt[1], pRootAt[2]} / cScale;
+    const float cApart = glm::length(glm::vec2{acWanted.x - cRagdollRoot.x, acWanted.y - cRagdollRoot.y});
+
+    if (placed.SayAfter && cNow - placed.MovedAt >= std::chrono::seconds(1))
+    {
+        placed.SayAfter = false;
+        spdlog::info("CorpseDiag: {:X}'s ragdoll now lies {:.0f} units from where its owner's corpse is", apActor->formID, cApart);
+    }
+
+    // The same 64 units as the reference: a settled ragdoll is not pulled around every frame.
+    if (cApart <= 64.f)
+        return false;
+
+    // Its root put just above where the owner has the body (a reference stands on the ground), to settle from there.
+    constexpr float cLift = 20.f;
+    const glm::vec3 cOffset{acWanted.x - cRagdollRoot.x, acWanted.y - cRagdollRoot.y, acWanted.z + cLift - cRagdollRoot.z};
+    const glm::vec3 cHavokOffset = cOffset * cScale;
+
+    WorldWriteLock lock(BhkWorldOf(pHkpWorld));
+    if (!lock.Held())
+        return false;
+    uint32_t moved = 0;
+    for (uint8_t* pBody : bodies)
+    {
+        // Still in that world now that it is locked.
+        if (At<void*>(pBody, kHkWorldOffset) != pHkpWorld)
+            continue;
+        const float* pAt = reinterpret_cast<const float*>(pBody + kBodyTranslationOffset);
+        const float position[4] = {pAt[0] + cHavokOffset.x, pAt[1] + cHavokOffset.y, pAt[2] + cHavokOffset.z, 0.f};
+        float rotation[4];
+        std::memcpy(rotation, pBody + kBodyQuaternionOffset, sizeof(rotation));
+        s_setPositionAndRotation.Get()(pBody, position, rotation);
+        std::memset(pBody + kAngularVelocityOffset - 0x10, 0, 16); // linear velocity
+        std::memset(pBody + kAngularVelocityOffset, 0, 16);
+        if (s_activate.Get())
+            s_activate.Get()(pBody);
+        ++moved;
+    }
+    placed.MovedAt = cNow;
+    placed.SayAfter = true;
+    spdlog::info("CorpseDiag: {:X}'s ragdoll lay {:.0f} units from where its owner's corpse is; moved there ({} bodies)", apActor->formID, cApart, moved);
+    return moved > 0;
 }
 
 bool IsWeaponTouchAt(const glm::vec3& acPoint) noexcept

@@ -472,9 +472,12 @@ void CharacterService::OnOwnershipClaimRequest(const PacketEvent<RequestOwnershi
     const auto& message = acMessage.Packet;
     const entt::entity cEntity = static_cast<entt::entity>(message.ServerId);
 
-    if (!CanClaimOwnership(acMessage.pPlayer, cEntity, message.ExpectedOwnershipEpoch, OwnershipTransferReason::LeaderClaim))
+    if (!CanClaimOwnership(acMessage.pPlayer, cEntity, message.ExpectedOwnershipEpoch, OwnershipTransferReason::LeaderClaim, message.Follower))
         return;
 
+    if (message.Follower)
+        if (auto* pOwnerComponent = m_world.try_get<OwnerComponent>(cEntity))
+            pOwnerComponent->FollowerOfPlayerId = acMessage.pPlayer->GetId();
     TransferOwnership(acMessage.pPlayer, cEntity, OwnershipTransferReason::LeaderClaim);
 }
 
@@ -524,6 +527,7 @@ void CharacterService::OnReferencesMoveRequest(const PacketEvent<ClientReference
         movementComponent.Rotation = glm::vec3(movement.Rotation.x, 0.f, movement.Rotation.y);
         movementComponent.Variables = movement.Variables;
         movementComponent.Direction = movement.Direction;
+        movementComponent.Flying = movement.Flying;
         movementComponent.VRPoseData = update.UpdatedVRPose;
 
         cellIdComponent.Cell = movement.CellId;
@@ -865,7 +869,8 @@ const char* CharacterService::GetOwnershipTransferReasonName(const OwnershipTran
     return "unknown reason";
 }
 
-bool CharacterService::CanClaimOwnership(Player* apPlayer, const entt::entity aEntity, const uint32_t aExpectedOwnershipEpoch, const OwnershipTransferReason aReason) const noexcept
+bool CharacterService::CanClaimOwnership(Player* apPlayer, const entt::entity aEntity, const uint32_t aExpectedOwnershipEpoch, const OwnershipTransferReason aReason,
+                                         const bool aFollower) const noexcept
 {
     const uint32_t serverId = World::ToInteger(aEntity);
     const char* pReasonName = GetOwnershipTransferReasonName(aReason);
@@ -920,10 +925,24 @@ bool CharacterService::CanClaimOwnership(Player* apPlayer, const entt::entity aE
     // A dead body goes to whoever is moving it, leader or not: only the owner sends a body's bones, so a body carried
     // by anyone else did not move on the other screens (2026-10-03 09:28, a bandit Emma had killed, carried by Seen).
     // The claim still has to come from the same party as the current owner.
+    // A player's follower belongs to that player's game (Emma's answer of 2026-10-07): asked for as one, it is given
+    // whoever leads the party, and another player's claim does not take it while its player is connected. A living
+    // actor otherwise went only to the party leader, so a follower asked for back by the other player stayed with the
+    // leader's game, which kept pulling her back where the follower's own game had her walk.
+    if (!aFollower && ownerComponent.FollowerOfPlayerId && ownerComponent.FollowerOfPlayerId != apPlayer->GetId() &&
+        m_world.GetPlayerManager().GetById(ownerComponent.FollowerOfPlayerId))
+        return reject("it is another player's follower");
+
+    // A dragon flying in its owner's game stays there until it lands or dies (Emma's answer of 2026-10-07): taken over
+    // in flight, the Mistwatch dragon fell and died (2026-10-03 09:06), since a creature's flight is not handed over.
+    if (characterComponent.IsDragon() && pCurrentOwner && pCurrentOwner != apPlayer)
+        if (const auto* pMovement = m_world.try_get<MovementComponent>(aEntity); pMovement && pMovement->Flying)
+            return reject("it is a dragon flying in its owner's game");
+
     auto& partyService = m_world.GetPartyService();
     const bool cDeadBody = characterComponent.IsDead();
-    if (!partyService.IsPlayerInParty(apPlayer) || (!cDeadBody && !partyService.IsPlayerLeader(apPlayer)))
-        return reject(cDeadBody ? "the player is not in a party" : "the player is not the party leader");
+    if (!partyService.IsPlayerInParty(apPlayer) || (!cDeadBody && !aFollower && !partyService.IsPlayerLeader(apPlayer)))
+        return reject(cDeadBody || aFollower ? "the player is not in a party" : "the player is not the party leader");
 
     PartyService::Party* const pParty = partyService.GetPlayerParty(apPlayer);
     if (!pParty || std::find(pParty->Members.begin(), pParty->Members.end(), pCurrentOwner) == pParty->Members.end())

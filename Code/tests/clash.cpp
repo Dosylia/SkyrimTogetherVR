@@ -10,6 +10,7 @@
 #include <Messages/ClashRequest.h>
 #include <Messages/NotifyClash.h>
 #include <Messages/RequestHealthChangeBroadcast.h>
+#include <Messages/RequestOwnershipClaim.h>
 #include <Messages/NotifyHealthChangeBroadcast.h>
 
 using namespace TiltedPhoques;
@@ -82,4 +83,22 @@ TEST_CASE("a hit keeps when it happened", "[clash]")
     NotifyHealthChangeBroadcast back2{};
     back2.DeserializeRaw(reader2);
     REQUIRE(back2 == notify);
+}
+
+TEST_CASE("a claim says whether it is for the claimant's own follower", "[clash]")
+{
+    for (const bool follower : {false, true})
+    {
+        RequestOwnershipClaim claim{};
+        claim.ServerId = 0x1A;
+        claim.ExpectedOwnershipEpoch = 3;
+        claim.Follower = follower;
+        Buffer buffer(32);
+        Buffer::Writer writer(&buffer);
+        claim.SerializeRaw(writer);
+        Buffer::Reader reader(&buffer);
+        RequestOwnershipClaim back{};
+        back.DeserializeRaw(reader);
+        REQUIRE(back == claim);
+    }
 }

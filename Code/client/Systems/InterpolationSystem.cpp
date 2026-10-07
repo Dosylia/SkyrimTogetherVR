@@ -295,6 +295,10 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
         // 2026-10-03 20:50); open in VR_TODO.md. The gap is logged, once every 30 s per body, so play sessions say how
         // far apart the two corpses really are.
         constexpr float cCorpseSnapDistance = 64.f;
+#ifdef SKYRIMVR
+        // What is drawn, the ragdoll, goes where the owner has the body (VRBodySync::PlaceCorpse).
+        VRBodySync::PlaceCorpse(apActor, position);
+#endif
         const glm::vec3 current{apActor->position.x, apActor->position.y, apActor->position.z};
         const float cApart = glm::distance(current, position);
         if (cApart > cCorpseSnapDistance)

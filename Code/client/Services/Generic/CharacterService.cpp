@@ -696,6 +696,8 @@ bool CharacterService::RequestOwnership(const uint32_t aFormId, const uint32_t a
     RequestOwnershipClaim request;
     request.ServerId = aServerId;
     request.ExpectedOwnershipEpoch = pRemoteComponent->OwnershipEpoch;
+    // This player's own follower is this game's whoever leads the party (the server's rule, see CanClaimOwnership).
+    request.Follower = pActor->IsPlayerTeammate() && !pActor->IsTemporary();
 
     if (!m_transport.Send(request))
         return false;
@@ -1685,7 +1687,7 @@ void CharacterService::OnOwnershipTransfer(const NotifyOwnershipTransfer& acMess
 
         // LocalComponent is installed only after canonical reconciliation is complete.
         pActor->GetExtension()->SetRemote(false);
-        spdlog::info("Gained ownership of actor {:X} at epoch {}", acMessage.ServerId, acMessage.OwnershipEpoch);
+        spdlog::info("Gained ownership of actor {:X} (form {:X}) at epoch {}", acMessage.ServerId, pActor ? pActor->formID : 0, acMessage.OwnershipEpoch);
         if (cMyFollower)
             SendInventoryDifference(pActor, acMessage.ServerId, acMessage.OwnershipEpoch, acMessage.CurrentActorData.InitialInventory);
         return;

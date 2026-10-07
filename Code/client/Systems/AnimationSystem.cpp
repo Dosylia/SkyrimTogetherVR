@@ -316,6 +316,10 @@ void AnimationSystem::Serialize(World& aWorld, ClientReferencesMoveRequest& aMov
         movement.Direction = pActor->currentProcess->middleProcess->direction;
     }
 
+    // A dragon in the air here is not taken over by another player's game (CharacterService::CanClaimOwnership on the
+    // server): taken over in flight, the Mistwatch dragon fell and died (2026-10-03 09:06).
+    movement.Flying = pActor->IsDragon() && pActor->actorState.IsFlying();
+
 #ifdef SKYRIMVR
     if (pActor == PlayerCharacter::Get())
     {

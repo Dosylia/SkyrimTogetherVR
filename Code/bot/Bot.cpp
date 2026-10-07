@@ -17,6 +17,7 @@
 #include <Messages/NotifyDroppedItemRemoved.h>
 #include <Messages/NotifyDroppedItemMove.h>
 #include <Messages/ClashRequest.h>
+#include <Messages/RequestOwnershipClaim.h>
 #include <Messages/NotifyClash.h>
 #include <Messages/NotifyWorldObjectMove.h>
 #include <Messages/ActivateRequest.h>
@@ -170,6 +171,11 @@ Bot::Bot(BotOptions aOptions, std::vector<Command> aScript) noexcept
     , m_script(std::move(aScript))
 {
     m_start = m_options.Start;
+    // "party lead" anywhere in the script counts from the start: the party is formed as this bot connects, before
+    // the script's first line runs, and a bot made leader otherwise leaves at once (follower pair, 2026-10-07).
+    for (const Command& command : m_script)
+        if (command.Name == "party" && !command.Args.empty() && command.Args[0] == "lead")
+            m_keepLeadership = true;
 }
 
 int Bot::Run() noexcept
@@ -827,6 +833,7 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
             actor.IsPlayer = false;
             actor.Base = message.BaseId;
             actor.Ref = message.FormId;
+            actor.OwnershipEpoch = message.OwnershipEpoch; // what a claim on it must name ("claim")
             actor.Health = health != message.InitialActorValues.ActorValuesList.end() ? health->second : 0.f;
             actor.HealthKnown = health != message.InitialActorValues.ActorValuesList.end();
             actor.Dead = message.IsDead;
@@ -910,6 +917,7 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
             npc.IsPlayer = false;
             npc.OwnedByUs = message.Owner;
             npc.OwnershipEpoch = message.OwnershipEpoch;
+            npc.Ref = m_npcReference; // so that "claim ref:<hex>" finds this bot's own NPC too
             npc.LastChange = Clock::now();
             spdlog::info("NPC registered as actor {:X} (owner {}) at epoch {}", message.ServerId, message.Owner ? "yes" : "no", message.OwnershipEpoch);
             Record(Collect::Ownership, fmt::format("npc {:X} owner {} epoch {}", message.ServerId, message.Owner ? 1 : 0, message.OwnershipEpoch));
@@ -1201,7 +1209,9 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
     {
         const bool leader = opcode == NotifyPartyJoined::Opcode ? static_cast<const NotifyPartyJoined&>(acMessage).IsLeader : static_cast<const NotifyPartyInfo&>(acMessage).IsLeader;
         const uint32_t leaderId = opcode == NotifyPartyJoined::Opcode ? static_cast<const NotifyPartyJoined&>(acMessage).LeaderPlayerId : static_cast<const NotifyPartyInfo&>(acMessage).LeaderPlayerId;
-        if (leader && !m_leftParty)
+        if (leader && m_keepLeadership)
+            spdlog::info("Leading the party (party lead): the host's game is a member");
+        else if (leader && !m_leftParty)
         {
             spdlog::info("The server made us party leader (we joined first); leaving the party so the host leads");
             m_leftParty = true;
@@ -1844,6 +1854,15 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return true;
     }
 
+    // "npcfly on|off": the NPC's next movement updates say it is flying (Movement::Flying), as a dragon's owner's game
+    // does while it is in the air; sent at once with no movement.
+    if (name == "npcfly")
+    {
+        m_npcFlying = args.empty() || args[0] != "off";
+        spdlog::info("[script] the NPC is {}", m_npcFlying ? "flying" : "not flying");
+        return StepCommand(Command{"npcmove", {"0", "0", "0"}, acCommand.Line}, aFirstTick);
+    }
+
     // "npcmove <dx> <dy> <dz>": the first NPC this bot owns moved by that much in one update, the way an owner's game
     // reports a body it is dragging. For the dead-body hand-off: a body its owner moves must not be asked for by a
     // game that only watches it move (2026-10-03 20:55, the Mistwatch dragon's corpse traded back and forth).
@@ -1869,6 +1888,7 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         message.Tick = GetClock().GetCurrentTick();
         ReferenceUpdate& update = message.Updates[npcId];
         update.UpdatedMovement.Position = ToNet(m_npcPosition);
+        update.UpdatedMovement.Flying = m_npcFlying;
         update.UpdatedMovement.CellId = m_cell;
         update.UpdatedMovement.WorldSpaceId = m_worldSpace;
         SendMsg(message);
@@ -2124,6 +2144,39 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
 
     // Stop going where the host goes. A bot follows the host through every load door, which is what most tests
     // want; the ones about what is left behind when a player walks away need somebody to stay behind.
+    // "claim ref:<hex> [follower]": ask the server for the actor of that reference, as a game asks for an actor it has
+    // loaded (a party leader's claim) or for its own follower (RequestOwnershipClaim::Follower).
+    if (name == "claim" && !args.empty() && args[0].rfind("ref:", 0) == 0)
+    {
+        const uint32_t cWanted = static_cast<uint32_t>(std::strtoul(args[0].c_str() + 4, nullptr, 16)) & 0x00FFFFFF;
+        const KnownActor* pFound = nullptr;
+        for (const auto& actor : m_actors)
+            if ((actor.Ref.BaseId & 0x00FFFFFF) == cWanted && actor.Ref != GameId{})
+                pFound = &actor;
+        if (!pFound)
+        {
+            spdlog::error("[script] claim: no actor of reference {:X} known", cWanted);
+            return true;
+        }
+        RequestOwnershipClaim request{};
+        request.ServerId = pFound->ServerId;
+        request.ExpectedOwnershipEpoch = pFound->OwnershipEpoch;
+        request.Follower = args.size() > 1 && args[1] == "follower";
+        SendMsg(request);
+        spdlog::info("[script] claimed actor {:X} (reference {:X}) at epoch {}{}", request.ServerId, cWanted, request.ExpectedOwnershipEpoch,
+                     request.Follower ? " as our follower" : "");
+        return true;
+    }
+
+    // "party lead": if the server makes this bot the party leader (it joined first, after a server restart), it keeps
+    // the leadership instead of leaving, so the host's game is a plain member -- what a game that does not lead does.
+    if (name == "party" && !args.empty() && args[0] == "lead")
+    {
+        m_keepLeadership = true;
+        spdlog::info("[script] keeping the party's leadership if the server gives it");
+        return true;
+    }
+
     if (name == "stay")
     {
         m_followHostCell = false;
@@ -2175,7 +2228,10 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
 
         AssignCharacterRequest request{};
         request.Cookie = m_npcCookie;
+        // "npc <hex> dragon": registered as a dragon (CharacterComponent::IsDragon on the server).
+        request.IsDragon = !args.empty() && args.back() == "dragon";
         request.ReferenceId = temporary ? GameId(std::numeric_limits<uint32_t>::max(), 0xFF000000u | (m_npcCookie & 0x00FFFFFFu)) : GameId(m_skyrimModId, baseId);
+        m_npcReference = request.ReferenceId;
         request.FormId = captured ? m_captureBase : GameId(m_skyrimModId, baseId);
         request.CellId = m_cell;
         request.WorldSpaceId = m_worldSpace;

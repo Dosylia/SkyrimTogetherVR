@@ -273,6 +273,9 @@ private:
     //! Moves relayed to this bot by the server, which only sends them to players in range.
     uint32_t m_dropMoves{};
     uint32_t m_clashes{}; //!< clashes relayed to this bot (NotifyClash)
+    bool m_keepLeadership{false}; //!< "party lead": keep the party's leadership when the server gives it
+    GameId m_npcReference{}; //!< the reference the last "npc" registered
+    bool m_npcFlying{}; //!< "npcfly": its movement updates say it is flying
     uint64_t m_lastClashTick{}; //!< when the last of them was seen, on the server's clock
     uint64_t m_firstClashTick{}; //!< and the first
     uint32_t m_objectMoves{}; //!< world-object moves relayed to this bot

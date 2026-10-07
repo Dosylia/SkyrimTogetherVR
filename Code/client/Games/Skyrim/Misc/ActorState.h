@@ -18,6 +18,13 @@ struct ActorState : IMovementState
     // Life state (bits 21-24): 1 dying, 2 dead.
     bool IsDying() const noexcept { return (flags1 & 0x1E00000) == 0x200000; }
     bool IsDead() const noexcept { return (flags1 & 0x1E00000) == 0x400000; }
+    //! FLY_STATE, bits 18-20 of flags1 (CommonLibVR-NG ActorState1, just below the life state read above): in the air
+    //! unless none (0) or perching (5).
+    bool IsFlying() const noexcept
+    {
+        const uint32_t cFly = (flags1 >> 18) & 0x7;
+        return cFly != 0 && cFly != 5;
+    }
     bool IsDeadOrDying() const noexcept { return IsDying() || IsDead(); }
 
     //! ATTACK_STATE_ENUM, bits 28-31 of flags1. The bow values are the interesting ones: 9 kBowDraw,

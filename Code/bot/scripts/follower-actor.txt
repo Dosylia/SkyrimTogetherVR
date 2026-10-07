@@ -1,0 +1,18 @@
+# The member's half of the follower pair (see follower-watcher.txt): it does not lead the party, and asks for Lydia
+# as its own follower. Until 2026-10-07 a living actor went only to the party leader, so this was refused.
+log follower actor
+waitfor connected 45
+collect spawn ownership party
+waitfor known other 40
+ownership accept
+waitfor known ref:A2C94 40
+wait 3
+log asking for Lydia as our follower
+claim ref:A2C94 follower
+waitfor owned == 1 10
+expect owned == 1
+log the leader asks for her back; she stays ours
+wait 10
+expect owned == 1
+log done
+stop

@@ -1,0 +1,27 @@
+# A player's follower belongs to that player's game, whoever leads the party (Emma, 2026-10-07). The leading half.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Pair follower
+#
+# This side joins first and keeps the party's leadership ("party lead"), and brings Lydia (A2C94, a real reference,
+# not a temporary actor). Its partner, a plain member, asks for her as its own follower and must get her; then this
+# side asks for her as a leader's game asks for what it loads, and must not get her back.
+log follower watcher
+party lead
+waitfor connected 45
+collect spawn ownership party
+waitfor known other 40
+ownership accept
+log bringing Lydia, the other side's follower to be
+npc A2C94
+waitfor owned == 1 30
+expect owned == 1
+log waiting for the other side to ask for her as its follower
+waitfor owned == 0 30
+expect owned == 0
+log asking for her back as the party leader: refused while she is the other player's follower
+claim ref:A2C94
+wait 4
+expect owned == 0
+wait 6
+log done
+stop

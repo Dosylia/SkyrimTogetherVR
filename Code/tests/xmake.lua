@@ -7,6 +7,8 @@ target("TPTests")
     add_headerfiles("**.h")
     add_files("*.cpp")
     add_deps("SkyrimEncoding")
+    -- SmallDump.h (client) writes minidumps.
+    add_syslinks("dbghelp")
     add_packages(
         "tiltedcore",
         "hopscotch-map",

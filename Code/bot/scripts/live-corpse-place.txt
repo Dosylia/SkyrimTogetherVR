@@ -4,7 +4,8 @@
 #
 # Each game drops a dead body with its own ragdoll, so the two can land apart ("death position not synced", Seen,
 # 2026-10-03 20:50). The receiving game moves its corpse to where the owner has it when the two are more than 64
-# units apart (InterpolationSystem). The bot kills its bear and then reports it 300 units away, the way an owner's
+# units apart (InterpolationSystem; since 2026-10-07 its ragdoll too, VRBodySync::PlaceCorpse). The bot kills its
+# bear and then reports it 300 units away, the way an owner's
 # corpse that fell elsewhere would be reported; the game's bear must be drawn there.
 log live corpse place
 waitfor connected 45
@@ -28,6 +29,9 @@ npcmove 0 300 0
 wait 3
 npcmove 0 0 0
 wait 6
+# What is drawn, the ragdoll, moved there: how far it lay (the gap before), and how far it lies a second after.
+log CHECK logged CorpseDiag: \w+'s ragdoll lay \d+ units from where its owner's corpse is; moved there
+log CHECK logged CorpseDiag: \w+'s ragdoll now lies ([0-9]|[1-5][0-9]) units from where its owner's corpse is
 log SHOT after of npc
 wait 4
 log CHECK game alive

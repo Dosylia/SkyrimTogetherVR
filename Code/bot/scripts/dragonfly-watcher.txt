@@ -1,0 +1,22 @@
+# The leading half of the dragonfly pair (see dragonfly-actor.txt). It leads the party and asks for the other side's
+# dragon twice: while it flies (refused) and after it has landed (granted).
+log dragonfly watcher
+party lead
+waitfor connected 45
+collect spawn ownership party
+waitfor known other 40
+ownership accept
+waitfor known ref:A2C94 40
+wait 4
+log asking for the dragon while it flies
+claim ref:A2C94
+wait 3
+expect owned == 0
+wait 6
+log asking again once it has landed
+claim ref:A2C94
+waitfor owned == 1 10
+expect owned == 1
+wait 3
+log done
+stop

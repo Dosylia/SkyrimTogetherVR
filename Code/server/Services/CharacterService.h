@@ -71,7 +71,7 @@ protected:
     void CreateCharacter(const PacketEvent<AssignCharacterRequest>& acMessage) const noexcept;
     void PopulateAssignmentResponse(entt::entity aEntity, AssignCharacterResponse& aResponse) const noexcept;
     static const char* GetOwnershipTransferReasonName(OwnershipTransferReason aReason) noexcept;
-    bool CanClaimOwnership(Player* apPlayer, entt::entity aEntity, uint32_t aExpectedOwnershipEpoch, OwnershipTransferReason aReason) const noexcept;
+    bool CanClaimOwnership(Player* apPlayer, entt::entity aEntity, uint32_t aExpectedOwnershipEpoch, OwnershipTransferReason aReason, bool aFollower = false) const noexcept;
     bool TransferOwnership(Player* apPlayer, entt::entity aEntity, OwnershipTransferReason aReason, bool aResetInvalidOwners = true) const noexcept;
     void TransferToNextOwner(entt::entity aEntity, OwnershipTransferReason aReason) const noexcept;
     //! Takes an actor off an owner who has gone silent or out of range and gives it to a player who can see it.

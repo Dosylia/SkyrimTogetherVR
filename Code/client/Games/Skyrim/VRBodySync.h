@@ -40,6 +40,9 @@ struct Clash
 bool TakeClash(Clash& aOut) noexcept;
 //! A clash the other player saw on one of this player's weapons: felt on the hand holding it (0 left, 1 right).
 void FeelClash(uint8_t aSide) noexcept;
+//! A dead body whose owner has it elsewhere: its ragdoll -- what it is drawn from -- is moved there, every rigid body
+//! by the same offset, when it lies more than 64 units away (at most twice a second). False when nothing was moved.
+bool PlaceCorpse(Actor* apActor, const glm::vec3& acWanted) noexcept;
 //! Whether this player's HIGGS bodies, or what they hold, touched another player's weapon body at that point (game
 //! units) in the last half second: a hit landed there landed on the weapon, not on its owner.
 bool IsWeaponTouchAt(const glm::vec3& acPoint) noexcept;

@@ -1,0 +1,26 @@
+# A dragon flying in its owner's game is not taken over by another player's (Emma, 2026-10-07). The owner's half.
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Pair dragonfly
+#
+# This side is a plain member and owns a dragon (Odahviing's reference is not needed: any Skyrim.esm reference
+# registered as a dragon), which says it is flying. The leader asks for it and must not get it; once it says it has
+# landed, the leader asks again and gets it.
+log dragonfly actor
+waitfor connected 45
+collect spawn ownership party
+waitfor known other 40
+ownership accept
+log bringing a dragon, in the air
+npc A2C94 dragon
+waitfor owned == 1 30
+npcfly on
+wait 8
+log still ours while it flies
+expect owned == 1
+npcfly off
+log landed: the leader may take it now
+waitfor owned == 0 20
+expect owned == 0
+wait 3
+log done
+stop

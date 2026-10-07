@@ -4,6 +4,7 @@ void RequestOwnershipClaim::SerializeRaw(TiltedPhoques::Buffer::Writer& aWriter)
 {
     Serialization::WriteVarInt(aWriter, ServerId);
     Serialization::WriteVarInt(aWriter, ExpectedOwnershipEpoch);
+    Serialization::WriteBool(aWriter, Follower);
 }
 
 void RequestOwnershipClaim::DeserializeRaw(TiltedPhoques::Buffer::Reader& aReader) noexcept
@@ -12,4 +13,5 @@ void RequestOwnershipClaim::DeserializeRaw(TiltedPhoques::Buffer::Reader& aReade
 
     ServerId = Serialization::ReadVarInt(aReader) & 0xFFFFFFFF;
     ExpectedOwnershipEpoch = Serialization::ReadVarInt(aReader) & 0xFFFFFFFF;
+    Follower = Serialization::ReadBool(aReader);
 }

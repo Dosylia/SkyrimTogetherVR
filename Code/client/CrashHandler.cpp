@@ -13,6 +13,7 @@
 #include <sstream>
 #include <strsafe.h>
 #include <Games/Memory.h>
+#include <SmallDump.h>
 
 using time_point = std::chrono::system_clock::time_point;
 
@@ -355,6 +356,31 @@ LONG WINAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
             const uint64_t regs[] = {cr.Rax, cr.Rcx, cr.Rdx, cr.Rbx, cr.Rsi, cr.Rdi, cr.Rbp,
                                      cr.R8,  cr.R9,  cr.R10, cr.R11, cr.R12, cr.R13, cr.R14, cr.R15};
             RecentDeletes::Report(regs, std::size(regs));
+        }
+
+        // The small dump first, in every build: it takes a moment, and it is the one a player can send with a
+        // report (the launcher takes it from logs\ when they agree). Stacks, registers, modules and the objects the
+        // crashing registers point at; not the ~1 GB of game data below.
+        try
+        {
+            CollectCrashObjects(pExceptionInfo);
+            MINIDUMP_CALLBACK_INFORMATION smallCallback{};
+            smallCallback.CallbackRoutine = &CrashDumpCallback;
+            const auto logs = TiltedPhoques::GetPath() / "logs";
+            const auto name = "crash_" + SerializeTimePoint(std::chrono::system_clock::now(), "UTC_%Y-%m-%d_%H-%M-%S") + ".small.dmp";
+            DWORD smallError = 0;
+            // A second, smaller pass (when the first is too big to send) needs the crash objects handed out again.
+            const uint64_t smallSize = SmallDump::Write(logs / name, pExceptionInfo, &smallCallback, smallError, []() noexcept { g_extraNext = 0; });
+            if (smallSize)
+            {
+                spdlog::critical(__FUNCTION__ ": small crash dump {} ({} KB)", name, smallSize / 1024);
+                SmallDump::Prune(logs);
+            }
+            else
+                spdlog::critical(__FUNCTION__ ": small crash dump could not be written (error {:#x})", smallError);
+        }
+        catch (...) // best effort, like the full dump
+        {
         }
 
 #if (IS_MASTER)

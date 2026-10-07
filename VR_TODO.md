@@ -12,10 +12,89 @@ everyone; dead bodies in sync; NPCs never below the floor; weapon hits land wher
 sword fights that feel like Blade & Sorcery -- the other player's sword and body are physics objects in your game, and
 the defender's screen decides whether a hit was blocked.
 
+## urSovngarde: launcher, reports and crash triage (2026-10-07)
+
+The project around the mod is called **urSovngarde**. Its launcher and its online side (reports, invite codes, the
+crash triage) live in their own private repos, `C:\dev\urSovngarde-launcher` and `C:\dev\urSovngarde-hub`, each with
+its `TODO.md`. What stays here is the mod's own part:
+
+- [x] Small crash dumps (2026-10-07, deployed as v1.8.1-121-gc9f9b92f-dirty.6df6e9f): on a crash the handler first
+      writes `logs\crash_UTC_<time>.small.dmp` in every build (stacks, registers, modules, the objects the crashing
+      registers point at; not the game's data segments), keeps the newest three, then the full dump as before. Above
+      3.5 MB it is written again with every thread's registers but only the crashing thread's stack (clearing a
+      thread's stack flag does nothing, removing its range works). `Code/client/SmallDump.h`; TPTests
+      `[smalldump]`: a real minidump of the test process, 44 KB; with eight busy threads 616 KB, the second pass
+      75 KB; pruning keeps the newest three and nothing else; all 41 test cases pass. The launcher's report takes
+      the newest two under 4 MB from `logs\`, masked in place. Not seen yet: one written by a real game crash (the
+      next crash's log says "small crash dump ... (N KB)"). Was: the game's crash handler writes a few-MB minidump
+      (call chain, registers, memory near the crash -- never a full 1 GB dump), for the launcher to send with the logs
+      when the player agrees.
+- [!] Join friends 3 -- no port opening at all: direct connections through both routers with GameNetworkingSockets'
+      P2P (TiltedConnect is built on it, v1.4.1), the hub as the go-between. Changes the mod's network code on both
+      sides; its real test needs two PCs on two internet connections (Emma and Seen). Facts (2026-10-07): the
+      xmake package builds GameNetworkingSockets with its own ICE (`ice` config on by default, not overridden; ICE
+      code present in the built `gamenetworkingsockets.lib`), so P2P needs no new library. What it needs: the server
+      listening for P2P besides its UDP port, the client connecting with custom signaling, the hub passing the
+      signaling messages between the two (a handful per connection; Workers KV's free plan allows 1,000 writes a
+      day), public STUN servers (free) to learn each side's address, and for the pairs whose routers both refuse
+      (often quoted as one in five or fewer) a TURN relay, which is a paid service, or no relay and those players
+      use Tailscale. Question under "Needs Emma".
+- [!] Release packaging for VR. Done 2026-10-07: `make-release.ps1` no longer takes files local to Emma's PC (a
+      `.map`, a stray `.zip`, found by the launcher's install test in the 2026-10-05 zip), and `-ListOnly` shows the
+      client folder's selection on any tree (29 entries from her tools folder, none of those). Open: `release.yml`
+      publishes a GitHub release on any `vX.Y.Z` tag push, built by `windows-playable-build.yml` in upstream's SE
+      layout (a `SkyrimTogetherReborn` folder): a tag pushed today would publish a zip the launcher cannot install,
+      and its update notice would announce it. Question under "Needs Emma". Was: release packaging for VR (the
+      workflows still name upstream's SE files).
+
+## Work queue (2026-10-07)
+
+Emma's answers of 2026-10-07: a player's follower always belongs to that player's game; a dragon flying in the other
+game is never taken over; keep at the crash on travelling away with PLANCK (option 3). Worked top to bottom by the loop:
+`[x]` with its evidence in one line, `[!]` with the question or action under "Needs Emma", `[-]` with why. Details of
+each item's past are in `VR_HISTORY.md` under the section named in brackets.
+
+- [x] **A corpse lies where its owner's lies** (2026-10-07, `live-corpse-place` 06:35 and 06:38, 5 of 5 each): the
+      dead body's ragdoll -- what is drawn -- is moved, every rigid body by one offset under the world lock, as PLANCK
+      warps a ragdoll (`VRBodySync::PlaceCorpse`, from InterpolationSystem). "ragdoll lay 1068 units from where its
+      owner's corpse is; moved there (19 bodies)", a second later "now lies 14 units" (1147 then 23 in the second run);
+      the camera at the owner's position shows the bear (empty ground on 2026-10-04). Was: **A corpse lies where its owner's lies.** Nothing moves a dead body's ragdoll on the receiving side: `ForcePosition`,
+      `MoveTo`, papyrus `SetPosition` and the console move the reference, not the ragdoll the body is drawn from, so the
+      two screens show it in different places ("CorpseDiag"), and a dragged body falls back to its old spot for the
+      watcher when the dragging stops. Find how a ragdoll is moved (PLANCK's source moves them: its scratchpad clone),
+      then `live-corpse-place` red to green. ["Dead bodies lie in different places", "Goal 4"]
+- [x] **A player's follower belongs to that player's game** (2026-10-07, bot pair `follower`, green twice 07:06): a
+      claim now says when the actor is the claimant's own follower (`RequestOwnershipClaim::Follower`, set by the client
+      from `IsPlayerTeammate`); the server grants it to a party member who does not lead (refused before: "the player
+      is not the party leader", 06:59) and remembers whose follower it is, refusing every other player's leader claim
+      and leader assignment while that player is connected ("Rejected party leader claim from player 1 for actor 2:
+      it is another player's follower"). Owed: `live-follower` in the rig (the client side), with the next session.
+      Was: **A player's follower belongs to that player's game**, whoever else is near or whatever loading screen is
+      between (Lydia, 2026-10-03 15:09: 92 hand-overs in 15 s). Server ownership rule; a rig test with a follower.
+      ["Who runs a follower", "Shared follower"]
+- [ ] **A dragon flying in the other game is never taken over** (the party leader's claim skips it until it lands or
+      dies; the Mistwatch dragon fell dead, 2026-10-03 09:06). ["Dragons taken over in flight"]
+- [ ] **The crash on travelling away with PLANCK and our copies left behind** (`+0x3AC1A8`, `+0xCBFD24`;
+      `live-copies-left-2`). How PLANCK keeps track of the actors it ragdolls, then our copies leave in a way it notices.
+      [KNOWN_ISSUES, "Crash within a second of travelling away"]
+- [x] **The weapon's visible blade** (2026-10-07, built with the corpse fix): `kWorldBoundOffset` is 0xE4; nothing
+      reads it on a live path any more (`ReadWorldBound` has no caller), only the shape report's line. Was: `kWorldBoundOffset` 0xB0 is `previousWorld`; the world bound is at 0xE4 on VR
+      (measured 2026-10-06). Batch into another item's build.
+- [ ] **The arrow nocked on the other player's bow**: cause known, not built. ["Nocked arrow not shown on the other
+      player's bow"] Batch into another item's build.
+
 ## Needs Emma
 
 ### Decisions
 
+- [!] **How releases are made.** (1) GitHub builds them when you push a tag: `release.yml` rewritten to make
+      `make-release.ps1`'s layout (`Skyrim Together VR`, `Server`, `Skyrim Together mod`) from the build and the UI;
+      (2) `make-release.ps1` on your PC, uploaded by hand, and `release.yml` switched off until then. Until one is
+      chosen, do not push a `vX.Y.Z` tag: it would publish upstream's SE layout.
+- [!] **Join friends 3, a relay or not.** Direct connections without opening a port (urSovngarde section above) work
+      for most pairs of routers; for the rest a TURN relay passes the traffic, which costs money each month. (1) No
+      relay: those pairs are told to use Tailscale, as today. (2) A relay later, once players hit it. Either way the
+      work ends with a test session with Seen, each on his own connection; when could that be?
 - [!] **How your equipped sword meets his.** A sword grabbed with HIGGS is stopped by his; an equipped one passes
       through (two keyframed bodies). (1) B&S-like: the equipped sword becomes a dynamic body held to the hand, what
       you see follows it, his blade stops yours -- the most work; (2) feedback only: buzz, sound, sparks and the
@@ -29,14 +108,6 @@ the defender's screen decides whether a hit was blocked.
       mid-fight); (2) your pull is sent to his game, which applies it (smoother AI, a delay, much new work); (3) leave it.
 - [!] **Grabbing or pushing the other player.** Nothing reaches him today; his real hands cannot be moved. A buzz on
       the grabbed hand, a stagger when shoved, or nothing?
-- [!] **Who runs a follower when you two are apart** (Lydia, 2026-10-03: the two games pulled her back and forth 92
-      times over a loading screen). (1) a player's follower always belongs to that player's game -- recommended; (2) a
-      loading screen does not count as leaving.
-- [!] **Dragons taken over in flight** (the Mistwatch dragon fell and died, 2026-10-03). (1) never take over a dragon
-      that is flying in the other game -- recommended; (2) keep the claim.
-- [!] **PLANCK and the crash on travelling away** (`+0x3AC1A8`, `+0xCBFD24`; only with PLANCK on, when three or more
-      of our copies are left behind). (1) live with it; (2) PLANCK off for co-op; (3) let me keep at it (next: how PLANCK
-      tracks the actors it ragdolls).
 - [!] **Long sessions grow** (~0.4 GB and 12 threads per loading screen, DynDOLOD DLL NG's threads; it ends in a
       freeze or a driver crash). Try DynDOLOD DLL NG Alpha-33, and/or `MemoryManager = true` in EngineFixesVR.ini --
       both machines the same. Which?
@@ -79,7 +150,7 @@ the defender's screen decides whether a hit was blocked.
 
 ### Crashes and stability
 
-- [ ] Crash on travelling away with PLANCK and our copies left behind -- decision above. [Crashes and stability]
+- [ ] Crash on travelling away with PLANCK and our copies left behind -- in the work queue.
 - [ ] Load after death crashes in the rig (`skyrimvrtools.dll+0x71B5`, `PlayerCharacter::UpdateAnimation`) -- the
       headset test above says whether it is real.
 - [ ] Script-engine crash on freed temporary forms (`+0x93CE17`, the game's): Emma's EngineFixesVR has
@@ -92,7 +163,7 @@ the defender's screen decides whether a hit was blocked.
 
 ### Sync: NPCs, followers, the world
 
-- [ ] Followers and dragons in flight -- decisions above.
+- [ ] Followers and dragons in flight -- in the work queue.
 - [ ] Maven fought by Seen was invisible for Emma; the blacksmith dead on Seen's side only; Brynjolf (essential)
       spinning on the floor for Seen after being "killed" (2026-10-04).
 - [ ] Lydia did not fight back while Emma was down; enemies ignored Seen while he was invisible to her (2026-10-03).

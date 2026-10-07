@@ -405,6 +405,9 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 - **Read `logs/tp_client.log` first.** On a crash it contains the faulting access, the registers and a
   raw stack scan. A real stack walk is impossible, because the custom-loaded game image has no
   unwind info.
+- **Small crash dumps** (`logs\crash_UTC_*.small.dmp`, since 2026-10-07): stacks, registers and the objects the
+  crashing registers point at, a few hundred KB, the newest three kept. The one a player's report carries; open it
+  with `cdb -z <dump> -c ".ecxr; kn 30; q"` like the big one (no game code to disassemble in it).
 - **Crash dumps** (`crash_UTC_*.dmp` in the game folder) are about 1GB, but they are the only place
   the game code can be disassembled: `SkyrimVR.exe` on disk is SteamStub-encrypted. Use `cdb`, not
   the WinDbg GUI:
