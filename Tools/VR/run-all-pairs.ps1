@@ -86,7 +86,7 @@ if (-not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
     # Wait for this server's own start-up line rather than a fixed pause: that line is what the version check
     # reads, and it is also the only sign the server is really up. A server whose STServer.dll and runner were
     # built apart exits at once, code 1, with no log line at all -- which cost an evening on 2026-09-29 before the
-    # note under Harness in VR_TODO.md was found. Say so here instead of letting every bot time out.
+    # note under Harness in VR_HISTORY.md was found. Say so here instead of letting every bot time out.
     $upBy = (Get-Date).AddSeconds(20)
     $started = $false
     while ((Get-Date) -lt $upBy) {

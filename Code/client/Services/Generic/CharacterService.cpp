@@ -3291,7 +3291,8 @@ void CharacterService::RunRemoteUpdates() noexcept
         {
             const auto& remoteComponent = interpolatedEntities.get<RemoteComponent>(entity);
             spdlog::info("Body {:X} (server id {:X}) is being moved here; asking for it, so that this side sends it", pFormIdComponent->Id, remoteComponent.Id);
-            RequestOwnership(pFormIdComponent->Id, remoteComponent.Id, entity);
+            if (!RequestOwnership(pFormIdComponent->Id, remoteComponent.Id, entity))
+                spdlog::info("Body {:X}: not asked after all (ownership epoch {} known here)", pFormIdComponent->Id, remoteComponent.OwnershipEpoch);
         }
 #endif
     }
@@ -3636,6 +3637,7 @@ void CharacterService::OnNotifyClash(const NotifyClash& acMessage) const noexcep
 #ifdef SKYRIMVR
     // Heard by everyone near it, felt by the one whose weapon it was.
     const bool cHeard = VRBodySync::SoundClash(point);
+    VRBodySync::SparkClash(point);
     if (cOurs)
         VRBodySync::FeelClash(acMessage.OtherSide);
     spdlog::info("Clash from server {}: {}{}", acMessage.FromId, cHeard ? "heard" : "not heard (no sound)", cOurs ? ", felt" : "");

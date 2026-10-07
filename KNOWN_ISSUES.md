@@ -1,7 +1,7 @@
 # Skyrim Together VR: port notes and known issues
 
 What is different, missing or fragile in the Skyrim VR (1.4.15) port, and why. Related files:
-- `VR_TODO.md`: the roadmap.
+- `VR_TODO.md`: the roadmap, current items only; `VR_HISTORY.md`: everything it held up to 2026-10-07.
 - `VR_MULTIPLAYER_GUIDE.md`: how to install and play.
 - `github.com/cmpayc/TiltedEvolutionVR`: an independent VR port; its address table and fixes were used here.
 

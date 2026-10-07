@@ -70,6 +70,7 @@ clash other right
 wait 3
 log CHECK logged Clash from server \d+: their right hand met our right weapon
 log CHECK logged Clash from server \d+: heard, felt
+log CHECK logged Clash: sparks at \(
 
 holdpose off
 wait 2

@@ -63,7 +63,7 @@ log CHECK logged VRWeaponBody: actor \w+ right weapon .* placed, it reads [0-2]\
 log CHECK logged VRWeaponBody: actor \w+ right weapon body [0-9]\.\d units from where the weapon is drawn
 log DO drop 31941 onto copy weapon body 12
 wait 3
-log CHECK logged VRWeaponBody: actor \w+ right weapon touches a body on layer 4
+log CHECK logged VRWeaponBody: actor \w+ (left|right) weapon touches a body on layer 4
 log SHOT sword of copy
 
 # The copy leaves range and its sword's body leaves the world with it.

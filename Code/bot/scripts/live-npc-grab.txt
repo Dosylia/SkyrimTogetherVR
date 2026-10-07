@@ -1,0 +1,38 @@
+# A living NPC of this bot's, grabbed by the player's HIGGS hand and pulled: what the player's game does with it, and
+# what reaches its owner (PvP queue Q2, 2026-10-06: "actually interacting with an npc ... could be seen").
+#
+#   python Tools\VR\live-check.py live-npc-grab
+#
+# Measurement, not a fix: whether HIGGS takes a living actor at all, where this game shows the NPC while it is pulled
+# (the owner keeps it where it stands), and what the client says about it.
+log live npc grab
+waitfor connected 45
+collect spawn health death ownership movement
+expect known me
+waitfor known other 40
+wait 5
+
+log -- a bear of this bot's, alive, standing still
+npc temp 23A8A
+waitfor owned == 1 20
+wait 8
+log CHECK npc alive
+log DO sample npc 2
+wait 3
+
+log -- the player takes it with a hand and walks off: twenty steps of 15 units
+log DO papyrus Actor SheatheWeapon 14
+wait 3
+log DO grab npc right
+wait 4
+log DO sample npc 2
+wait 3
+log DO walk 0 15 0 20
+wait 6
+log DO sample npc 4
+wait 6
+log CHECK npc alive
+log CHECK game alive
+wait 3
+log done
+stop

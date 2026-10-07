@@ -274,6 +274,7 @@ private:
     uint32_t m_dropMoves{};
     uint32_t m_clashes{}; //!< clashes relayed to this bot (NotifyClash)
     uint64_t m_lastClashTick{}; //!< when the last of them was seen, on the server's clock
+    uint64_t m_firstClashTick{}; //!< and the first
     uint32_t m_objectMoves{}; //!< world-object moves relayed to this bot
     uint32_t m_activationsBack{}; //!< activations relayed to this bot in its own name: its own, sent back by a game
     std::vector<std::pair<uint32_t, std::string>> m_names; // player id -> username

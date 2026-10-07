@@ -1088,6 +1088,8 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         const auto& message = static_cast<const NotifyClash&>(acMessage);
         ++m_clashes;
         m_lastClashTick = message.Tick;
+        if (!m_firstClashTick)
+            m_firstClashTick = message.Tick;
         const glm::vec3 cPoint(message.Point);
         const int64_t cAgo = static_cast<int64_t>(GetClock().GetCurrentTick()) - static_cast<int64_t>(message.Tick);
         spdlog::info("Clash from {}: its {} met the {} weapon of {} at ({:.0f}, {:.0f}, {:.0f}), {:.0f} units a second, {} ms ago", message.FromId,
@@ -1166,9 +1168,21 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
             return;
         }
 
-        // Nothing to hand back when it was never handed to us.
+        // Nothing to hand back when it was never handed to us. But one of ours taken by somebody else -- a player's game
+        // claiming the body of this bot's NPC while dragging it (2026-10-06) -- is not ours any more.
         if (!cOursNow)
+        {
+            for (auto& actor : m_actors)
+                if (actor.ServerId == message.ServerId && actor.OwnedByUs)
+                {
+                    actor.OwnedByUs = false;
+                    actor.OwnershipEpoch = message.OwnershipEpoch;
+                    actor.LastChange = Clock::now();
+                    spdlog::info("Actor {:X} is now player {}'s at epoch {} -- taken from us", message.ServerId, message.OwnerPlayerId, message.OwnershipEpoch);
+                    Record(Collect::Ownership, fmt::format("owner-is {:X} epoch {}", message.ServerId, message.OwnershipEpoch));
+                }
             return;
+        }
 
         spdlog::info("Server handed us actor {:X}; handing it back (a bot never owns anything)", message.ServerId);
         RequestOwnershipTransfer request{};
@@ -1639,18 +1653,20 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
             return true;
         }
 
-        // "atclash": stamped at the moment the last clash relayed to this bot was seen on the other player's screen,
-        // less the VR playback delay (225 ms, CharacterService::RunRemoteUpdates): a hit the defender's game showed
-        // landing just as its weapon met this one.
+        // "atclash [<ms>]": stamped that long after the first clash relayed to this bot (negative: before it). Without
+        // a number, 225 ms before it -- the VR playback delay (CharacterService::RunRemoteUpdates) -- which is a hit the
+        // defender's game showed landing just as its weapon met this one. The first clash, because nothing of the
+        // player's touched this bot's weapons before it, while touches go on after it for as long as a hand rests there.
         uint64_t tick = 0;
         if (args.size() > 2 && args[2] == "atclash")
         {
-            if (!m_lastClashTick)
+            if (!m_firstClashTick)
             {
                 spdlog::error("[script] hit ... atclash: no clash relayed yet");
                 return true;
             }
-            tick = m_lastClashTick > 225 ? m_lastClashTick - 225 : 1;
+            const int64_t cOffset = args.size() > 3 ? std::strtoll(args[3].c_str(), nullptr, 10) : -225;
+            tick = static_cast<uint64_t>(std::max<int64_t>(1, static_cast<int64_t>(m_firstClashTick) + cOffset));
         }
         SendHit(target, arg(1, -30.f), tick);
         return true;

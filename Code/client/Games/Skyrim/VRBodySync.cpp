@@ -3219,6 +3219,10 @@ void HookPostPhysicsOnce() noexcept
 }
 
 #ifdef SKYRIMVR
+// Installed before the plugins, so PLANCK's hook on the same call wraps ours: ours writes the drawn pose right before
+// the drive, after PLANCK's own work. Installed around PLANCK's instead (once the game runs), PLANCK's work copies the
+// game's animation pose over the track and the ragdoll hands went from 8-14 units off the drawn hands to 84-90 (rig,
+// 2026-10-06 22:25 and 22:30, as on the first try the same morning). Left inside.
 TiltedPhoques::Initializer s_driveToPoseHook(
     []()
     {
@@ -3284,10 +3288,14 @@ void SayWeaponContacts() noexcept
             const bool cStarts = cNow - lastTouch >= std::chrono::milliseconds(250);
             lastTouch = cNow;
             auto& nextClash = s_nextClash[key];
-            if (cStarts && cNow >= nextClash)
+            // And fast enough to be a blow: a hand resting between the copy's two blades brushed each about once a
+            // second at 0-5 units a second, a new meeting every time (11 in a run, rig 21:28), while 98 of the 103
+            // meetings of the first real fight were faster than 20 (6 at 10 or less). A slower one is a touch.
+            constexpr float cMeetingSpeed = 10.f;
+            const float speed = glm::length(contact.Velocities[0] - contact.Velocities[1]) / havokScale;
+            if (cStarts && speed >= cMeetingSpeed && cNow >= nextClash)
             {
                 nextClash = cNow + std::chrono::milliseconds(250);
-                const float speed = glm::length(contact.Velocities[0] - contact.Velocities[1]) / havokScale;
                 std::lock_guard clashesLock(s_clashesLock);
                 if (s_clashes.size() < 16)
                     s_clashes.push_back({static_cast<uint32_t>(key >> 1), static_cast<uint8_t>(key & 1), contact.Point / havokScale, speed, contact.HiggsAt[other] / havokScale, true});
@@ -4154,6 +4162,7 @@ bool TakeClash(Clash& aOut) noexcept
             }
     FeelClash(aOut.OwnSide);
     aOut.Heard = SoundClash(aOut.Point);
+    SparkClash(aOut.Point);
     return true;
 }
 
@@ -4178,6 +4187,34 @@ bool IsWeaponTouchAt(const glm::vec3& acPoint) noexcept
         if (touch.At.time_since_epoch().count() && cNow - touch.At < std::chrono::milliseconds(500) && glm::distance(touch.Point, cHavokPoint) <= cTolerance)
             return true;
     return false;
+}
+
+bool SparkClash(const glm::vec3& acPoint) noexcept
+{
+    // The game's own sparks for a one-handed blade on metal (Skyrim.esm WPNBlade1HandVsMetaImpact, 0x4BB52), at the
+    // point, for a second. Asked for by Emma and Seen after the first fight (2026-10-06: "no blocking animation with
+    // sparks or whatever").
+    using TSpawnParticle = void*(TESObjectCELL* apCell, float aLifetime, const char* apModel, const NiPoint3& acRotation, const NiPoint3& acPosition, float aScale,
+                                 uint32_t aFlags, void* apTarget);
+    POINTER_SKYRIMSE(TSpawnParticle, s_spawnParticle, 29218, 29218); // BSTempEffectParticle::Spawn (CommonLibVR-NG)
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    TESObjectCELL* pCell = pPlayer ? pPlayer->GetParentCellEx() : nullptr;
+    if (!s_spawnParticle.Get() || !pCell)
+        return false;
+    NiPoint3 rotation;
+    rotation.x = rotation.y = rotation.z = 0.f;
+    NiPoint3 position;
+    position.x = acPoint.x;
+    position.y = acPoint.y;
+    position.z = acPoint.z;
+    const bool cSpawned = s_spawnParticle.Get()(pCell, 1.f, "Effects\\ImpactEffects\\FXMetalSparkImpactSlice.nif", rotation, position, 1.f, 7, nullptr) != nullptr;
+    static std::chrono::steady_clock::time_point s_nextSaid{};
+    if (const auto cNow = std::chrono::steady_clock::now(); cNow >= s_nextSaid)
+    {
+        s_nextSaid = cNow + std::chrono::seconds(5);
+        spdlog::info("Clash: sparks at ({:.0f}, {:.0f}, {:.0f}){}", acPoint.x, acPoint.y, acPoint.z, cSpawned ? "" : " not shown (the game made no effect)");
+    }
+    return cSpawned;
 }
 
 bool SoundClash(const glm::vec3& acPoint) noexcept
@@ -4634,6 +4671,7 @@ bool ObserveRemoteBodyMotion(Actor* apActor, const glm::vec3& acOwnerPosition) n
         std::chrono::steady_clock::time_point TouchedAt{};
         bool Reported = false; // this grab has been reported to the caller
         glm::vec3 OwnerLast{};
+        std::chrono::steady_clock::time_point SampledAt{};
         std::chrono::steady_clock::time_point OwnerMovedAt{};
     };
     static std::unordered_map<uint32_t, Watch> s_watch;
@@ -4652,6 +4690,14 @@ bool ObserveRemoteBodyMotion(Actor* apActor, const glm::vec3& acOwnerPosition) n
         watch.Placed = true;
         return false;
     }
+
+    // Looked at every 100 ms, as the owner's side looks at its own bodies (CaptureBodyPose, at the snapshot rate): the
+    // 4 units below were between two frames until 2026-10-06, 240 units a second at 60 fps, which a hand dragging a
+    // body never reaches -- Seen dragged one of Emma's bodies at 20:03 and his game never noticed (no hand-off line all
+    // evening), while the rig's test moved it in 15-unit jumps and always passed.
+    if (now - watch.SampledAt < std::chrono::milliseconds(100))
+        return false;
+    watch.SampledAt = now;
 
     const float step = glm::distance(at, watch.Last);
     watch.Last = at;

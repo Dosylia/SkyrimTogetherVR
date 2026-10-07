@@ -43,6 +43,8 @@ void FeelClash(uint8_t aSide) noexcept;
 //! Whether this player's HIGGS bodies, or what they hold, touched another player's weapon body at that point (game
 //! units) in the last half second: a hit landed there landed on the weapon, not on its owner.
 bool IsWeaponTouchAt(const glm::vec3& acPoint) noexcept;
+//! The game's sparks of a blade on metal, at a clash's point, for a second; false when none were made.
+bool SparkClash(const glm::vec3& acPoint) noexcept;
 //! The game's blade-block sound, at a clash's point; false when it could not be played.
 bool SoundClash(const glm::vec3& acPoint) noexcept;
 

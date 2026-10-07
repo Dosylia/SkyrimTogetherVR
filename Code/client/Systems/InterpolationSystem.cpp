@@ -49,6 +49,12 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
         static std::chrono::steady_clock::time_point s_nextLog = std::chrono::steady_clock::now() + 10s;
 
         const int64_t ahead = static_cast<int64_t>(movements.back().Tick) - static_cast<int64_t>(aTick);
+        // Remote players alone (Physics queue P4, 2026-10-06): their hands and weapons are what a sword fight meets,
+        // and the line above mixes in every NPC copy. How far ahead of playback their newest point is says how much
+        // of the playback delay the network really needs.
+        static TiltedPhoques::Vector<int64_t> s_playerAhead;
+        if (apActor && apActor->GetExtension() && apActor->GetExtension()->IsRemotePlayer() && s_playerAhead.size() < 8192)
+            s_playerAhead.push_back(ahead);
         s_maxAhead = std::max(s_maxAhead, ahead);
         s_minAhead = std::min(s_minAhead, ahead);
         ++s_updates;
@@ -69,6 +75,15 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
         {
             s_nextLog = now + 10s;
             spdlog::info("InterpDiag: {} updates, newest buffered tick {} to {} ms ahead of playback, {} updates had no future point", s_updates, s_minAhead, s_maxAhead, s_starved);
+            if (!s_playerAhead.empty())
+            {
+                std::sort(s_playerAhead.begin(), s_playerAhead.end());
+                const auto at = [](const double acShare) { return s_playerAhead[static_cast<size_t>(acShare * static_cast<double>(s_playerAhead.size() - 1))]; };
+                const auto starved = std::count_if(s_playerAhead.begin(), s_playerAhead.end(), [](const int64_t aAhead) { return aAhead < 0; });
+                spdlog::info("InterpDiag players: {} updates, newest point ahead of playback: lowest {}, 1% {}, 5% {}, median {} ms; {} had none ahead", s_playerAhead.size(),
+                             s_playerAhead.front(), at(0.01), at(0.05), at(0.5), starved);
+                s_playerAhead.clear();
+            }
 
             // The owner sends every actor it has every 100 ms, so an actor whose stream has stopped here is one the
             // server chose not to forward (its range check against the centre grid this client reported) or one the

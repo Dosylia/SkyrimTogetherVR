@@ -869,11 +869,20 @@ bool CharacterService::CanClaimOwnership(Player* apPlayer, const entt::entity aE
 {
     const uint32_t serverId = World::ToInteger(aEntity);
     const char* pReasonName = GetOwnershipTransferReasonName(aReason);
-    const auto view = m_world.view<OwnerComponent, CharacterComponent, CellIdComponent, FormIdComponent>();
+    const auto view = m_world.view<OwnerComponent, CharacterComponent, CellIdComponent>();
     const auto it = view.find(aEntity);
     if (it == view.end())
     {
-        spdlog::debug("Rejected {} from player {:X} because actor {:X} is unavailable or temporary", pReasonName, apPlayer->GetId(), serverId);
+        spdlog::info("Rejected {} from player {:X} because actor {:X} is unavailable", pReasonName, apPlayer->GetId(), serverId);
+        return false;
+    }
+    // A temporary actor (no form id the server keeps) is claimed only once it is a dead body: the claim is by server
+    // id, and a body changes hands that way already when its owner leaves (the player's game then sends its bones).
+    // Bodies of temporary actors are common -- encounter spawns, leveled NPCs -- and until 2026-10-06 nobody but their
+    // owner could ever move them for the others: the rig's bot NPC was asked for 17 times while dragged, never granted.
+    if (!m_world.try_get<FormIdComponent>(aEntity) && !view.get<CharacterComponent>(*it).IsDead())
+    {
+        spdlog::info("Rejected {} from player {:X} because actor {:X} is temporary and alive", pReasonName, apPlayer->GetId(), serverId);
         return false;
     }
 
@@ -883,11 +892,13 @@ bool CharacterService::CanClaimOwnership(Player* apPlayer, const entt::entity aE
     Player* const pCurrentOwner = ownerComponent.GetOwner();
     const uint32_t currentOwnerId = pCurrentOwner ? pCurrentOwner->GetId() : 0;
 
+    // Said at info: a body dragged by a player who does not own it is asked for every moment it moves, and when none of
+    // it was granted nothing in any log said why (rig, live-body-grab, 2026-10-06). Claims are rare otherwise (a party
+    // leader's game claiming what it loads).
     const auto reject = [&](const char* apReason)
     {
-        spdlog::debug(
-            "Rejected {} from player {:X} for actor {:X}: {} (requested epoch {}, current owner {:X}, current epoch {})",
-            pReasonName, apPlayer->GetId(), serverId, apReason, aExpectedOwnershipEpoch, currentOwnerId, ownerComponent.OwnershipEpoch);
+        spdlog::info("Rejected {} from player {:X} for {} {:X}: {} (requested epoch {}, current owner {:X}, current epoch {})", pReasonName, apPlayer->GetId(),
+                     characterComponent.IsDead() ? "dead body" : "actor", serverId, apReason, aExpectedOwnershipEpoch, currentOwnerId, ownerComponent.OwnershipEpoch);
         return false;
     };
 

@@ -78,6 +78,23 @@ wait 2
 log CHECK player dropped 0
 log CHECK logged Defender's rule: a hit of 30 from player \d+ is blocked
 
+# The window's early edge: a clash counts from 325 ms before the hit happened (300 ms before it, and it is seen 225 ms
+# after). Stamped 300 ms before the first clash a hit is blocked; 360 ms before it, it lands -- nothing of the player's
+# had touched this bot's weapons yet.
+log CHECK player mark
+wait 1
+hit other -30 atclash -300
+wait 2
+log CHECK player dropped 0
+log CHECK player mark
+wait 1
+hit other -30 atclash -360
+wait 2
+log CHECK player dropped 30
+
+# The other player's delay alone, every 10 s.
+log CHECK logged InterpDiag players: \d+ updates
+
 # One meeting, a clash or two -- not one every quarter second while the hand rests on the blade.
 expect clashes <= 4
 
@@ -86,6 +103,7 @@ clash other right
 wait 3
 log CHECK logged Clash from server \d+: their right hand met our right weapon
 log CHECK logged Clash from server \d+: heard, felt
+log CHECK logged Clash: sparks at \(
 
 holdpose off
 wait 2

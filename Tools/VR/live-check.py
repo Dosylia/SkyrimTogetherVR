@@ -704,15 +704,17 @@ class Run:
                     if not ref:
                         self.results.append((False, text.strip(), 'the drop was never announced by the client'))
                 elif text.startswith('DO walk '):
-                    # "DO walk <dx> <dy> <dz> <steps>": the player moves by that much, five steps a second, and drags
-                    # whatever a HIGGS hand holds along (a corpse grabbed with "DO grab npc").
+                    # "DO walk <dx> <dy> <dz> <steps> [<seconds a step>]": the player moves by that much a step, five steps a
+                    # second unless told otherwise, and drags whatever a HIGGS hand holds along (a corpse grabbed with
+                    # "DO grab npc"). Small fast steps are a hand dragging smoothly; big ones are jumps.
                     w = text.split()
                     step = [float(w[2]), float(w[3]), float(w[4])]
+                    pause = float(w[6]) if len(w) > 6 else 0.2
                     for _ in range(int(w[5])):
                         me = position('14')
                         if me:
                             papyrus('ObjectReference', 'SetPosition', '14', [me[0] + step[0], me[1] + step[1], me[2] + step[2]])
-                        time.sleep(0.2)
+                        time.sleep(pause)
                     print('   (walked %d steps of (%.0f, %.0f, %.0f))' % (int(w[5]), step[0], step[1], step[2]), flush=True)
                 elif text.startswith('DO grab dropped ') or text.startswith('DO grab npc '):
                     # "DO grab dropped left|right": HIGGS's hand takes what "DO drop ... here" dropped (HiggsVR.GrabObject;
@@ -751,6 +753,18 @@ class Run:
                         papyrus('ObjectReference', 'SetPosition', '14', [player_at[0] + delta[0], player_at[1] + delta[1], player_at[2] + delta[2]])
                         self.bring = (centre, ref)
                         print('   (player moved by (%.0f, %.0f, %.0f) so the held item meets the blade at (%.0f, %.0f, %.0f))' % (delta[0], delta[1], delta[2], centre[0], centre[1], centre[2]), flush=True)
+                elif text.startswith('DO sample npc '):
+                    # "DO sample npc <seconds>": where this game shows the bot's NPC, and how far from the player, every
+                    # half second (the bot, which owns it, keeps it where it stands).
+                    seconds = float(text.split()[3])
+                    form, _ = self.subject('npc')
+                    t0 = time.time()
+                    while time.time() - t0 < seconds:
+                        at = position(form) if form else None
+                        me = position('14')
+                        if at and me:
+                            print('   (npc at (%.0f, %.0f, %.0f), %.0f from the player)' % (at[0], at[1], at[2], math.dist(at, me)), flush=True)
+                        time.sleep(0.5)
                 elif text.startswith('DO sample held '):
                     # "DO sample held <seconds>": where the held item is against the blade centre and the player, every half second.
                     seconds = float(text.split()[3])
