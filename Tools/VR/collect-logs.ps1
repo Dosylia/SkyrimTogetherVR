@@ -1,5 +1,5 @@
-# Zips everything needed for a Skyrim Together VR bug report onto the Desktop.
-# Run it from the "Skyrim Together VR" tools folder (collect-logs.bat does that), or pass -ClientFolder.
+# Zips everything needed for an urSovngarde bug report onto the Desktop.
+# Run it from the mod's folder, next to urSovngarde.exe (collect-logs.bat does that), or pass -ClientFolder.
 param(
     [string]$ClientFolder = $PSScriptRoot
 )
@@ -7,8 +7,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $stamp = Get-Date -Format 'yyyy-MM-dd_HH-mm'
-$staging = Join-Path $env:TEMP "SkyrimTogetherVR-logs-$stamp"
-$zip = Join-Path ([Environment]::GetFolderPath('Desktop')) "SkyrimTogetherVR-logs-$stamp.zip"
+$staging = Join-Path $env:TEMP "urSovngarde-logs-$stamp"
+$zip = Join-Path ([Environment]::GetFolderPath('Desktop')) "urSovngarde-logs-$stamp.zip"
 New-Item -ItemType Directory -Force $staging | Out-Null
 
 function Add-File([string]$Path, [string]$Name = (Split-Path $Path -Leaf)) {
@@ -18,7 +18,7 @@ function Add-File([string]$Path, [string]$Name = (Split-Path $Path -Leaf)) {
     }
 }
 
-Write-Host "Collecting Skyrim Together VR logs..."
+Write-Host "Collecting urSovngarde logs..."
 
 # Client logs (the rotated ones hold earlier sessions of the same day).
 Get-ChildItem (Join-Path $ClientFolder 'logs') -Filter 'tp_client*.log' -ErrorAction SilentlyContinue | ForEach-Object { Add-File $_.FullName }
@@ -55,7 +55,7 @@ if (Test-Path $log) {
 }
 
 if (-not (Get-ChildItem $staging)) {
-    Write-Host "No logs found in $ClientFolder. Run this from the Skyrim Together VR tools folder."
+    Write-Host "No logs found in $ClientFolder. Run this from the mod's folder, next to urSovngarde.exe."
     Remove-Item $staging -Recurse -Force
     exit 1
 }

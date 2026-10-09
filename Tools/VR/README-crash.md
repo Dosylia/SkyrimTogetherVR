@@ -44,8 +44,8 @@ python Tools/VR/minidump.py <path to .dmp>
 ## The build has to match
 
 The launcher replaces the game executable, so a dump shows **one** ~90 MB module named
-`SkyrimTogetherVR.exe` holding the game's code and ours together. Module names cannot separate them. What
-can is the linker map (`build/windows/x64/release/SkyrimTogetherVR.map`, produced by the `/MAP` flag in
+`urSovngarde.exe` (`SkyrimTogetherVR.exe` before the rename of 2026-10-09) holding the game's code and ours together. Module names cannot separate them. What
+can is the linker map (`build/windows/x64/release/urSovngarde.map`, produced by the `/MAP` flag in
 `Code/immersive_launcher/xmake.lua`): it lists only our symbols, so an address it names is ours, and the
 game's image sits inside `?game_seg@@3PAEA`.
 

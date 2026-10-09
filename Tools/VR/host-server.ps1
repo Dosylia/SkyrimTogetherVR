@@ -1,18 +1,19 @@
-# Starts the Skyrim Together server and prints the address to give to friends.
-# Keep this next to SkyrimTogetherServer.exe (host-server.bat does the rest), or pass -ServerFolder.
+# Starts the urSovngarde server and prints the address to give to friends.
+# Keep this next to urSovngardeServer.exe (host-server.bat does the rest), or pass -ServerFolder.
 param(
     [string]$ServerFolder = $PSScriptRoot
 )
 
 $ErrorActionPreference = 'Stop'
 
-$exe = Join-Path $ServerFolder 'SkyrimTogetherServer.exe'
-if (-not (Test-Path $exe)) {
-    Write-Host "SkyrimTogetherServer.exe not found in $ServerFolder"
+# urSovngardeServer.exe since the rename of 2026-10-09; a folder not updated since still has SkyrimTogetherServer.exe.
+$exe = 'urSovngardeServer.exe', 'SkyrimTogetherServer.exe' | ForEach-Object { Join-Path $ServerFolder $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $exe) {
+    Write-Host "urSovngardeServer.exe not found in $ServerFolder"
     exit 1
 }
 
-if (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue) {
+if (Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue) {
     Write-Host "A server is already running. Close it first: two servers can't share the port."
     exit 1
 }

@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $log = Join-Path $root 'build\linux-check.log'
 
-if (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(SkyrimTogetherVR|SkyrimVR)$' }) {
+if (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(urSovngarde|SkyrimTogetherVR|SkyrimVR)$' }) {
     Write-Host 'The game is running; a Docker build now would cost it frames. Not started.' -ForegroundColor Yellow
     exit 2
 }
@@ -64,7 +64,7 @@ if ($code -eq 0) {
     Write-Host ('Linux unit tests: ' + ((@($tests | Where-Object { $_ -match 'passed|failed' }) | Select-Object -Last 1) -replace '^\s+', ''))
     if (-not ($tests -match 'All tests passed')) { $code = 3 }
 
-    $start = & cmd.exe /c 'docker run --rm st-linux-check bash -lc "cd /src/package/bin && cp ../lib/libSTServer.so . && (timeout 8 ./SkyrimTogetherServer 2>&1 || true) | grep -a Protocol | head -1" 2>&1'
+    $start = & cmd.exe /c 'docker run --rm st-linux-check bash -lc "cd /src/package/bin && cp ../lib/libSTServer.so . && (timeout 8 ./urSovngardeServer 2>&1 || true) | grep -a Protocol | head -1" 2>&1'
     $linuxProtocol = if ("$start" -match 'Protocol (\S+):') { $Matches[1] } else { '' }
     $bot = Join-Path $root 'build\windows\x64\release\STBot.exe'
     $winProtocol = ''

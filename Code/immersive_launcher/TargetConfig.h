@@ -29,7 +29,7 @@ static constexpr TargetConfig CurrentTarget{ L"Skyrim Special Edition", 489830, 
 static constexpr TargetConfig CurrentTarget{ L"Skyrim VR", 611670, 0x05000000 };
 #define TARGET_NAME L"SkyrimVR"
 #define TARGET_NAME_A "SkyrimVR"
-#define PRODUCT_NAME L"Skyrim Together VR"
+#define PRODUCT_NAME L"urSovngarde"
 #define SHORT_NAME L"Skyrim VR"
 #endif
 

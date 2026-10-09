@@ -221,6 +221,24 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
 
 ## Built, waiting for a real session
 
+- [ ] **Everything renamed urSovngarde** (Emma, 2026-10-09: "rename everything"). `SkyrimTogetherVR.exe` is
+      `urSovngarde.exe` (`set_basename`, `Code/immersive_launcher/xmake.lua`), `SkyrimTogetherServer.exe` is
+      `urSovngardeServer.exe` (Linux too: Dockerfile, linux.yml, release.yml), the release folders `urSovngarde` and
+      `urSovngarde mod`, the SteamVR dashboard tab and the HUD lines say urSovngarde, PRODUCT_NAME too. Kept on
+      purpose: `SkyrimTogether.esp` (saves name their plugins), `%LOCALAPPDATA%\SkyrimTogetherVR\connect.txt`, the log
+      line "Skyrim Together client, build" (the launcher, collect-logs and the crash tools read it), the window class
+      and internal code names (upstream merges). Moving over: `deploy-client.ps1` re-points the MO2 executable (MO2
+      closed; open, it leaves a copy under the old name) and sets the old exe aside; `update.ps1` writes the new names
+      and refreshes an old-named file only where one is (tested on an old and a new install); the release's update
+      zip carries the build under both names for an older update.bat; the launcher (`install/mod.rs` Layout) reads both
+      release layouts and both installs, re-points an MO2 entry in place and removes the old program. Found on the way:
+      the game runs inside the mod's program, so no SkyrimVR.exe process exists while the mod plays, and the launcher
+      never saw a game running; it now looks for both program names (`GAME_PROCESSES`). Built and deployed to Emma's
+      setup (v1.9.0-1-g651691e9-dirty.bdb57ff): her MO2 entry runs urSovngarde.exe (ini copied aside), the old exe kept
+      as `.old-20261009-210250`, the server in `E:\FUS\tools\urSovngarde Server` renamed and started once (5 s, fine).
+      Launcher: 94 tests (new: a release from before, an install from before moved to the new names, the MO2 entry
+      re-pointed once and not twice). Left: a launcher release before the mod release (launcher 0.3.2 finds the mod
+      only by the old name), a session with the new names, the website's install page at the mod release (brief).
 - [ ] **PvP damage that skips the defender's rule** (session of 2026-10-08, Emma hosting, both on v1.9.0). Sparks
       and the attacker's side of the rule work: 51 of Emma's swings that met Seen's blade were not sent, and Seen's
       game blocked 10 of the 42 that were. But none of Seen's 28 sword hits and 2 spell hits on Emma reached her

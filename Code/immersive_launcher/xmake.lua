@@ -66,7 +66,7 @@ target("SkyrimImmersiveLauncher")
     build_launcher()
 
 target("SkyrimImmersiveLauncherVR")
-    set_basename("SkyrimTogetherVR")
+    set_basename("urSovngarde")
     add_defines("TARGET_PREFIX=\"st\"")
     add_defines("SKYRIMVR")
     add_deps("SkyrimTogetherClientVR")

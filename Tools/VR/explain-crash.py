@@ -24,7 +24,7 @@ import os
 import re
 import sys
 
-DEFAULT_CLIENT = r'E:\FUS\tools\Skyrim Together VR\SkyrimTogetherVR.exe'
+DEFAULT_CLIENT = r'E:\FUS\tools\Skyrim Together VR\urSovngarde.exe'
 DEFAULT_LOG = r'E:\FUS\tools\Skyrim Together VR\logs\tp_client.log'
 BASE = 0x140000000
 

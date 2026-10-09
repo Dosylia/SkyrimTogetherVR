@@ -31,8 +31,9 @@ param(
 
 if ($Shortcut) { $NoConnect = $true }
 # The game's process: the launcher's own, or the game itself when another executable starts it.
-$gameProcess = if ($Shortcut) { 'SkyrimVR' } else { 'SkyrimTogetherVR' }
-$gamePattern = '^' + $gameProcess + '$'
+# The game runs inside the mod's program: urSovngarde.exe, SkyrimTogetherVR.exe before the rename of 2026-10-09.
+$gameProcess = if ($Shortcut) { @('SkyrimVR') } else { @('urSovngarde', 'SkyrimTogetherVR') }
+$gamePattern = '^(' + ($gameProcess -join '|') + ')$'
 
 $ErrorActionPreference = 'Stop'
 
@@ -129,7 +130,7 @@ function Show-Status {
         $(if ($health) { "frame $($health.frame), $($health.lastLifecycle)" } else { 'no answer' }), `
         $connected, `
         $(if (Test-Running '^vrserver$') { 'running' } else { 'closed' }), `
-        $(if (Test-Running '^SkyrimTogetherServer$') { 'running' } else { 'stopped' }))
+        $(if (Test-Running '^(urSovngardeServer|SkyrimTogetherServer)$') { 'running' } else { 'stopped' }))
 }
 
 function Copy-SavesAside {
@@ -148,7 +149,7 @@ function Copy-SavesAside {
 
 function Restore-Saves {
     if (-not (Test-Path -LiteralPath $savesCopy)) { return }
-    if (Test-Running '^(SkyrimTogetherVR|SkyrimVR)$') { Write-Host 'The game is still running; saves NOT put back yet.' -ForegroundColor Red; return }
+    if (Test-Running '^(urSovngarde|SkyrimTogetherVR|SkyrimVR)$') { Write-Host 'The game is still running; saves NOT put back yet.' -ForegroundColor Red; return }
     if (-not (Test-Path -LiteralPath $savesCopyDone)) {
         # Copying aside stopped halfway, before the game was started: the saves were never touched.
         Remove-Item -LiteralPath $savesCopy -Recurse -Force
@@ -192,7 +193,7 @@ function Stop-Everything {
         }
     }
 
-    if ($state -and $state.startedServer) { Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue | Stop-Process -Force }
+    if ($state -and $state.startedServer) { Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue | Stop-Process -Force }
 
     Restore-Saves
 
@@ -227,7 +228,7 @@ if ($Action -eq 'status') { Show-Status; return }
 if ($Action -eq 'down') { Stop-Everything; Show-Status; if ($script:downFailed) { exit 3 }; return }
 
 # ---- up ----
-if (Test-Running '^(SkyrimTogetherVR|SkyrimVR)$') { throw 'The game is already running. If that is a real session, leave it alone; otherwise run "down" first.' }
+if (Test-Running '^(urSovngarde|SkyrimTogetherVR|SkyrimVR)$') { throw 'The game is already running. If that is a real session, leave it alone; otherwise run "down" first.' }
 if (Test-Running '^(vrserver|vrmonitor)$') { throw 'SteamVR is already running. If the headset is in use, leave it alone; otherwise close it first.' }
 
 $startedServer = $false
@@ -244,8 +245,8 @@ try {
     $loaded = Select-String -Path $vrLog -Pattern "Driver 'null' finished adding tracked device with serial number 'CTRL2Serial'" -Quiet
     if (-not $loaded) { throw "SteamVR is up, but the null driver did not add its controllers (see $vrLog). Is the built driver_null.dll still in place?" }
 
-    if (-not $NoConnect -and -not (Test-Running '^SkyrimTogetherServer$')) {
-        Start-Process -FilePath (Join-Path $release 'SkyrimTogetherServer.exe') -WorkingDirectory $release -WindowStyle Hidden
+    if (-not $NoConnect -and -not (Test-Running '^(urSovngardeServer|SkyrimTogetherServer)$')) {
+        Start-Process -FilePath (Join-Path $release 'urSovngardeServer.exe') -WorkingDirectory $release -WindowStyle Hidden
         $startedServer = $true
         @{ startedServer = $true; save = $Save } | ConvertTo-Json | Set-Content $stateFile
         Start-Sleep -Seconds 4

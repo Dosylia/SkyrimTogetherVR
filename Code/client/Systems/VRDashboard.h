@@ -23,7 +23,7 @@ class IVROverlay;
  * @brief Shows the Skyrim Together UI as a SteamVR dashboard overlay.
  *
  * There is no game window to draw the overlay into on VR, so CEF renders the page offscreen at a fixed size and
- * the pixels go to a SteamVR dashboard tab ("Skyrim Together", opened with the headset's system button). The
+ * the pixels go to a SteamVR dashboard tab ("urSovngarde", opened with the headset's system button). The
  * texture lives on our own D3D11 device, which keeps this independent of the game's renderer and render thread.
  * SteamVR's laser pointer sends mouse events, and its virtual keyboard handles text fields.
  */

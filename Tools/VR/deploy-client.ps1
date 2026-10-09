@@ -28,8 +28,9 @@ if (-not $Destination) {
 }
 
 $release = (Resolve-Path (Join-Path $PSScriptRoot '..\..\build\windows\x64\release')).Path
-$exe = Join-Path $release 'SkyrimTogetherVR.exe'
-$pdb = Join-Path $release 'SkyrimTogetherVR.pdb'
+# urSovngarde.exe since the rename of 2026-10-09; SkyrimTogetherVR.exe before (an older build output may still hold it).
+$exe = Join-Path $release 'urSovngarde.exe'
+$pdb = Join-Path $release 'urSovngarde.pdb'
 
 foreach ($f in @($exe, $pdb)) {
     if (-not (Test-Path $f)) { Write-Host "Missing $f -- build first" -ForegroundColor Red; exit 2 }
@@ -75,18 +76,44 @@ foreach ($other in @('STServer.dll', 'STBot.exe')) {
 
 if (-not (Test-Path $Destination)) { Write-Host "No such folder: $Destination" -ForegroundColor Red; exit 2 }
 
-# Exactly one fallback is kept, so the folder never fills with old builds.
-Get-ChildItem -Path $Destination -Filter 'SkyrimTogetherVR.*.old-*' -ErrorAction SilentlyContinue | Remove-Item -Force
+# Exactly one fallback is kept, so the folder never fills with old builds. The old name goes aside too: left live,
+# an MO2 executable still pointing at it would run the old build.
+Get-ChildItem -Path $Destination -Filter '*.old-*' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(urSovngarde|SkyrimTogetherVR)\.' } | Remove-Item -Force
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-foreach ($name in @('SkyrimTogetherVR.exe', 'SkyrimTogetherVR.pdb')) {
+foreach ($name in @('urSovngarde.exe', 'urSovngarde.pdb', 'SkyrimTogetherVR.exe', 'SkyrimTogetherVR.pdb')) {
     $live = Join-Path $Destination $name
     if (Test-Path $live) { Move-Item $live "$live.old-$stamp" -Force }
 }
 
-Copy-Item $exe (Join-Path $Destination 'SkyrimTogetherVR.exe') -Force
-Copy-Item $pdb (Join-Path $Destination 'SkyrimTogetherVR.pdb') -Force
+Copy-Item $exe (Join-Path $Destination 'urSovngarde.exe') -Force
+Copy-Item $pdb (Join-Path $Destination 'urSovngarde.pdb') -Force
 
-$deployed = Join-Path $Destination 'SkyrimTogetherVR.exe'
+# The MO2 executable that runs the old name is pointed at the new one, MO2 closed (it writes its own settings back
+# when it closes, and the launcher never closes it). Open, a copy under the old name keeps Play on the new build
+# until the next deploy with MO2 closed.
+$instance = Split-Path (Split-Path $Destination -Parent) -Parent
+$mo2Ini = Join-Path $instance 'ModOrganizer.ini'
+if (Test-Path $mo2Ini) {
+    # MO2 writes "12\binary=E:/FUS/tools/Skyrim Together VR/SkyrimTogetherVR.exe": an entry for this folder's old exe.
+    $oldExe = (Join-Path $Destination 'SkyrimTogetherVR.exe').ToLowerInvariant()
+    $lines = [System.IO.File]::ReadAllLines($mo2Ini)
+    $hits = @(for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\d+\\binary=(.+)$' -and ($Matches[1].Trim() -replace '/', '\').ToLowerInvariant() -eq $oldExe) { $i }
+    })
+    if ($hits.Count -gt 0) {
+        if (Get-Process ModOrganizer -ErrorAction SilentlyContinue) {
+            Copy-Item $exe (Join-Path $Destination 'SkyrimTogetherVR.exe') -Force
+            Write-Host "MO2 is open: its executable still points at SkyrimTogetherVR.exe, a copy of this build for now. Deploy again with MO2 closed to point it at urSovngarde.exe." -ForegroundColor Yellow
+        } else {
+            Copy-Item $mo2Ini "$mo2Ini.bak-$stamp"
+            foreach ($i in $hits) { $lines[$i] = $lines[$i] -replace 'SkyrimTogetherVR\.exe\s*$', 'urSovngarde.exe' }
+            [System.IO.File]::WriteAllLines($mo2Ini, $lines, (New-Object System.Text.UTF8Encoding $false))
+            Write-Host "MO2's executable now runs urSovngarde.exe (ModOrganizer.ini copied aside as .bak-$stamp)." -ForegroundColor Green
+        }
+    }
+}
+
+$deployed = Join-Path $Destination 'urSovngarde.exe'
 $deployedSize = (Get-Item $deployed).Length
 $srcHash = (Get-FileHash $exe -Algorithm SHA256).Hash
 $dstHash = (Get-FileHash $deployed -Algorithm SHA256).Hash

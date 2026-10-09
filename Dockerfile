@@ -40,8 +40,8 @@ WORKDIR /st-server
 
 COPY --from=builder \
     /src/package/lib/libSTServer.so \
-    /src/package/bin/SkyrimTogetherServer \
+    /src/package/bin/urSovngardeServer \
     /st-server/
 
-ENTRYPOINT ["./SkyrimTogetherServer"]
+ENTRYPOINT ["./urSovngardeServer"]
 EXPOSE 10578/udp

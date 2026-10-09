@@ -5,7 +5,7 @@ Two things make the usual approach fail here:
   - dbghelp would not load the PDB (SymLoadModuleEx reported the module deferred, then reported every known
     function as not found), so symbolising through a debugger API was abandoned on 2026-09-27.
   - The launcher replaces the game's executable, so a crash dump shows one ~90 MB module at 0x140000000
-    named SkyrimTogetherVR.exe that holds the game's code *and* ours. No module name can separate them.
+    named urSovngarde.exe (SkyrimTogetherVR.exe before the rename of 2026-10-09) that holds the game's code *and* ours. No module name can separate them.
 
 The linker map sidesteps both. It is a plain text list of every symbol the linker placed, with its final
 address, and it only lists ours -- so an address it can name is our code, and an address past the end of the
@@ -29,7 +29,10 @@ import sys
 import bisect
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEFAULT_MAP = os.path.join(REPO, 'build', 'windows', 'x64', 'release', 'SkyrimTogetherVR.map')
+# urSovngarde.map since the rename of 2026-10-09; an older build output holds SkyrimTogetherVR.map.
+DEFAULT_MAP = os.path.join(REPO, 'build', 'windows', 'x64', 'release', 'urSovngarde.map')
+if not os.path.exists(DEFAULT_MAP):
+    DEFAULT_MAP = os.path.join(REPO, 'build', 'windows', 'x64', 'release', 'SkyrimTogetherVR.map')
 
 LINE = re.compile(r'^\s+[0-9a-fA-F]{4}:[0-9a-fA-F]{8}\s+(\S+)\s+([0-9a-fA-F]{16})\s')
 STAMP = re.compile(r'^\s*Timestamp is ([0-9a-fA-F]{8})')

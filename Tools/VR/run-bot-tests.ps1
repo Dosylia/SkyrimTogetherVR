@@ -67,7 +67,7 @@ $release = Join-Path $PSScriptRoot '..\..\build\windows\x64\release'
 $release = (Resolve-Path $release).Path
 
 $bot = Join-Path $release 'STBot.exe'
-$serverExe = Join-Path $release 'SkyrimTogetherServer.exe'
+$serverExe = Join-Path $release 'urSovngardeServer.exe'
 foreach ($needed in @($bot, $serverExe)) {
     if (-not (Test-Path $needed)) { throw "Not built: $needed. Run: xmake build STBot SkyrimTogetherServer SkyrimServerRunner" }
 }
@@ -79,7 +79,7 @@ $versionFile = Join-Path $release '..\..\..\BuildVersion.txt'
 $botVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { 'unknown' }
 
 $startedServer = $false
-if (-not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
+if (-not (Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
     Write-Host "Starting a server" -ForegroundColor Cyan
     Start-Process -FilePath $serverExe -WorkingDirectory $release -WindowStyle Hidden | Out-Null
     $startedServer = $true
@@ -92,7 +92,7 @@ if (-not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
             $probe = New-Object System.Net.Sockets.UdpClient
             $probe.Connect($serverHost, [int]$serverPort)
             $probe.Close()
-            if (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue) { break }
+            if (Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue) { break }
         } catch { }
         Start-Sleep -Milliseconds 200
     }
@@ -158,7 +158,7 @@ if ($SelfCheck) {
 
     if (-not $selfOk) {
         if ($hostBot -and -not $hostBot.HasExited) { Stop-Process -Id $hostBot.Id -Force -ErrorAction SilentlyContinue }
-        if ($startedServer -and -not $KeepServer) { Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
+        if ($startedServer -and -not $KeepServer) { Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
         Write-Host "`nHarness self-check FAILED: do not trust any green result until this is fixed" -ForegroundColor Red
         exit 2
     }
@@ -245,7 +245,7 @@ finally {
     }
     if ($hostBot -and -not $hostBot.HasExited) { Stop-Process -Id $hostBot.Id -Force -ErrorAction SilentlyContinue }
     if ($startedServer -and -not $KeepServer) {
-        Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Write-Host "Server stopped" -ForegroundColor DarkGray
     }
 }

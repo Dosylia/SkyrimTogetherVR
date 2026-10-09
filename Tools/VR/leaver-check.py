@@ -57,7 +57,7 @@ def read(log):
 
 
 def main():
-    if running('SkyrimTogetherVR.exe') or running('SkyrimVR.exe'):
+    if running('urSovngarde.exe') or running('SkyrimTogetherVR.exe') or running('SkyrimVR.exe'):
         print('The game is running; this test restarts the server. Not started.')
         return 2
 

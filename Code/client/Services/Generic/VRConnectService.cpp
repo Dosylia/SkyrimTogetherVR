@@ -81,7 +81,7 @@ void VRConnectService::Toggle() noexcept
         // Set before closing: Close() reports the disconnection synchronously, and it must not schedule a retry.
         m_state = State::kIdle;
         m_transport.Close();
-        Utils::ShowHudMessage("Skyrim Together: disconnected (F6 to connect again)");
+        Utils::ShowHudMessage("urSovngarde: disconnected (F6 to connect again)");
         return;
     }
 
@@ -98,14 +98,14 @@ bool VRConnectService::CheckInstall() noexcept
     if (!IsScriptExtenderLoaded())
     {
         spdlog::error("VRConnectService: SKSE VR is not loaded");
-        Utils::ShowHudMessage("Skyrim Together: SKSE VR is not loaded, check the SKSE VR install");
+        Utils::ShowHudMessage("urSovngarde: SKSE VR is not loaded, check the SKSE VR install");
     }
 
     auto* pGrids = INISettingCollection::Get()->GetSetting("uGridsToLoad:General");
     if (pGrids && pGrids->data != 5)
     {
         spdlog::error("VRConnectService: uGridsToLoad is {}, the server requires 5", pGrids->data);
-        Utils::ShowHudMessage("Skyrim Together: set uGridsToLoad=5 in SkyrimPrefs.ini, the server refuses other values");
+        Utils::ShowHudMessage("urSovngarde: set uGridsToLoad=5 in SkyrimPrefs.ini, the server refuses other values");
         ok = false;
     }
 
@@ -123,7 +123,7 @@ void VRConnectService::StartAttempt() noexcept
 {
     if (!IsInGame())
     {
-        Utils::ShowHudMessage("Skyrim Together: load a save before connecting");
+        Utils::ShowHudMessage("urSovngarde: load a save before connecting");
         m_state = State::kIdle;
         return;
     }
@@ -132,13 +132,13 @@ void VRConnectService::StartAttempt() noexcept
     if (!LoadConfig(config))
     {
         spdlog::warn("VRConnectService: no server in %LOCALAPPDATA%\\SkyrimTogetherVR\\connect.txt");
-        Utils::ShowHudMessage("Skyrim Together: no server set, write it in %LOCALAPPDATA%\\SkyrimTogetherVR\\connect.txt");
+        Utils::ShowHudMessage("urSovngarde: no server set, join from the urSovngarde launcher");
         m_state = State::kIdle;
         return;
     }
 
     spdlog::info("VRConnectService: connecting to {} (attempt {})", config.Address.c_str(), m_failedAttempts + 1);
-    Utils::ShowHudMessage(TiltedPhoques::String("Skyrim Together: connecting to ") + config.Address);
+    Utils::ShowHudMessage(TiltedPhoques::String("urSovngarde: connecting to ") + config.Address);
 
     m_state = State::kConnecting;
     m_attemptStarted = std::chrono::steady_clock::now();
@@ -171,7 +171,7 @@ void VRConnectService::OnUpdate(const UpdateEvent&) noexcept
             Config config;
             if (!LoadConfig(config))
             {
-                Utils::ShowHudMessage("Skyrim Together: no server set, run setup-connect.bat in the Skyrim Together VR folder");
+                Utils::ShowHudMessage("urSovngarde: no server set, join from the urSovngarde launcher or run setup-connect.bat in the mod's folder");
                 return;
             }
         }
@@ -217,7 +217,7 @@ void VRConnectService::OnDisconnected(const DisconnectedEvent&) noexcept
     m_state = State::kWaiting;
     m_nextAttempt = std::chrono::steady_clock::now() + delay;
 
-    const auto message = fmt::format("Skyrim Together: {}, trying again in {} s", wasOnline ? "connection lost" : "server not reachable", delay.count());
+    const auto message = fmt::format("urSovngarde: {}, trying again in {} s", wasOnline ? "connection lost" : "server not reachable", delay.count());
     spdlog::info("VRConnectService: {}", message);
     Utils::ShowHudMessage(message.c_str());
 }

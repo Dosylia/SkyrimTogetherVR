@@ -1,4 +1,4 @@
-# Packages a Skyrim Together VR release zip: client tools folder, server, game files and the guide.
+# Packages an urSovngarde release zip: client tools folder, server, game files and the guide.
 #   powershell -ExecutionPolicy Bypass -File Tools\VR\make-release.ps1
 #   ... -ListOnly    shows which files of the client folder would go in, and stops (works on an uncommitted tree)
 param(
@@ -13,7 +13,8 @@ $ErrorActionPreference = 'Stop'
 # What of the client folder goes into a release: the tools folder as it runs, minus anything local to one PC. The
 # 2026-10-05 zip carried a behaviours zip from Emma's folder and the linker's .map (the launcher's install test,
 # 2026-10-07): a .map and a stray .zip are never part of the client.
-$skip = @('logs', 'cache')
+# The programs' old names (before 2026-10-09) and the build's own files are left out too: those come from the build.
+$skip = @('logs', 'cache', 'SkyrimTogetherVR.exe', 'SkyrimTogetherVR.pdb', 'urSovngarde.exe', 'urSovngarde.pdb')
 $clientFiles = @(Get-ChildItem $ClientFolder | Where-Object {
     $skip -notcontains $_.Name -and
     $_.Name -notmatch '\.old|\.running|^crash_.*\.dmp$|\.threaddiag\.|\.map$|\.zip$'
@@ -35,8 +36,9 @@ if (-not $version -or $version -like 'unknown*') { throw "No build version found
 # version means uncommitted changes, and such a build must not be handed out.
 if ($version -like '*dirty*') { throw "The build is from an uncommitted tree ($version); commit and build again before releasing." }
 # The files players download carry the mod's name (urSovngarde-v1.9.0.zip, -update.zip, -server.zip, Emma
-# 2026-10-07); the names inside them (SkyrimTogetherVR.exe, the "Skyrim Together VR" folder) stay, as MO2 setups,
-# update.bat and the launcher point at them.
+# 2026-10-07), and since 2026-10-09 so does everything inside (Emma: "rename everything"): the programs
+# urSovngarde.exe and urSovngardeServer.exe, the folders "urSovngarde" and "urSovngarde mod". SkyrimTogether.esp keeps
+# its name: saves record their plugins by name. The launcher reads both layouts.
 $name = "urSovngarde-$version"
 $standaloneName = $name
 $staging = Join-Path $OutputFolder $name
@@ -45,10 +47,11 @@ New-Item -ItemType Directory -Force $staging | Out-Null
 
 # Client: the tools folder as it runs, minus anything local to one PC. The exe comes from the build, so a
 # release never ships a stale client.
-$client = Join-Path $staging 'Skyrim Together VR'
+$client = Join-Path $staging 'urSovngarde'
 New-Item -ItemType Directory -Force $client | Out-Null
 $clientFiles | ForEach-Object { Copy-Item $_.FullName (Join-Path $client $_.Name) -Recurse }
-Copy-Item (Join-Path $buildFolder 'SkyrimTogetherVR.exe') $client -Force
+Copy-Item (Join-Path $buildFolder 'urSovngarde.exe') $client -Force
+Copy-Item (Join-Path $buildFolder 'urSovngarde.pdb') $client -Force
 Copy-Item (Join-Path $buildFolder 'TPProcess.exe') $client -Force
 Copy-Item (Join-Path $PSScriptRoot 'collect-logs.*') $client
 Copy-Item (Join-Path $PSScriptRoot 'setup-connect.*') $client
@@ -57,7 +60,8 @@ Copy-Item (Join-Path $PSScriptRoot 'update.*') $client
 # Server, with default settings: never the host's password.
 $server = Join-Path $staging 'Server'
 New-Item -ItemType Directory -Force (Join-Path $server 'config') | Out-Null
-foreach ($file in 'SkyrimTogetherServer.exe', 'SkyrimTogetherServer.exe.manifest', 'STServer.dll') {
+# The manifest is inside the program (server_runner.rc); the .manifest file next to it was a leftover of March 2026.
+foreach ($file in 'urSovngardeServer.exe', 'STServer.dll') {
     Copy-Item (Join-Path $buildFolder $file) $server
 }
 (Get-Content (Join-Path $buildFolder 'config\STServer.ini')) -replace '^(sPassword|sAdminPassword)=.*$', '$1=' |
@@ -65,7 +69,7 @@ foreach ($file in 'SkyrimTogetherServer.exe', 'SkyrimTogetherServer.exe.manifest
 Copy-Item (Join-Path $PSScriptRoot 'host-server.*') $server
 
 # Game files, installed as an MO2 mod.
-Copy-Item (Join-Path $RepoRoot 'GameFiles\Skyrim') (Join-Path $staging 'Skyrim Together mod') -Recurse
+Copy-Item (Join-Path $RepoRoot 'GameFiles\Skyrim') (Join-Path $staging 'urSovngarde mod') -Recurse
 
 # Never VR_MULTIPLAYER_GUIDE.md: it carries the host's public IP, PC name and router settings.
 Copy-Item (Join-Path $PSScriptRoot 'README-release.md') (Join-Path $staging 'README.md')
@@ -81,7 +85,18 @@ Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip
 # unlike the full zip. The pdb goes with it, or crash logs from the new exe name the wrong functions.
 $updateZip = Join-Path $OutputFolder "$name-update.zip"
 if (Test-Path $updateZip) { Remove-Item $updateZip -Force }
-Compress-Archive -Path (Join-Path $buildFolder 'SkyrimTogetherVR.exe'), (Join-Path $buildFolder 'SkyrimTogetherVR.pdb') -DestinationPath $updateZip
+# The same build under the programs' old names too, for the release that renamed them: an update.bat of an earlier
+# release only knows the old names, and an MO2 executable may still point at one. The new update.bat only replaces an
+# old-named file that is already there.
+$bridge = Join-Path $OutputFolder "$name-update-bridge"
+if (Test-Path $bridge) { Remove-Item $bridge -Recurse -Force }
+New-Item -ItemType Directory -Force $bridge | Out-Null
+Copy-Item (Join-Path $buildFolder 'urSovngarde.exe') $bridge
+Copy-Item (Join-Path $buildFolder 'urSovngarde.pdb') $bridge
+Copy-Item (Join-Path $buildFolder 'urSovngarde.exe') (Join-Path $bridge 'SkyrimTogetherVR.exe')
+Copy-Item (Join-Path $buildFolder 'urSovngarde.pdb') (Join-Path $bridge 'SkyrimTogetherVR.pdb')
+Compress-Archive -Path (Join-Path $bridge '*') -DestinationPath $updateZip
+Remove-Item $bridge -Recurse -Force
 
 # The server on its own, for whoever hosts (on a machine without the game too): the whole server folder, without
 # the 165 MB full zip.

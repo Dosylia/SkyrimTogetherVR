@@ -148,7 +148,7 @@ bool VRDashboard::InitializeOverlay() noexcept
         return false;
     }
 
-    const auto overlayError = m_pOverlay->CreateDashboardOverlay("skyrimtogether.menu", "Skyrim Together", &m_handle, &m_thumbnailHandle);
+    const auto overlayError = m_pOverlay->CreateDashboardOverlay("skyrimtogether.menu", "urSovngarde", &m_handle, &m_thumbnailHandle);
     if (overlayError != vr::VROverlayError_None)
     {
         spdlog::error("VRDashboard: CreateDashboardOverlay failed ({})", static_cast<int>(overlayError));

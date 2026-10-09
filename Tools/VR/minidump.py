@@ -5,7 +5,7 @@ crash handler only labels the stack addresses it happens to recognise. A minidum
 and the thread stacks, which is enough to attribute every address properly.
 
 One wrinkle is specific to this project: the launcher *replaces* the game's executable, loading the game
-image inside its own module, so a dump shows a single ~90 MB module named SkyrimTogetherVR.exe holding both
+image inside its own module, so a dump shows a single ~90 MB module named urSovngarde.exe (SkyrimTogetherVR.exe before the rename of 2026-10-09) holding both
 the game's code and ours. Module names therefore cannot tell the two apart -- see mapsym.py, which can.
 
 Usage:

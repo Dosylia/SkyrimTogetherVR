@@ -34,8 +34,8 @@ jobs:
           expected_assets=(
             "SkyrimTogether-${version}-windows-x64.zip"
             "SkyrimTogether-${version}-windows-x64-debug-symbols.zip"
-            "SkyrimTogetherServer-${version}-linux-amd64.tar.gz"
-            "SkyrimTogetherServer-${version}-linux-arm64.tar.gz"
+            "urSovngardeServer-${version}-linux-amd64.tar.gz"
+            "urSovngardeServer-${version}-linux-arm64.tar.gz"
           )
 
           for asset in "${expected_assets[@]}"; do

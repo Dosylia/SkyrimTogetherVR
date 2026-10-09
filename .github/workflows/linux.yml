@@ -79,15 +79,15 @@ jobs:
               run: |
                   xmake install -o packaged
                   install -d release-stage
-                  install -m 755 packaged/bin/SkyrimTogetherServer release-stage/
+                  install -m 755 packaged/bin/urSovngardeServer release-stage/
                   install -m 644 packaged/lib/libSTServer.so release-stage/
 
             - name: Verify Linux binary architecture
               run: |
-                  file release-stage/SkyrimTogetherServer
+                  file release-stage/urSovngardeServer
                   case "${{ matrix.arch }}" in
-                    amd64) file release-stage/SkyrimTogetherServer | grep -Eq 'x86-64|x86_64' ;;
-                    arm64) file release-stage/SkyrimTogetherServer | grep -Eqi 'aarch64|arm64' ;;
+                    amd64) file release-stage/urSovngardeServer | grep -Eq 'x86-64|x86_64' ;;
+                    arm64) file release-stage/urSovngardeServer | grep -Eqi 'aarch64|arm64' ;;
                   esac
 
             - name: Create Linux release archive
@@ -97,7 +97,7 @@ jobs:
                   echo "ARTIFACT_VERSION=$version" >> "$GITHUB_ENV"
                   mkdir -p release-assets
                   tar -C release-stage -czf \
-                    "release-assets/SkyrimTogetherServer-${version}-linux-${{ matrix.arch }}.tar.gz" \
+                    "release-assets/urSovngardeServer-${version}-linux-${{ matrix.arch }}.tar.gz" \
                     .
 
             # Upload artifacts
@@ -108,4 +108,4 @@ jobs:
                   name: release-asset-linux-${{ matrix.arch }}
                   retention-days: 1
                   if-no-files-found: error
-                  path: release-assets/SkyrimTogetherServer-${{ env.ARTIFACT_VERSION }}-linux-${{ matrix.arch }}.tar.gz
+                  path: release-assets/urSovngardeServer-${{ env.ARTIFACT_VERSION }}-linux-${{ matrix.arch }}.tar.gz

@@ -73,7 +73,8 @@ def check_map_matches(d, map_path):
     ring". A wrong answer delivered confidently is worse than no answer.
     """
     want = mapsym.timestamp(map_path)
-    got = d.module_timestamp('SkyrimTogetherVR.exe')
+    # urSovngarde.exe since the rename of 2026-10-09; a dump from an older build names SkyrimTogetherVR.exe.
+    got = d.module_timestamp('urSovngarde.exe') or d.module_timestamp('SkyrimTogetherVR.exe')
     if want is None or got is None:
         return True, None
     if want == got:

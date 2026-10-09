@@ -59,7 +59,7 @@ function Assert-VersionsMatch($botExe, $release, [int]$SkipLines = 0) {
 
 $release = (Resolve-Path (Join-Path $PSScriptRoot '..\..\build\windows\x64\release')).Path
 $bot = Join-Path $release 'STBot.exe'
-$serverExe = Join-Path $release 'SkyrimTogetherServer.exe'
+$serverExe = Join-Path $release 'urSovngardeServer.exe'
 
 # The bot reads its scripts from the release folder, and nothing in the build puts them there. They were copied
 # by hand, which drifted both ways: the doorloss pair existed only in the release folder and was never added to
@@ -75,11 +75,11 @@ $logBeforeStart = 0
 if (Test-Path $serverLogPath) { $logBeforeStart = @(Get-Content $serverLogPath).Count }
 
 $startedServer = $false
-if (-not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
+if (-not (Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
     Start-Process -FilePath $serverExe -WorkingDirectory $release -WindowStyle Hidden | Out-Null
     $startedServer = $true
     $deadline = (Get-Date).AddSeconds(30)
-    while ((Get-Date) -lt $deadline -and -not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
+    while ((Get-Date) -lt $deadline -and -not (Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
         Start-Sleep -Milliseconds 200
     }
 
@@ -95,12 +95,12 @@ if (-not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
             $skip = if ($logBeforeStart -gt $lines.Count) { 0 } else { $logBeforeStart }
             if ($lines | Select-Object -Skip $skip | Select-String -Pattern 'started on port' -Quiet) { $started = $true; break }
         }
-        if (-not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) { break }
+        if (-not (Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue)) { break }
         Start-Sleep -Milliseconds 250
     }
     if (-not $started) {
         Write-Host "The server did not come up: it wrote no 'started on port' line." -ForegroundColor Red
-        if (-not (Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
+        if (-not (Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue)) {
             Write-Host "  It has already exited. The usual cause is STServer.dll and the runner built apart -- rebuild everything in one go." -ForegroundColor Yellow
         }
         exit 1
@@ -189,7 +189,7 @@ if (Test-Path $serverLogPath) {
 }
 
 if ($startedServer -and -not $KeepServer) {
-    Get-Process SkyrimTogetherServer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process urSovngardeServer, SkyrimTogetherServer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
 if ($failures) { Write-Host "`n$($Pairs.Count) pairs, $failures halves failed" -ForegroundColor Red; exit 1 }
