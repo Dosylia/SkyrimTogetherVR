@@ -10,7 +10,7 @@
 #
 # The key: a free VirusTotal account's API key (virustotal.com, profile menu, API key), saved as the only text of
 # %USERPROFILE%\.str-vt-key. It is read from there and never printed; it never goes in the repo. A free key allows
-# 4 calls a minute, so a whole release takes 10 to 20 minutes.
+# 4 calls a minute, so a whole release (15 files) takes 15 to 25 minutes.
 #
 # Uploading shares a file with VirusTotal's partners and its paying users: only for files that will be public anyway.
 param(
@@ -26,8 +26,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# What to scan: the three zips make-release.ps1 wrote, and our four programs from inside them, because a vendor's
-# false-positive form wants the very file it flagged.
+# What to scan: the three zips make-release.ps1 wrote, our four programs from inside them, because a vendor's
+# false-positive form wants the very file it flagged, and the helper scripts one by one: a zip's result does not say
+# which file inside it was flagged, and the .bat files start PowerShell with "-ExecutionPolicy Bypass", a pattern some
+# engines distrust (2026-10-09: no scan had looked at them alone yet).
 $label = $null
 # Through powershell -File, "-Path a.zip,b.exe" arrives as one string.
 $Path = @($Path | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
@@ -44,6 +46,12 @@ if (-not $Path) {
         (Join-Path $staging 'urSovngarde\TPProcess.exe'),
         (Join-Path $staging 'Server\urSovngardeServer.exe'),
         (Join-Path $staging 'Server\STServer.dll'))
+    foreach ($helper in 'collect-logs', 'setup-connect', 'update') {
+        $Path += Join-Path $staging "urSovngarde\$helper.bat"
+        $Path += Join-Path $staging "urSovngarde\$helper.ps1"
+    }
+    $Path += Join-Path $staging 'Server\host-server.bat'
+    $Path += Join-Path $staging 'Server\host-server.ps1'
     $missing = @($Path | Where-Object { -not (Test-Path $_) })
     if ($missing) { throw ("Not found (run make-release.ps1 for this build first):`n  " + ($missing -join "`n  ")) }
 }
