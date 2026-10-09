@@ -1149,6 +1149,26 @@ bool TP_MAKE_THISCALL(HookDamageActor, Actor, float aDamage, Actor* apHitter, bo
                 return false;
         }
 
+        // TEMPORARY (2026-10-08): this game's own hits on this player from another player's copy (its sword body, its
+        // spells), which no defender's rule weighs. On 2026-10-08 Emma lost health every frame to Seen's Sparks here
+        // while his game never counted that spell on her. Summed per second: a concentration spell hits each frame.
+        if (const ActorExtension* pHitterExtension = apHitter ? apHitter->GetExtension() : nullptr; pHitterExtension && pHitterExtension->IsRemotePlayer())
+        {
+            static float s_damage = 0.f;
+            static uint32_t s_hits = 0;
+            static auto s_since = std::chrono::steady_clock::now();
+            s_damage += realDamage;
+            ++s_hits;
+            if (const auto cNow = std::chrono::steady_clock::now(); cNow - s_since >= std::chrono::seconds(1))
+            {
+                spdlog::info("PvP: this game hit us with player copy {:X}: {} hit(s), {:.0f} damage since the last such line {} ms ago (not weighed by the defender's rule)", apHitter->formID,
+                             s_hits, s_damage, std::chrono::duration_cast<std::chrono::milliseconds>(cNow - s_since).count());
+                s_damage = 0.f;
+                s_hits = 0;
+                s_since = cNow;
+            }
+        }
+
         World::Get().GetRunner().Trigger(HealthChangeEvent(apThis->formID, -realDamage));
         return TiltedPhoques::ThisCall(RealDamageActor, apThis, aDamage, apHitter, aKillMove);
     }

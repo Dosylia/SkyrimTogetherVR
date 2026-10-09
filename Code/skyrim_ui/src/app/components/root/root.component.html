@@ -15,6 +15,14 @@
     class="app-root-controls"
     [class.background-element]="view$ | async"
   >
+    <!-- urSovngarde's mark, as on the website and in the launcher. -->
+    <div class="app-root-brand">
+      <span class="app-root-brand-sigil" aria-hidden="true"></span>
+      <div>
+        <p class="app-root-brand-name"><span>ur</span>Sovngarde</p>
+        <p class="app-root-brand-tagline">Co-op for Skyrim VR</p>
+      </div>
+    </div>
     <app-window border="strip" class="app-root-menu">
       <button
         *ngIf="!(connected$ | async) && !(connectionInProgress$ | async)"

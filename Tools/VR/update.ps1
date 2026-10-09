@@ -1,6 +1,6 @@
 # Applies a Skyrim Together VR update zip without closing Mod Organizer 2 or the server window's folder.
 # Keep this next to SkyrimTogetherVR.exe (update.bat does the rest). Drag the update zip onto update.bat,
-# or run:  update.bat "path\to\SkyrimTogetherVR-...-update.zip"
+# or run:  update.bat "path\to\urSovngarde-...-update.zip"
 #
 # Client files (SkyrimTogetherVR.exe, SkyrimTogetherVR.pdb) go into this folder. Server files
 # (SkyrimTogetherServer.exe, its .manifest, STServer.dll) go into the folder that holds SkyrimTogetherServer.exe:

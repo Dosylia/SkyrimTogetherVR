@@ -3593,6 +3593,22 @@ void CharacterService::SendClashes() noexcept
         const auto it = std::find_if(view.begin(), view.end(), [&view, &clash](auto entity) { return view.get<FormIdComponent>(entity).Id == clash.FormId; });
         if (it == view.end())
             continue;
+        // His weapon on a hand holding no weapon or shield is a hit on the hand, not a parry (Emma, 2026-10-09): not
+        // weighed by the defender's rule, not felt, heard nor sent. Said at most every 5 s.
+        if (!clash.Parries)
+        {
+            static uint32_t s_bare = 0;
+            static auto s_nextBareSaid = std::chrono::steady_clock::now();
+            ++s_bare;
+            if (const auto cNow = std::chrono::steady_clock::now(); cNow >= s_nextBareSaid)
+            {
+                spdlog::info("Clash: {} touch(es) of the weapon of {:X} on our {} holding no weapon or shield since the last such line; no parry", s_bare, clash.FormId,
+                             clash.OwnSide == 0 ? "left hand" : clash.OwnSide == 1 ? "right hand" : "hand");
+                s_bare = 0;
+                s_nextBareSaid = cNow + std::chrono::seconds(5);
+            }
+            continue;
+        }
         // Every touch is weighed by the defender's rule (ActorValueService); only a meeting is felt, heard and sent.
         const uint64_t cTick = m_transport.GetClock().GetCurrentTick();
         m_dispatcher.trigger(ClashEvent{clash.FormId, cTick});

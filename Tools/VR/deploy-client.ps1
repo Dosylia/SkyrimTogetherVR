@@ -48,8 +48,12 @@ if ($size -lt $MinimumBytes) {
 function Get-BuildVersion($path) {
     $bytes = [System.IO.File]::ReadAllBytes($path)
     $text = [System.Text.Encoding]::ASCII.GetString($bytes)
-    $m = [regex]::Match($text, 'v\d+\.\d+\.\d+-\d+-g[0-9a-f]+(-dirty\.[0-9a-f]+)?')
-    if ($m.Success) { return $m.Value }
+    # A build exactly on a tag is just "v1.9.0": git describe adds "-<commits>-g<hash>" only past one (the v1.9.0
+    # release build was refused here, 2026-10-07).
+    # The longest one: a binary can also hold a cut piece of it ("v1.9.0-d" in STServer.dll, 2026-10-08), whose
+    # "v1.9.0" alone then looked like another build.
+    $all = [regex]::Matches($text, 'v\d+\.\d+\.\d+(-\d+-g[0-9a-f]+)?(-dirty\.[0-9a-f]+)?') | ForEach-Object { $_.Value }
+    if ($all) { return ($all | Sort-Object Length -Descending | Select-Object -First 1) }
     return $null
 }
 

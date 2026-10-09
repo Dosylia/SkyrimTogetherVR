@@ -1,4 +1,4 @@
-# Skyrim Together VR
+# urSovngarde
 
 Co-op for Skyrim VR, a port of Skyrim Together Reborn.
 

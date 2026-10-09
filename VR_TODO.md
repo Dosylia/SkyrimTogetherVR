@@ -29,16 +29,72 @@ its `TODO.md`. What stays here is the mod's own part:
       next crash's log says "small crash dump ... (N KB)"). Was: the game's crash handler writes a few-MB minidump
       (call chain, registers, memory near the crash -- never a full 1 GB dump), for the launcher to send with the logs
       when the player agrees.
-- [!] Join friends 3 -- no port opening at all: direct connections through both routers with GameNetworkingSockets'
-      P2P (TiltedConnect is built on it, v1.4.1), the hub as the go-between. Changes the mod's network code on both
-      sides; its real test needs two PCs on two internet connections (Emma and Seen). Facts (2026-10-07): the
-      xmake package builds GameNetworkingSockets with its own ICE (`ice` config on by default, not overridden; ICE
-      code present in the built `gamenetworkingsockets.lib`), so P2P needs no new library. What it needs: the server
-      listening for P2P besides its UDP port, the client connecting with custom signaling, the hub passing the
-      signaling messages between the two (a handful per connection; Workers KV's free plan allows 1,000 writes a
-      day), public STUN servers (free) to learn each side's address, and for the pairs whose routers both refuse
-      (often quoted as one in five or fewer) a TURN relay, which is a paid service, or no relay and those players
-      use Tailscale. Question under "Needs Emma".
+- [!] Join friends 3 -- no port opening at all, through our own relay (Emma, 2026-10-07, after the free options were
+      compared: playit.gg needs its paid plan for a game not on its list; Radmin VPN, ZeroTier and Tailscale make
+      every player install a program; only a relay of ours is free or near free and asks nothing of the players).
+      **Design: a plain UDP relay, no change to the mod.** A small program of ours (Rust, `relay/` in the hub repo)
+      on a rented server with a public address. Host: Host starts the server as today plus a host tunnel in the
+      launcher, one outbound UDP flow to the relay (so no port to open), which registers a session; the invite code
+      at the hub then names the relay session instead of an address. For each player the relay announces, the host
+      tunnel opens one local socket and passes packets to and from the server on 127.0.0.1:<port>, so the server
+      sees every player as a separate local connection. Player: Join with a code that names a relay session starts a
+      join tunnel in the launcher listening on 127.0.0.1:<port>; the connect file points the game there. The game
+      and the server never know. Facts checked (2026-10-07): the client connects with `ConnectByIPAddress` and the
+      server listens with `CreateListenSocketIP` (TiltedConnect), so a local address works; the server uses a
+      player's address only for its log lines and the player list's endpoint (`GameServer.cpp`
+      HandleAuthenticationRequest, `SetEndpoint`), never to decide anything, so relayed players only show as
+      127.0.0.1 there. GameNetworkingSockets encrypts every connection, so the relay passes bytes it cannot read.
+      Wire: [session 8 bytes][player 2 bytes][the game's packet]; the game keeps its packets under about 1,300 bytes,
+      so the header stays under any internet path's limit. Keepalives every 15 s hold the routers' mappings. Not an
+      open proxy: it forwards only between a registered host and players holding its code, caps players and
+      bandwidth per session, ends sessions the host stops renewing, limits sessions per address, and keeps no
+      addresses in its logs (the website's privacy page to say so when it goes live). The tunnels live in the
+      launcher, which already stays open while the game runs; closing it during a session asks first.
+      **Steps**, each tested before the next: (1) measure a real session's traffic per player (packets and kB per
+      second, at the server), which sizes the relay and says whether a free server is enough, half a day; (2) the
+      relay and both tunnels on this PC: relay in WSL, Emma's server behind the host tunnel, the rig's bot client
+      behind a join tunnel, real game traffic through it, about 4 to 5 days; (3) the hub's code record and the
+      launcher's screens (Host says "through the relay", Join needs nothing new), 1 to 2 days; (4) the relay deployed
+      on Emma and Seen's existing IONOS VPS, which runs Plesk and their websites (Emma, 2026-10-07): one program as a
+      sandboxed systemd service, no Docker, one UDP port opened in the IONOS policy and Plesk's firewall, a `deploy`
+      account with Emma's key that may only restart it; Seen's setup guide is the Claude Docs page "urSovngarde relay
+      server setup", 1 day; (5) a session with Seen, each on his own connection. About 1.5 to 2 weeks in all.
+      The P2P route this item first described (GameNetworkingSockets' ICE, present in the built library, with the hub
+      as go-between) stays possible later to save the relay's hop for pairs whose routers allow it; it changes the
+      mod's network code on both sides. Questions under "Needs Emma".
+      Progress (2026-10-07, the plumbing, steps 2 and 3 in part): the relay is a std-only Rust program in the
+      launcher's repo, `relay/` (not the hub's: the launcher shares its wire format, `relay/src/proto.rs`), 9 tests
+      (routing between a host and its players only, refusals, lost answers, a host's changed address, leaving,
+      silence, the byte allowance). The launcher's two tunnels, `src-tauri/src/relay/` (host: one local socket per
+      player towards 127.0.0.1:<server port>; friend: a local port the connect file names), 3 tests through a real
+      relay on this PC with a stand-in server and games (both ways, 1,300 bytes, two players seen as two, the
+      session's end heard). The hub: `GET /relay` (its `RELAY` setting, empty today) and a relay session on codes,
+      tested locally with `wrangler dev`, not deployed. Host and Join use it when the hub names a relay, directly
+      otherwise. End to end with the relay program, the local hub, the launcher's code path and stand-ins: a packet
+      through and back (`examples/relay-check.rs`). Left: the screens, the hub deployed, a Linux build of the relay
+      for the VPS, then the measurement and a real game through it.
+      Later the same day: Seen's VPS is ready (85.215.172.211, `relay.ursovngarde.com` points at it, unlimited
+      traffic, UDP checked from both homes). The Linux build (static, 437 KB, built and tested in `rust:1-alpine`) is
+      in `/opt/ursovngarde/relay`, copied through `deploy` with Emma's key (same checksum). Waiting on Seen, in his
+      guide's step 8: stop the echo test that still holds udp/10610, add the sudoers rule (`deploy` is asked for a
+      password), install `relay/ursovngarde-relay.service`. Then a test from Emma's PC through the real relay with
+      the hub run locally, before the live hub's `RELAY` is set.
+      Done: the service runs on the VPS (active, udp/10610). Through it over the internet, from Emma's PC, with the
+      hub run locally naming `relay.ursovngarde.com:10610` and the launcher's own code path (`relay-check`): code
+      registered with its session, joined, a packet to a stand-in server and back; 50 round trips all back, median
+      50.0 ms (49.4 to 51.5). Host and friend were both on Emma's PC, so that is two trips to the VPS: about 25 ms
+      each way from Emma's line, and a real friend adds their own trip to hers. Still open: ICMP is dropped by the
+      server's firewall (ping unanswered, no effect on the relay), and the real game through it before the live
+      hub's `RELAY` is set.
+      Hardened (2026-10-08, from the launcher's review): a relay restart or a host's changed address no longer ends
+      a game. The relay rebuilds a lost session for the host holding its token, the host tunnel takes its place back
+      after 45 s of silence, a friend's tunnel joins again (test: a game goes on across a relay restart, 5 runs). A
+      friend's launcher closed and opened again rebuilds the tunnel on the port the connect file names (test). A
+      failed join through the relay is said (host gone, game full, relay unreachable) instead of leaving a connect
+      file that points at nothing. This relay build runs on the VPS since 2026-10-08 19:40 (same checksum as built
+      here; the previous one kept beside it as `ursovngarde-relay.previous`). Seen added the sudoers rule: `deploy`
+      may run `systemctl restart ursovngarde-relay` and `systemctl status ursovngarde-relay` (exactly those, no
+      options), so relay updates no longer need him.
 - [!] Release packaging for VR. Done 2026-10-07: `make-release.ps1` no longer takes files local to Emma's PC (a
       `.map`, a stray `.zip`, found by the launcher's install test in the 2026-10-05 zip), and `-ListOnly` shows the
       client folder's selection on any tree (29 entries from her tools folder, none of those). Open: `release.yml`
@@ -91,14 +147,47 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       `make-release.ps1`'s layout (`Skyrim Together VR`, `Server`, `Skyrim Together mod`) from the build and the UI;
       (2) `make-release.ps1` on your PC, uploaded by hand, and `release.yml` switched off until then. Until one is
       chosen, do not push a `vX.Y.Z` tag: it would publish upstream's SE layout.
-- [!] **Join friends 3, a relay or not.** Direct connections without opening a port (urSovngarde section above) work
-      for most pairs of routers; for the rest a TURN relay passes the traffic, which costs money each month. (1) No
-      relay: those pairs are told to use Tailscale, as today. (2) A relay later, once players hit it. Either way the
-      work ends with a test session with Seen, each on his own connection; when could that be?
+- [!] **Join friends 3, our relay** (decided 2026-10-07: our own relay; plan in the urSovngarde section above).
+      Where it runs is settled: the existing IONOS VPS with Plesk (Emma, 2026-10-07), set up by Seen from the guide;
+      its traffic allowance against the measured traffic (step 1) is the one thing to watch. Two choices left:
+      (1) Relay always (one path to test and to explain), or direct when the host's port is open and
+      the relay otherwise (saves the extra hop for those hosts, two paths to test). (2) When a session with Seen
+      could be, each on his own connection: needed once to measure (it can also be measured with the rig) and once
+      at the end.
+- [x] **Only a weapon or shield blocks** (Emma, 2026-10-09: "only a sword or shield should block"). A touch of his
+      weapon counts when that hand holds a weapon (the game's hand object is a WEAP), the left hand a worn shield
+      (read at most once a second: it walks the inventory), or something held with HIGGS's grab; a bare, spell or torch
+      hand gets nothing: no buzz, sound, sparks, no ClashRequest, no defender's rule (`VRBodySync::HandParries`,
+      `CharacterService::SendClashes`, said every 5 s as "no parry"). Correction to the note of that evening: Emma's
+      right hand held Dawnbreaker, not a spell (`FEE34` is `DA09EncDawnbreaker`, read from Skyrim.esm); her blocks
+      were real. Built, deployed (v1.9.0-dirty.5b57258); to see in a fight with a bare or spell hand.
+- [x] **Hitting his sword still hurt him** (Emma, 2026-10-09). Dawnbreaker's strike enchantment (touch delivery,
+      checked in Skyrim.esm) was sent as a spell cast at every strike, the ones dropped on his blade included, and
+      his game replayed it from her copy at him: 13 local hits of 16 to 74 between 18:34:43 and 18:36:27, each
+      0.2 to 0.8 s after a cast, none weighed by the defender's rule. Now a touch enchantment aimed at the other
+      player's copy is not sent (`MagicService::OnSpellCastEvent`), and one aimed at this player is not replayed
+      (`OnNotifySpellCast`, for a game on an older build). The strike itself still travels as the hit; the
+      enchantment's own damage on a landed strike between players is not sent for now (her game never reported it
+      as a spell hit). Also found: in his game her copy held no weapon body from 18:34:16 to 18:36 ("another weapon or
+      none in the hand", then "the weapon is not out"), so his game saw none of her blade meeting his and his rule
+      blocked nothing; her arrows (Orcish, Steel) were equipped and unequipped on the copy 35 times in two minutes.
+      Not fixed: needs a look at why the copy's weapon was taken out of the world while she fought with it.
 - [!] **How your equipped sword meets his.** A sword grabbed with HIGGS is stopped by his; an equipped one passes
       through (two keyframed bodies). (1) B&S-like: the equipped sword becomes a dynamic body held to the hand, what
       you see follows it, his blade stops yours -- the most work; (2) feedback only: buzz, sound, sparks and the
       defender's rule, no physical stop -- what exists now; (3) fight with grabbed swords. [Physics queue]
+      Emma, 2026-10-08, after a fight with Seen: "if I meet my enemy sword I shouldn't be able to still go past it, or
+      it defeats the purpose" -- that is (1). To confirm before it starts (the most work), and after the damage path
+      below is right: a stop that lets blades through still has to drop the hit.
+- [x] **7.9 GB copied at every start** (Emma's OK, 2026-10-08). MO2's `overwrite\Root` held 77 crash dumps (7.5 GB,
+      18 Sep to 6 Oct, written by the game into its folder and captured by RootBuilder), a 388 MB unchanged copy of
+      the v1.9.0 `Skyrim Together VR` folder and `urSovngarde Server` (both from the launcher's no-MO2 test install
+      into the game folder); RootBuilder copied all of it into the game folder before each start (41 s of a 66 s start
+      that evening). Done: the dumps moved to `E:\urSovngarde crash dumps (moved out of FUS 2026-10-08)`, the copy
+      deleted, the server moved to `E:\FUS\tools\urSovngarde Server` (where an MO2 install puts it) with the
+      launcher's `serverDir` pointing there; `overwrite\Root` keeps 1.6 MB of small files. Hosting from the new place
+      is allowed by the existing "Skyrim Together Server (UDP 10578)" firewall rule. Still to see: the next start's
+      RootBuilder time. Worth a launcher check later: dumps piling up in a RootBuilder modlist's overwrite.
 - [!] **A stiffer PLANCK?** His ragdoll follows his pose 8-14 units loose because PLANCK's ragdolls follow softly
       (your `activeragdoll.ini` is at the defaults: `positionGain = 0.05`, `hierarchyGain = 0.6`, `poweredTau = 0.8`).
       Stiffer means his body (what your sword hits) is tighter, and every NPC reacts more stiffly to hits. May I try
@@ -132,6 +221,34 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
 
 ## Built, waiting for a real session
 
+- [ ] **PvP damage that skips the defender's rule** (session of 2026-10-08, Emma hosting, both on v1.9.0). Sparks
+      and the attacker's side of the rule work: 51 of Emma's swings that met Seen's blade were not sent, and Seen's
+      game blocked 10 of the 42 that were. But none of Seen's 28 sword hits and 2 spell hits on Emma reached her
+      rule (no "Defender's rule" line in her log), while she went down twice (20:30:27, 20:32:46). Her damage came from
+      her own game instead: Seen's game logged her health falling every frame (every 28 ms) at 20:32:43, which is a
+      concentration spell, Seen's Sparks (2DD2A, cast on her copy of him at 20:32:33, 35 and 48) hitting her inside
+      her world, and a single 78-point loss at 20:30:26 where his game had counted 22. So hits a player's copy makes
+      in the other game (its sword body, its spells) are applied there unweighed, and the sound is a body hit's.
+      Her character was server id 0 (she started the server and joined first), which every path handles in the
+      code as read. Diagnostic lines built and deployed (client and the hosted server, v1.9.0-dirty.383a24f): where
+      a hit sent to this player goes when it is not held, this game's own hits from a player copy (summed per
+      second), every spell interrupt sent and received, and on the server each player-on-player hit with who it went
+      to. Next session (both on this build) says which path to close; no fix before that.
+      Answered by the fight of 2026-10-09 18:34 (Seen hosting on port 9600, both clients on the diagnostic build,
+      his server plain v1.9.0): with Emma's character at server id 1, all of Seen's hits on her reached her rule
+      (11: 7 blocked, 4 landed), none of his copy's hits landed in her game, and nothing was counted twice. On his
+      side, her 15 sent hits all landed (his game saw no blade meeting: her right hand held a spell) after her game
+      had held back 26 on his blade, and his game applied 13 hits of her right-hand spell FEE34 itself (16 to 74
+      each, 0.2 to 0.8 s after each cast); spells only do damage in the target's game, which is the one path they
+      have, not a double. The "received; it is actor ... here" lines were each player's own damage reports to the
+      other (the server names the sender as attacker), harmless. So the one difference with 2026-10-08 is id 0:
+      which entity gets it is chance (here an NPC her game reported a moment before her character). Fix: the server
+      keeps id 0 for an empty entity for its whole life (`Code/server/World.cpp`), built and deployed to Emma's tools
+      folder and `E:\FUS\tools\urSovngarde Server` (v1.9.0-dirty.c9063a5, starts and runs). Whoever hosts needs this
+      server. To see: a fight with Emma hosting. The exact line that mishandles 0 is still unknown.
+- [ ] **Sparks that never stops** (same session): Seen's two-handed Sparks cast at 20:32:48 went on in Emma's game
+      after he stopped and after her respawn, still hitting her; she could not equip a weapon for a while. The
+      interrupt lines above say whether his stop was sent and whether her game applied it.
 - [x] A hit on his sword is not a hit on him: PLANCK's hit point (+0x6BC) on a spot his weapon body was just touched
       is not sent (22 of Emma's 56 hits in the first fight were on his sword).
 - [x] Clashes: buzz on the hand that met it (both players), the game's blade-block sound and sparks at the point; a

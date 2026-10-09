@@ -113,6 +113,19 @@ void ActorValueService::OnHealthChangeBroadcast(const PacketEvent<RequestHealthC
     notify.Tick = message.Tick;
 
     const entt::entity cEntity = static_cast<entt::entity>(message.Id);
+    // TEMPORARY (2026-10-08): one player's hit on another player's character, and who it was sent to. None of Seen's
+    // hits on Emma (the host, character server id 0) reached her defender's rule.
+    const auto* pCharacter = m_world.try_get<CharacterComponent>(cEntity);
+    if (message.DeltaHealth <= -1.f && pCharacter && pCharacter->IsPlayer())
+    {
+        std::string sentTo;
+        if (const auto* pCell = m_world.try_get<CellIdComponent>(cEntity))
+            for (Player* pOther : m_world.GetPlayerManager())
+                if (pOther != acMessage.pPlayer && pCell->IsInRange(pOther->GetCellComponent(), false))
+                    sentTo += fmt::format("{}{}", sentTo.empty() ? "" : ", ", pOther->GetId());
+        spdlog::info("PvP: player {} hit player character {:X} for {:.0f}; sent to player(s) [{}]", acMessage.pPlayer ? acMessage.pPlayer->GetId() : 0, message.Id,
+                     -message.DeltaHealth, sentTo);
+    }
     if (!GameServer::Get()->SendToPlayersInRange(notify, cEntity, acMessage.pPlayer))
         spdlog::error("{}: SendToPlayersInRange failed", __FUNCTION__);
 }

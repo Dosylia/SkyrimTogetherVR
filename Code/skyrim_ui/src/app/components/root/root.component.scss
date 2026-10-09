@@ -108,6 +108,48 @@
   flex: 0 0 auto;
 }
 
+// urSovngarde's mark above the menu, as the launcher's header has it: the sigil, the name with "ur" in gold, the
+// tagline small in gold.
+.app-root-brand {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding-left: 0.4rem;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
+
+  // Through the stylesheet, as the UI's other images: the build copies what styles name, not what markup names.
+  .app-root-brand-sigil {
+    flex: 0 0 auto;
+    width: 4.2rem;
+    height: 4.2rem;
+    background: url('../../../assets/images/sigil.svg') center / contain no-repeat;
+    filter: drop-shadow(0 0 10px rgba(229, 96, 46, 0.35));
+  }
+
+  p {
+    margin: 0;
+    line-height: 1.15;
+    text-transform: uppercase;
+  }
+}
+
+.app-root-brand-name {
+  font-size: 1.8rem;
+  letter-spacing: 0.22em;
+  color: #f0e8d6;
+
+  span {
+    color: #c0982c;
+  }
+}
+
+.app-root-brand-tagline {
+  font-size: 0.85rem;
+  letter-spacing: 0.42em;
+  color: #c0982c;
+}
+
 .app-root-menu {
   display: flex;
   height: 4rem;

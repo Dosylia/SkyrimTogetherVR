@@ -7,6 +7,8 @@
 #include <Games/ActorExtension.h>
 #include <PlayerCharacter.h>
 #include <BSAnimationGraphManager.h>
+#include <Components/BGSBipedObjectForm.h>
+#include <Forms/TESObjectARMO.h>
 #include <NetImmerse/NiNode.h>
 #include <NetImmerse/NiTransform.h>
 
@@ -2042,6 +2044,7 @@ struct PendingClash
     float Speed;     // game units a second
     glm::vec3 Hand;  // game units: the HIGGS body, which says which of the player's hands it was
     bool Start;      // the two started touching (a meeting); otherwise still touching
+    bool Held;       // what met it is held up with HIGGS's grab, not one of HIGGS's own bodies
 };
 std::mutex s_clashesLock;
 std::vector<PendingClash> s_clashes;
@@ -3297,7 +3300,8 @@ void SayWeaponContacts() noexcept
                 nextClash = cNow + std::chrono::milliseconds(250);
                 std::lock_guard clashesLock(s_clashesLock);
                 if (s_clashes.size() < 16)
-                    s_clashes.push_back({static_cast<uint32_t>(key >> 1), static_cast<uint8_t>(key & 1), contact.Point / havokScale, speed, contact.HiggsAt[other] / havokScale, true});
+                    s_clashes.push_back({static_cast<uint32_t>(key >> 1), static_cast<uint8_t>(key & 1), contact.Point / havokScale, speed, contact.HiggsAt[other] / havokScale, true,
+                                         contact.HiggsKind[other] == 2});
             }
             else
             {
@@ -3310,7 +3314,8 @@ void SayWeaponContacts() noexcept
                     nextTouch = cNow + std::chrono::milliseconds(100);
                     std::lock_guard clashesLock(s_clashesLock);
                     if (s_clashes.size() < 16)
-                        s_clashes.push_back({static_cast<uint32_t>(key >> 1), static_cast<uint8_t>(key & 1), contact.Point / havokScale, 0.f, contact.HiggsAt[other] / havokScale, false});
+                        s_clashes.push_back({static_cast<uint32_t>(key >> 1), static_cast<uint8_t>(key & 1), contact.Point / havokScale, 0.f, contact.HiggsAt[other] / havokScale, false,
+                                             contact.HiggsKind[other] == 2});
                 }
             }
         }
@@ -4123,6 +4128,35 @@ void* FirstPersonHand(PlayerCharacter* apPlayer, const size_t aSide) noexcept
     return GetName(pHand) == s_name[aSide] ? pHand : nullptr;
 }
 
+// Whether this hand holds what parries: a weapon in the hand, or for the left hand a worn shield (the game keeps a
+// shield as worn armour, not as the hand's object). Not a spell, a torch or nothing.
+bool HandParries(const uint8_t aSide) noexcept
+{
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer || aSide > 1)
+        return false;
+    if (const TESForm* pHeld = pPlayer->GetEquippedWeapon(aSide); pHeld && pHeld->formType == FormType::Weapon)
+        return true;
+    if (aSide != 0)
+        return false;
+    // Read at most once a second: it walks the whole inventory, and a blade resting on his is weighed ten times a
+    // second.
+    static bool s_shield = false;
+    static std::chrono::steady_clock::time_point s_readAt{};
+    if (const auto cNow = std::chrono::steady_clock::now(); cNow - s_readAt >= std::chrono::seconds(1))
+    {
+        s_readAt = cNow;
+        const Inventory shields = pPlayer->GetInventory(
+            [](TESForm& aForm)
+            {
+                return aForm.formType == FormType::Armor &&
+                       (static_cast<TESObjectARMO&>(aForm).slotType & static_cast<uint32_t>(BGSBipedObjectForm::Part::Shield)) != 0;
+            });
+        s_shield = std::any_of(shields.Entries.begin(), shields.Entries.end(), [](const Inventory::Entry& acEntry) { return acEntry.IsWorn(); });
+    }
+    return s_shield;
+}
+
 bool TakeClash(Clash& aOut) noexcept
 {
     PendingClash pending{};
@@ -4139,8 +4173,6 @@ bool TakeClash(Clash& aOut) noexcept
     aOut.Speed = pending.Speed;
     aOut.Start = pending.Start;
     aOut.Heard = false;
-    if (!pending.Start)
-        return true;
 
     // Which of the local hands it was: the one nearer the HIGGS body (the hand, or the hand holding what met it). Every
     // HIGGS body is one of the two hands', so there is no limit: a hand moved 84 units in one frame left its body more
@@ -4159,6 +4191,12 @@ bool TakeClash(Clash& aOut) noexcept
                     aOut.HandDistance = distance;
                 }
             }
+    // Only a weapon or a shield parries (Emma, 2026-10-09): 5 of her 7 blocks that evening were his sword on a hand
+    // that held no blade, and a hand is a body part, so his blade on it is a hit. Something held up with HIGGS's grab
+    // counts as held.
+    aOut.Parries = pending.Held || HandParries(aOut.OwnSide);
+    if (!pending.Start || !aOut.Parries)
+        return true;
     FeelClash(aOut.OwnSide);
     aOut.Heard = SoundClash(aOut.Point);
     SparkClash(aOut.Point);

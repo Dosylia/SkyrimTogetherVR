@@ -35,6 +35,9 @@ struct Clash
     bool Start = true;
     //! How far the HIGGS body that met it was from that hand's node.
     float HandDistance = 0.f;
+    //! What met it can parry: a weapon or shield in that hand, or something held up with HIGGS. A bare or spell hand
+    //! cannot: such a touch is not felt, heard, sent nor weighed by the defender's rule.
+    bool Parries = false;
 };
 //! The next clash seen at a frame end, felt and heard as it is taken when it is a meeting; false when there is none.
 bool TakeClash(Clash& aOut) noexcept;

@@ -31,6 +31,7 @@
 #include <Games/Overrides.h>
 
 #include <Forms/SpellItem.h>
+#include <Forms/EnchantmentItem.h>
 #include <PlayerCharacter.h>
 
 #include <Games/TES.h>
@@ -151,6 +152,17 @@ void MagicService::OnSpellCastEvent(const SpellCastEvent& acEvent) const noexcep
     SpellItem* pCastSpell = Cast<SpellItem>(pMagicForm);
 
 #ifdef SKYRIMVR
+    // A weapon's strike enchantment on the other player (touch delivery: Dawnbreaker's fire) is not sent as a cast. It
+    // is part of the strike, which travels as the hit and is weighed by the defender's rule; replayed as a cast in the
+    // other game, it burned him on every swing, the ones his blade stopped included (13 times, 16 to 74 each, while
+    // 26 of the strikes themselves were dropped on his blade, 2026-10-09).
+    if (const EnchantmentItem* pEnchantment = Cast<EnchantmentItem>(pMagicForm); pEnchantment && pEnchantment->eDelivery == MagicSystem::TOUCH && acEvent.DesiredTargetID)
+        if (Actor* pTarget = Cast<Actor>(TESForm::GetById(acEvent.DesiredTargetID)); pTarget && pTarget->GetExtension() && pTarget->GetExtension()->IsRemotePlayer())
+        {
+            spdlog::info("PvP: strike enchantment {:X} on player copy {:X} not sent as a cast; the strike is the hit", acEvent.SpellId, acEvent.DesiredTargetID);
+            return;
+        }
+
     // Powers and dragon shouts are fire-and-forget, so the concentration filter below dropped them and the other
     // player never heard or felt a shout. They cast through the OTHER source with spell type POWER, LESSER_POWER or
     // VOICE_POWER (TiltedEvolutionVR 20a62f9, confirmed at runtime 2026-08-29). Ported 2026-09-18.
@@ -323,6 +335,18 @@ void MagicService::OnNotifySpellCast(const NotifySpellCast& acMessage) const noe
         }
     }
 
+#ifdef SKYRIMVR
+    // The other player's strike enchantment aimed at this player is part of a strike that arrives as a hit and is
+    // weighed by the defender's rule; replayed here, it hurt through every parry (see OnSpellCastEvent). Also refused
+    // here, for a game on a build that still sends it.
+    if (const EnchantmentItem* pEnchantment = Cast<EnchantmentItem>(pSpell); pEnchantment && pEnchantment->eDelivery == MagicSystem::TOUCH && pDesiredTarget &&
+                                                                             pDesiredTarget == PlayerCharacter::Get())
+    {
+        spdlog::info("PvP: strike enchantment {:X} from player copy {:X} on us not replayed; the strike is the hit", pSpell->formID, pActor->formID);
+        return;
+    }
+#endif
+
     ScopedSpellCastOverride _;
 
     MagicCaster* pCaster = pActor->GetMagicCaster(static_cast<CS>(acMessage.CastingSource));
@@ -362,7 +386,8 @@ void MagicService::OnInterruptCastEvent(const InterruptCastEvent& acEvent) const
     request.CasterId = localComponent.Id;
     request.CastingSource = acEvent.CastingSource;
 
-    spdlog::debug("Sending out interrupt cast");
+    // TEMPORARY (2026-10-08, info rather than debug): Seen's Sparks went on in Emma's game after he stopped casting.
+    spdlog::info("Interrupt cast sent: caster {:X} (server {:X}), source {}", formId, localComponent.Id, acEvent.CastingSource);
 
     m_transport.Send(request);
 }
@@ -400,7 +425,7 @@ void MagicService::OnNotifyInterruptCast(const NotifyInterruptCast& acMessage) c
 
     pCaster->InterruptCast();
 
-    spdlog::debug("Interrupt remote cast successful");
+    spdlog::info("Interrupt cast received: copy {:X}, source {}, interrupted", pActor->formID, acMessage.CastingSource);
 }
 
 void MagicService::OnAddTargetEvent(const AddTargetEvent& acEvent) noexcept

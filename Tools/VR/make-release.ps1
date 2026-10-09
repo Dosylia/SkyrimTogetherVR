@@ -34,8 +34,11 @@ if (-not $version -or $version -like 'unknown*') { throw "No build version found
 # A release built from a clean, tagged tree is the standalone package anyone can install; "dirty" in the
 # version means uncommitted changes, and such a build must not be handed out.
 if ($version -like '*dirty*') { throw "The build is from an uncommitted tree ($version); commit and build again before releasing." }
-$name = "SkyrimTogetherVR-$version"
-$standaloneName = "SkyrimTogetherVR-standalone-$version"
+# The files players download carry the mod's name (urSovngarde-v1.9.0.zip, -update.zip, -server.zip, Emma
+# 2026-10-07); the names inside them (SkyrimTogetherVR.exe, the "Skyrim Together VR" folder) stay, as MO2 setups,
+# update.bat and the launcher point at them.
+$name = "urSovngarde-$version"
+$standaloneName = $name
 $staging = Join-Path $OutputFolder $name
 if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Force $staging | Out-Null
@@ -80,11 +83,12 @@ $updateZip = Join-Path $OutputFolder "$name-update.zip"
 if (Test-Path $updateZip) { Remove-Item $updateZip -Force }
 Compress-Archive -Path (Join-Path $buildFolder 'SkyrimTogetherVR.exe'), (Join-Path $buildFolder 'SkyrimTogetherVR.pdb') -DestinationPath $updateZip
 
-# Server update pack, for whoever hosts: the three files that change, without the 165 MB full zip.
-$serverZip = Join-Path $OutputFolder "$name-server-update.zip"
+# The server on its own, for whoever hosts (on a machine without the game too): the whole server folder, without
+# the 165 MB full zip.
+$serverZip = Join-Path $OutputFolder "$name-server.zip"
 if (Test-Path $serverZip) { Remove-Item $serverZip -Force }
 Compress-Archive -Path (Join-Path $server '*') -DestinationPath $serverZip
 
 Write-Host ("Standalone:    {0} ({1:N0} MB)" -f $zip, ((Get-Item $zip).Length / 1MB))
 Write-Host ("Client update: {0} ({1:N1} MB)" -f $updateZip, ((Get-Item $updateZip).Length / 1MB))
-Write-Host ("Server update: {0} ({1:N1} MB)" -f $serverZip, ((Get-Item $serverZip).Length / 1MB))
+Write-Host ("Server:        {0} ({1:N1} MB)" -f $serverZip, ((Get-Item $serverZip).Length / 1MB))

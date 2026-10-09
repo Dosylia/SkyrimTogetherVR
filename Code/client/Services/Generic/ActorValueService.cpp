@@ -397,7 +397,9 @@ void ActorValueService::OnHealthChangeBroadcast(const NotifyHealthChangeBroadcas
 #ifdef SKYRIMVR
     // Another player's hit on this player waits for the defender's rule (RunHeldHits).
     if (acMessage.DeltaHealth < 0.f && acMessage.AttackerPlayerId)
-        if (Actor* pActor = Utils::GetByServerId<Actor>(acMessage.Id); pActor && pActor == PlayerCharacter::Get())
+    {
+        Actor* pActor = Utils::GetByServerId<Actor>(acMessage.Id);
+        if (pActor && pActor == PlayerCharacter::Get())
         {
             NotifyHealthChangeBroadcast held = acMessage;
             if (!held.Tick)
@@ -405,6 +407,11 @@ void ActorValueService::OnHealthChangeBroadcast(const NotifyHealthChangeBroadcas
             m_heldHits.push_back(held);
             return;
         }
+        // TEMPORARY (2026-10-08): none of Seen's 28 hits on Emma reached her defender's rule, while all 42 of hers on
+        // him reached his; she was the host, her character server id 0. Says where such a hit goes instead.
+        spdlog::info("PvP: a hit of {:.0f} from player {} on server id {:X} received; it is {} here, not this player", -acMessage.DeltaHealth, acMessage.AttackerPlayerId,
+                     acMessage.Id, pActor ? fmt::format("actor {:X}", pActor->formID) : std::string("no actor"));
+    }
 #endif
     ApplyHealthChange(acMessage);
 }
