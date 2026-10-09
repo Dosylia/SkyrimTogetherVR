@@ -99,9 +99,21 @@ on_load(function (target)
         local branch, commitHash, timestamp, describe, protocol = version()
         _g.tilted_version = { branch = branch, describe = describe, protocol = protocol }
     end
+    if not _g.tilted_version.numbers then
+        -- The same version as four numbers, the tag then the commits since it (v1.9.0-2-g827b3940 is 1.9.0.2); 0.0.0.0
+        -- without a tag.
+        local describe = _g.tilted_version.describe
+        local major, minor, patch = describe:match("^v?(%d+)%.(%d+)%.(%d+)")
+        _g.tilted_version.numbers = { major or 0, minor or 0, patch or 0, (major and describe:match("^v?%d+%.%d+%.%d+%-(%d+)%-g")) or 0 }
+    end
     target:add("defines", 'BUILD_BRANCH="' .. _g.tilted_version.branch .. '"', 'BUILD_COMMIT="' .. _g.tilted_version.describe .. '"')
     -- What the server compares on connect: a digest of Code/encoding alone. See modules/version.lua.
     target:add("defines", 'BUILD_PROTOCOL="' .. _g.tilted_version.protocol .. '"')
+    -- For the programs' version resources (the .rc files). Until 2026-10-09 they said 0.0.0.0 and the upstream's
+    -- names, and antivirus engines weigh an unsigned program with no believable identity as suspicious.
+    local n = _g.tilted_version.numbers
+    target:add("defines", "BUILD_MAJOR=" .. n[1], "BUILD_MINOR=" .. n[2], "BUILD_PATCH=" .. n[3], "BUILD_SINCE=" .. n[4],
+        'BUILD_FILEVERSION="' .. table.concat(n, ".") .. '"')
 end)
 
 before_build(function (target)
@@ -149,6 +161,13 @@ before_build(function (target)
 #endif
 #ifndef BUILD_PROTOCOL
 #define BUILD_PROTOCOL "unknown-protocol"
+#endif
+#ifndef BUILD_MAJOR
+#define BUILD_MAJOR 0
+#define BUILD_MINOR 0
+#define BUILD_PATCH 0
+#define BUILD_SINCE 0
+#define BUILD_FILEVERSION "0.0.0.0"
 #endif
 ]]
     if not os.exists(buildInfoPath) or io.readfile(buildInfoPath) ~= buildInfo then

@@ -1,7 +1,11 @@
   
 #include "winres.h"
 
+// What Windows and antivirus engines read as the program's identity (see Code/immersive_launcher/launcher.rc). The
+// BUILD_ values are defines from the root xmake.lua.
 VS_VERSION_INFO VERSIONINFO
+FILEVERSION BUILD_MAJOR,BUILD_MINOR,BUILD_PATCH,BUILD_SINCE
+PRODUCTVERSION BUILD_MAJOR,BUILD_MINOR,BUILD_PATCH,BUILD_SINCE
 FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
 FILEFLAGS 0x1L
@@ -16,10 +20,14 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "Together Team"
-            VALUE "ProductName", "UIProcess"
-            VALUE "FileDescription", "TiltedUI Worker"
+            VALUE "CompanyName", "urSovngarde"
+            VALUE "ProductName", "urSovngarde"
+            VALUE "FileDescription", "urSovngarde interface"
+            VALUE "InternalName", "TPProcess"
             VALUE "OriginalFilename", "TPProcess.exe"
+            VALUE "FileVersion", BUILD_FILEVERSION
+            VALUE "ProductVersion",	BUILD_BRANCH "@" BUILD_COMMIT
+            VALUE "LegalCopyright", "urSovngarde contributors and Tilted Phoques (Skyrim Together Reborn), GPL-3.0 or later"
         END
     END
     BLOCK "VarFileInfo"

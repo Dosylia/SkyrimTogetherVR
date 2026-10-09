@@ -362,6 +362,17 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       header, and the address library disagreeing with our table.
 - [ ] Install script, a guide for other modlists, a licence check before sharing builds (GPL-3), VR server
       defaults (difficulty, PvP, time scale), a test checklist per build.
+- [ ] **Antivirus false positives** (Nexus quarantined the first upload, 2026-10-09; VirusTotal: guessing engines
+      such as Rising, Trapmine, MaxSecure). (1) The programs' identity: until now upstream's ("Together Team",
+      "TogetherOnline", `launcher.exe`, 0.0.0.0), now urSovngarde's, with the version as four numbers from the root
+      `xmake.lua` (v1.9.0-2 is 1.9.0.2) in the four `.rc` files. Written; not built yet (SteamVR was open). Check
+      after the build: Properties, Details of each program. Nothing reads our exe's version: the game's comes from
+      SkyrimVR.exe, and plugins asking for the running program's path get SkyrimVR.exe once the game is loaded.
+      (2) `Tools\VR\scan-release.ps1`: scans a release on VirusTotal before publishing and writes the checksums,
+      the links and where to report each flag. Tested against a stand-in VirusTotal (lookup, small and over-32 MB
+      uploads, waiting, a flag, the report); needs Emma's free key in `%USERPROFILE%\.str-vt-key` for real use.
+      (3) Signing, Emma's decision: SignPath Foundation (free for open source; needs the release built by GitHub
+      Actions, see "How releases are made", and the launcher's repo public) or a paid certificate in her name.
 
 ### Tooling
 

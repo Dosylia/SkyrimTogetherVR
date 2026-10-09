@@ -107,3 +107,4 @@ Compress-Archive -Path (Join-Path $server '*') -DestinationPath $serverZip
 Write-Host ("Standalone:    {0} ({1:N0} MB)" -f $zip, ((Get-Item $zip).Length / 1MB))
 Write-Host ("Client update: {0} ({1:N1} MB)" -f $updateZip, ((Get-Item $updateZip).Length / 1MB))
 Write-Host ("Server:        {0} ({1:N1} MB)" -f $serverZip, ((Get-Item $serverZip).Length / 1MB))
+Write-Host 'Before publishing: Tools\VR\scan-release.ps1 scans these on VirusTotal and writes the checksums to post with them.'

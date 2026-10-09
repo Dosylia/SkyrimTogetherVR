@@ -1,7 +1,12 @@
 #include "winres.h"
 #include "BuildInfo.h"
 
+// What Windows and antivirus engines read as the program's identity. Until 2026-10-09 it was the upstream's, at
+// 0.0.0.0 and named launcher.exe, and engines that guess weigh an unsigned program with no believable identity as
+// suspicious. The numbers and texts come from the root xmake.lua.
 VS_VERSION_INFO VERSIONINFO
+FILEVERSION BUILD_MAJOR,BUILD_MINOR,BUILD_PATCH,BUILD_SINCE
+PRODUCTVERSION BUILD_MAJOR,BUILD_MINOR,BUILD_PATCH,BUILD_SINCE
 FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
 FILEFLAGS 0x1L
@@ -16,11 +21,21 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "Together Team"
-            VALUE "ProductName", "TogetherOnline"
-            VALUE "FileDescription", "Multiplayer mod for Bethesda games"
-            VALUE "OriginalFilename", "launcher.exe"
+            VALUE "CompanyName", "urSovngarde"
+#ifdef SKYRIMVR
+            VALUE "ProductName", "urSovngarde"
+            VALUE "FileDescription", "urSovngarde (Skyrim VR co-op)"
+            VALUE "InternalName", "urSovngarde"
+            VALUE "OriginalFilename", "urSovngarde.exe"
+#else
+            VALUE "ProductName", "Skyrim Together"
+            VALUE "FileDescription", "Skyrim Together (Skyrim co-op)"
+            VALUE "InternalName", "SkyrimTogether"
+            VALUE "OriginalFilename", "SkyrimTogether.exe"
+#endif
+            VALUE "FileVersion", BUILD_FILEVERSION
             VALUE "ProductVersion",	BUILD_BRANCH "@" BUILD_COMMIT
+            VALUE "LegalCopyright", "urSovngarde contributors and Tilted Phoques (Skyrim Together Reborn), GPL-3.0 or later"
         END
     END
     BLOCK "VarFileInfo"
