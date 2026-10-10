@@ -1437,14 +1437,14 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return true;
     }
 
-    // "partyhealth <fraction>": the health a party member reports to its party (RequestPlayerHealthUpdate), what a
+    // "partyhealth <percent>": the health (0-100) a party member reports to its party (RequestPlayerHealthUpdate), what a
     // real client sends twice a second when it changes; 0 is a player gone down ("X is down", 2026-10-10).
     if (name == "partyhealth")
     {
         RequestPlayerHealthUpdate request{};
-        request.Percentage = arg(0, 1.f);
+        request.Percentage = arg(0, 100.f);
         SendMsg(request);
-        spdlog::info("[script] party health {:.2f} sent", request.Percentage);
+        spdlog::info("[script] party health {:.0f}% sent", request.Percentage);
         return true;
     }
 

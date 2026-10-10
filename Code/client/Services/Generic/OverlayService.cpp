@@ -159,9 +159,27 @@ void OverlayService::CreateVR() noexcept
 }
 #endif
 
+// The overlay is painted on the CPU (OnPaint), so CEF needs no GPU process. When one could not be launched (2026-10-10,
+// both players: "GPU process launch failed: error_code=63" nine times in 30 ms while the game was leaving), CEF ended the
+// whole game ("GPU process isn't usable. Goodbye.", the crash at libcef.dll+7A52582). With its GPU work in the browser
+// process and software compositing, there is no GPU process to launch. Here rather than in TiltedUI, which is
+// upstream's repository.
+struct UrSovngardeOverlayApp final : OverlayApp
+{
+    using OverlayApp::OverlayApp;
+
+    void OnBeforeCommandLineProcessing(const CefString& aProcessType, CefRefPtr<CefCommandLine> aCommandLine) override
+    {
+        OverlayApp::OnBeforeCommandLineProcessing(aProcessType, aCommandLine);
+        aCommandLine->AppendSwitch("disable-gpu");
+        aCommandLine->AppendSwitch("disable-gpu-compositing");
+        aCommandLine->AppendSwitch("in-process-gpu");
+    }
+};
+
 void OverlayService::CreateOverlay(OverlayApp::RenderProvider* apProvider) noexcept
 {
-    m_pOverlay = new OverlayApp(apProvider, new ::OverlayClient(m_transport, apProvider->Create()));
+    m_pOverlay = new UrSovngardeOverlayApp(apProvider, new ::OverlayClient(m_transport, apProvider->Create()));
 
     if (!m_pOverlay->Initialize())
     {
@@ -409,7 +427,6 @@ void OverlayService::OnConnectedEvent(const ConnectedEvent& acEvent) noexcept
 
 void OverlayService::OnDisconnectedEvent(const DisconnectedEvent&) noexcept
 {
-    m_playerNames.clear();
     m_playerHealth.clear();
 
     // On VR the disconnection message comes from VRConnectService, which knows whether it will reconnect.
@@ -539,7 +556,6 @@ void OverlayService::OnConnectionError(const ConnectionErrorEvent& acConnectedEv
 void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcept
 {
     String cellName = GetCellName(acMessage.WorldSpaceId, acMessage.CellId);
-    m_playerNames[acMessage.PlayerId] = acMessage.Username;
 #ifdef SKYRIMVR
     // Sent both when someone joins and, on connecting, for everyone already there.
     Utils::ShowHudMessage(String("urSovngarde: ") + acMessage.Username + " is online" + (cellName.empty() ? "" : String(" (") + cellName + ")"));
@@ -559,7 +575,6 @@ void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcep
 
 void OverlayService::OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept
 {
-    m_playerNames.erase(acMessage.PlayerId);
     m_playerHealth.erase(acMessage.PlayerId);
 #ifdef SKYRIMVR
     Utils::ShowHudMessage(String("urSovngarde: ") + acMessage.Username + " left");
@@ -630,8 +645,9 @@ void OverlayService::OnNotifyPlayerHealthUpdate(const NotifyPlayerHealthUpdate& 
     const auto previous = m_playerHealth.find(acMessage.PlayerId);
     if (previous != m_playerHealth.end() && previous->second > 0.f && acMessage.Percentage <= 0.f)
     {
-        const auto name = m_playerNames.find(acMessage.PlayerId);
-        const String who = name != m_playerNames.end() ? name->second : String("A party member");
+        const auto& players = m_world.GetPartyService().GetPlayers();
+        const auto name = players.find(acMessage.PlayerId);
+        const String who = name != players.end() ? name->second : String("A party member");
         spdlog::info("Party: {} is down", who.c_str());
 #ifdef SKYRIMVR
         Utils::ShowHudMessage(String("urSovngarde: ") + who + " is down");

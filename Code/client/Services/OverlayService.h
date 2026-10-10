@@ -103,8 +103,8 @@ private:
     World& m_world;
     TransportService& m_transport;
 
-    // Each other player's name and last health in the party, for "X is down" (Emma, 2026-10-10: a message, no revive).
-    TiltedPhoques::Map<uint32_t, String> m_playerNames;
+    // Each other player's last health in the party, for "X is down" (Emma, 2026-10-10: a message, no revive); the
+    // name comes from the party's own list (PartyService::GetPlayers).
     TiltedPhoques::Map<uint32_t, float> m_playerHealth;
 
     bool m_active = false;

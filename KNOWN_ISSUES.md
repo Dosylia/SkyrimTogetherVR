@@ -424,3 +424,16 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
 - Logs from before 2026-09-13 say "coredump created" even when no dump was written.
 - **Don't keep a debugger attached during play sessions.** Thread creation in DynDOLOD and similar
   plugins makes it stutter.
+
+## Crashes of the 2026-10-10 morning session (v1.9.0-6-gdeb36762)
+
+- Emma, 11:17:21, after teleporting: `SkyrimVR.exe+0x534D71`, a write to 0x6C (a null pointer plus 0x6C) on a game
+  worker thread, 200 ms after the arrival's NPC copies were spawned (Lydia last). No frame of ours on the stack, nothing
+  deleted that session. Hub report 20261010-091730-c3ab5319. First time seen at this address; watch for a second one
+  before naming a cause.
+- Seen, 11:15:44, at the main menu, not yet connected: `libcef.dll` int3. CEF's own log says it all: "GPU process launch
+  failed: error_code=63" nine times in 30 ms, then "GPU process isn't usable. Goodbye." CEF could not start its helper
+  program at all. Emma: it is the crash when leaving (three that morning). Fixed in code, not yet built: CEF now runs
+  its GPU work in the game process (`disable-gpu`, `disable-gpu-compositing`, `in-process-gpu`, from
+  `UrSovngardeOverlayApp` in the client's `OverlayService.cpp`; the overlay is painted on the CPU anyway), so there is no GPU program to launch. To check after the
+  build: the menus still draw, and leaving no longer crashes. Hub report 20261010-091857-9cb48f47.

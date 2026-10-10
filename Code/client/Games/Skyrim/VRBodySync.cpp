@@ -4277,6 +4277,22 @@ constexpr float kBladeGuard = 8.f; // units from the grip: nearer than that, his
 constexpr float kBladeRest = 1.5f; // units ours is held off his blade's line, about half of two blades' thickness
 constexpr float kBladeSlack = 2.f; // units past the end of either blade a touch still counts
 
+// Whether our blade, turned into the plane of his (SideOf's normal and side), touches his within the length of both:
+// null when it does, otherwise why not. aT and aV are where along ours and his. One rule for meeting and for holding,
+// so a blade is never caught under one and let go under the other.
+const char* WhyNotTouching(const Blade& acOurs, const Blade& acHis, const float aSideNow, const glm::vec3& acNormal, float& aT, float& aV) noexcept
+{
+    if (!LineParameters(acOurs.Grip, glm::normalize(acOurs.Axis - aSideNow * acNormal), acHis.Grip, acHis.Axis, aT, aV))
+        return "the blades lie along each other";
+    if (aT < kBladeGuard)
+        return "his blade is at the hand";
+    if (aT > acOurs.Length + kBladeSlack)
+        return "his blade is beyond the end of ours";
+    if (aV < -kBladeSlack || aV > acHis.Length + kBladeSlack)
+        return "ours is beyond the end of his";
+    return nullptr;
+}
+
 std::array<BladeExtent, 2> MeasureCopyBlades(const Rig& acRig) noexcept
 {
     std::array<BladeExtent, 2> extents{};
@@ -4486,13 +4502,7 @@ void StopLocalBlades(const std::chrono::steady_clock::time_point aNow) noexcept
                 if (stop.Key || sign == 0.f || before == stop.LastSide.end() || before->second == 0.f || before->second == sign)
                     continue;
                 float t = 0.f, v = 0.f;
-                const bool cLines = LineParameters(ours.Grip, glm::normalize(ours.Axis - sideNow * normal), his.Segment.Grip, his.Segment.Axis, t, v);
-                const char* pNotHeld = !cLines                                                   ? "the blades lie along each other"
-                                       : t < kBladeGuard                                         ? "his blade passed at the hand"
-                                       : t > ours.Length + kBladeSlack                           ? "his blade passed beyond our tip"
-                                       : v < -kBladeSlack || v > his.Segment.Length + kBladeSlack ? "ours passed beyond his blade's ends"
-                                                                                                 : nullptr;
-                if (pNotHeld)
+                if (const char* pNotHeld = WhyNotTouching(ours, his.Segment, sideNow, normal, t, v))
                 {
                     // Crossings that are not held, said at most four times a second: what a test or a fight shows of the
                     // geometry (grips, axes, where along each blade).
@@ -4537,15 +4547,7 @@ void StopLocalBlades(const std::chrono::steady_clock::time_point aNow) noexcept
                 pWhy = "the hand is on his blade's line";
             else if (sideNow * stop.HeldSide > 0.f)
                 pWhy = "the hand came back";
-            else if (!LineParameters(ours.Grip, glm::normalize(ours.Axis - sideNow * normal), pHis->Segment.Grip, pHis->Segment.Axis, t, v))
-                pWhy = "the blades lie along each other";
-            else if (t < kBladeGuard)
-                pWhy = "his blade reached the hand";
-            else if (t > ours.Length + kBladeSlack)
-                pWhy = "it slid off the end of ours";
-            else if (v < -kBladeSlack || v > pHis->Segment.Length + kBladeSlack)
-                pWhy = "it slid off the end of his";
-            else
+            else if ((pWhy = WhyNotTouching(ours, pHis->Segment, sideNow, normal, t, v)) == nullptr)
             {
                 const glm::vec3 held = glm::normalize(glm::normalize(ours.Axis - sideNow * normal) + stop.HeldSide * (kBladeRest / t) * normal);
                 turn = RotationBetween(ours.Axis, held);
