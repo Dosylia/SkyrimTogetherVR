@@ -105,6 +105,9 @@
     },
     "SETTINGS": {
       "AUDIO": "Audio",
+      "VOICE": "Voz",
+      "TEST_MICROPHONE_INFO": "Habla cinco segundos y luego escúchate",
+      "TEST_MICROPHONE": "Probar mi micrófono",
       "MUTE_UI": "Silenciar interfaz",
       "UI_VOLUME": "Volumen de interfaz",
       "PARTY": "Grupo",

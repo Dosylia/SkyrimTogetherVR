@@ -90,6 +90,19 @@ jobs:
                     arm64) file release-stage/urSovngardeServer | grep -Eqi 'aarch64|arm64' ;;
                   esac
 
+            # The program refuses a library from another build (CheckBuildTag) and exits at once, so a server that
+            # starts and listens proves the pair belongs together. Run from a copy: it writes config/ and logs/ where it
+            # runs, which must not end up in the archive.
+            - name: The staged server starts
+              run: |
+                  run_dir="$RUNNER_TEMP/server-start"
+                  mkdir -p "$run_dir"
+                  cp release-stage/urSovngardeServer release-stage/libSTServer.so "$run_dir/"
+                  cd "$run_dir"
+                  TILTED_ACCEPT_EULA=1 LD_LIBRARY_PATH=. timeout 8 ./urSovngardeServer > start.txt 2>&1 || true
+                  cat start.txt
+                  grep -q "started on port" start.txt
+
             - name: Create Linux release archive
               if: ${{ inputs.upload-build-for-next-job }}
               run: |

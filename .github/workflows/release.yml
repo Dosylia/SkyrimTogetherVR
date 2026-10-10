@@ -12,7 +12,9 @@ name: Create GitHub Release
 # Run by hand (Actions, "Create GitHub Release", Run workflow) it builds the zips as an artifact and publishes
 # nothing: a way to try a branch before tagging it.
 #
-# The Linux server is left out until it builds again (VR_TODO, "The Linux build of the dedicated server").
+# The Linux server (linux.yml, x64 and arm64) is published beside the zips as urSovngardeServer-<version>-linux-<arch>
+# .tar.gz: urSovngardeServer and libSTServer.so from one build, checked there by starting it. The public server on
+# Seen's VPS builds or takes release tags, so a Linux fix reaches it only through a release (2026-10-10).
 
 on:
   push:
@@ -106,8 +108,14 @@ jobs:
           path: build/release/*.zip
           if-no-files-found: error
 
+  build-linux:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build-mode: release
+      upload-build-for-next-job: true
+
   publish:
-    needs: build-windows
+    needs: [build-windows, build-linux]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
@@ -119,10 +127,22 @@ jobs:
           name: urSovngarde-release
           path: release-files
 
-      - name: Verify the zips
+      - name: Download the Linux servers
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-asset-linux-*
+          path: release-files
+          merge-multiple: true
+
+      - name: Verify the zips and the Linux servers
         run: |
           for suffix in "" "-update" "-server"; do
             test -f "release-files/urSovngarde-${GITHUB_REF_NAME}${suffix}.zip"
+          done
+          for arch in amd64 arm64; do
+            archive="release-files/urSovngardeServer-${GITHUB_REF_NAME#v}-linux-${arch}.tar.gz"
+            tar -tzf "$archive" | grep -Eq '(^|/)urSovngardeServer$'
+            tar -tzf "$archive" | grep -Eq '(^|/)libSTServer\.so$'
           done
 
       - name: Create GitHub Release

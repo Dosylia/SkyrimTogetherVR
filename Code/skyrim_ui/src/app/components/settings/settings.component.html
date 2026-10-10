@@ -41,6 +41,16 @@
     </section>
 
     <section>
+      <h2>{{ 'COMPONENT.SETTINGS.VOICE' | transloco }}</h2>
+      <div class="setting">
+        <label>{{ 'COMPONENT.SETTINGS.TEST_MICROPHONE_INFO' | transloco }}</label>
+        <button data-style-ornament="simple" (click)="testMicrophone()">
+          {{ 'COMPONENT.SETTINGS.TEST_MICROPHONE' | transloco }}
+        </button>
+      </div>
+    </section>
+
+    <section>
       <h2>{{ 'COMPONENT.SETTINGS.UI' | transloco }}</h2>
       <div class="setting">
         <label>{{ 'COMPONENT.SETTINGS.LANGUAGE' | transloco }}</label>

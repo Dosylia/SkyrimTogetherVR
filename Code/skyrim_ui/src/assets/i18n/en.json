@@ -112,6 +112,9 @@
         "OUTDATED": "Version is outdated. Please update."
       },
       "AUDIO": "Audio",
+      "VOICE": "Voice",
+      "TEST_MICROPHONE_INFO": "Speak for five seconds, then hear it back",
+      "TEST_MICROPHONE": "Test my microphone",
       "MUTE_UI": "Mute User Interface",
       "UI_VOLUME": "User Interface Volume",
       "PARTY": "Party",

@@ -110,6 +110,9 @@
         "OUTDATED": "Deine Version ist nicht aktuell. Bitte aktualisiere sie."
       },
       "AUDIO": "Audio",
+      "VOICE": "Sprache",
+      "TEST_MICROPHONE_INFO": "Fünf Sekunden sprechen, dann anhören",
+      "TEST_MICROPHONE": "Mikrofon testen",
       "MUTE_UI": "UI Stummschalten",
       "UI_VOLUME": "UI Lautstärke",
       "PARTY": "Gruppe",

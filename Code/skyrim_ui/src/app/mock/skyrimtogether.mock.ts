@@ -140,6 +140,10 @@ export class SkyrimtogetherMock extends EventEmitter implements SkyrimTogether {
     }
   }
 
+  testMicrophone(): void {
+    console.log('Microphone test (the game records five seconds and plays them back)');
+  }
+
   launchParty(): void {
     if (this.connected) {
       this.emit('partyCreated');

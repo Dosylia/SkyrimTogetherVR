@@ -5,6 +5,7 @@
 
 #include <Services/OverlayClient.h>
 #include <Services/TransportService.h>
+#include <Services/VoiceService.h>
 #ifdef SKYRIMVR
 #include <Services/VRConnectService.h>
 #endif
@@ -83,6 +84,8 @@ bool OverlayClient::OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefR
             ProcessTeleportMessage(eventArgs);
         else if (eventName == "toggleDebugUI")
             ProcessToggleDebugUI();
+        else if (eventName == "testMicrophone")
+            World::Get().GetRunner().Queue([]() { World::Get().ctx().at<VoiceService>().StartMicrophoneTest(); });
 
         return true;
     }

@@ -105,6 +105,9 @@
     },
     "SETTINGS": {
       "AUDIO": "Audio",
+      "VOICE": "Voix",
+      "TEST_MICROPHONE_INFO": "Parlez cinq secondes, puis réécoutez-vous",
+      "TEST_MICROPHONE": "Tester mon micro",
       "MUTE_UI": "Interface silencieuse",
       "UI_VOLUME": "Volume de l'interface",
       "PARTY": "Groupe",

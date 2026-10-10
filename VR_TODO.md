@@ -115,6 +115,11 @@ controllers: `input vrTrackedSet`, one frame = HMD and both controllers, a 3x4 `
 5. Mounts: the rider's copy put on the horse directly (Sync).
 6. The skill book that cannot be taken after the other player touched it (Sync).
 
+Next big work (Emma, 2026-10-10 afternoon, for the public server: "Need plan for this and map pointers of players
+completed, this is next big work"): party members on the map (item 4, plan completed under Later) and proximity
+voice chat, our own first ("I would rather a test run with our own system and if it fails, then fall back to
+mumble"; plan under Later, "Proximity voice chat").
+
 - [ ] **The next build, after Emma's session of 2026-10-10** (handed over by the public-page session, which builds
       nothing itself). On disk, unbuilt: `AuthenticationRequest.HideFromPublicPage` and the new `PlayerPlaceRequest`
       (protocol change), the client's place updates (PlayerService, TransportService) and the server's
@@ -191,10 +196,12 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
 
 ### Decisions
 
-- [!] **Party members on the map: four choices** (plan under "Party members on the map and compass"). (1) The
-      quest's name in the journal: "Fellow travellers", or another. (2) Who is shown: party members only (planned),
-      or everyone on a public server. (3) A member standing next to you: keep the compass marker, or hide it while
-      you can see them. (4) The text: the name alone ("Seen"), or with the place ("Seen, near Whiterun").
+- [x] **Players on the map: decided** (Emma, 2026-10-10). (1) The quest is "Fellow travellers". (2) Everyone gets a
+      marker, "a bit different depending if on party or not": party members as quest markers on the map and the
+      compass, other players as a world-map icon only, never on the compass. (3) A party member whose body is loaded
+      in your game: marker hidden. (4) The text is the name and the place ("Seen, near Whiterun").
+- [x] **Proximity voice: decided** (Emma, 2026-10-10). (1) Everyone near you hears you (about 30 m). (2) Off until
+      each player turns it on. (3) Yes to a party channel heard at any distance, besides proximity.
 
 - [x] **How releases are made: both ways** (Emma, 2026-10-10: "Both options should work"). (1) GitHub builds them
       when a `vX.Y.Z` tag is pushed: `release.yml` rewritten to make `make-release.ps1`'s layout (`urSovngarde`,
@@ -728,24 +735,86 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       and showing objectives, VR addresses for the quest functions (the likely surprise), one VR session. Exact
       positions later would need a new message (everyone updates). Before it: try invite, accept and "teleport to" in
       VR once; never tried, our sessions were two players who knew where the other was.
-      Plan, 2026-10-10 (no code yet; Emma playing):
-      1. Records, in `GameFiles/Skyrim/SkyrimTogether.esp` with TES5VREdit (`E:\FUS\tools\SSEEdit 4.1.5f`): a misc
-         quest "Fellow travellers", started by the client on connect and stopped on disconnect; 7 reference aliases
-         (Member1..7, optional, "allow reserved"); 7 objectives, objective N aimed at alias N, text `<Alias=MemberN>`
-         so it shows the player's name; 7 persistent invisible markers (an activator with no model, so it can carry a
-         name) in a holding cell. Form ids written down once, used by the client.
-      2. Driving it from the client, all through papyrus natives the client already calls (`PAPYRUS_FUNCTION`), so
-         no new VR addresses: Quest.Start/Stop, ReferenceAlias.ForceRefTo, Quest.SetObjectiveDisplayed,
-         ObjectReference.SetDisplayName (SKSE VR) for the name. A new `PartyMarkerService`: once a second, for each
-         party member other than us, its slot's marker goes to that player's cell (`NotifyPlayerCellChanged`: centre
-         of the exterior cell, or the interior cell itself, where the game points at its door), its objective shown.
-         When the member's copy is loaded here, the alias points at the copy itself, exact and live. A member who
-         leaves the party or the server: objective hidden, slot freed.
-      3. Test in the rig: the bot in the party, then `teleport away`: papyrus checks the marker's position and
-         `IsObjectiveDisplayed`, a SHOT of the map (DevBench `menu`); `teleport back`: the alias on the copy. Then one
-         real session with Seen: the compass and the map in the headset.
-      4. Later, exact positions for far players: a server message with each party member's position every 2 s (a
-         protocol change, everyone updates); the public server's status push already sends x, y and heading.
-      Choices for Emma (under "Waiting on a test or action"): the quest's name; who is shown (party only, as planned,
-      or everyone on a public server); whether a member next to you keeps a compass marker; the objective text
-      (name alone, or "Seen travels near Whiterun").
+      Plan, completed 2026-10-10 afternoon (checked against the code; no code written yet). The plugin's last records
+      were added by hand in 2026-09; no generator for them in the repo.
+      1. Records, in `GameFiles/Skyrim/SkyrimTogether.esp` (the client finds its forms by name, as
+         `MagicService.cpp` does with `ModManager::Get()->GetByName("SkyrimTogether.esp")`), made by an xEdit script
+         kept in the repo (`Tools/VR/party-markers.pas`), run in TES5VREdit (`E:\FUS\tools\SSEEdit 4.1.5f`; once
+         from the command line if xEdit allows it, else one "Apply Script" click by Emma on a copy of the plugin):
+         a misc quest "Fellow travellers", not start-enabled; 7 persistent markers (an activator with no model, so it
+         can carry a name) in a small holding interior; 7 reference aliases Member1..7, each a forced reference to its
+         marker, so the client never fills aliases; 7 objectives, objective N aimed at alias N, text `<Alias=MemberN>`
+         (the marker's name). Form ids written down in the script's header.
+      2. Moving the markers natively, not by papyrus: `TESObjectREFR::MoveTo(cell, position)` (`TESObjectREFR.cpp`,
+         the call the teleport of an NPC already uses, `CharacterService::MoveActor`) takes any cell and its
+         worldspace. Far member: their cell from `NotifyPlayerCellChanged` (world and cell, already sent to everyone):
+         an exterior cell, the marker at its centre (grid x 4096 + 2048, the same for y; about 58 m of precision); an
+         interior, the marker inside it and the game itself points at the way in. Near member (their copy loaded
+         here): the marker follows the copy twice a second, so the compass is exact without touching aliases.
+      3. The quest from papyrus natives through `PapyrusService` (the `PAPYRUS_FUNCTION` pattern, as
+         `Quest.SetCurrentStageID` in `TESQuest.cpp`): Quest.Start on connect and Stop on disconnect,
+         Quest.SetObjectiveDisplayed per member, and SKSE VR's ObjectReference.SetDisplayName for the member's name
+         (fallback if the lookup fails: the name written natively on the marker). The only new risk: SKSE's natives
+         not found by name; the first rig step checks it before anything else is built.
+      4. `PartyMarkerService` (client, new): party members from `PartyService`, slot per member, once a second the
+         markers moved and objectives shown or hidden; a member leaving the party or the server frees the slot.
+         Nothing in the protocol.
+      5. Tests: in the rig, the bot joins the party (`party` commands), then `teleport away`: a log line with the
+         marker's cell and position, `IsObjectiveDisplayed` true, a SHOT of the map (DevBench `menu`); `teleport
+         back`: the marker on the copy. Then one session with Seen: the compass and the map in the headset.
+      6. Later, exact positions for far members: a server message with each party member's position every 2 s
+         (protocol change); the public server's status push already sends x, y and heading.
+      Decided by Emma (Decisions, "Players on the map: decided"), which adds to the steps above:
+      - Other players (not in the party): a world-map icon each, not on the compass. Records: a pool of persistent
+        map-marker references (32, a public server's size; one icon type unused by vanilla locations), named and
+        moved like the party markers (step 2) and made visible on the map; the pool slot freed when the player
+        leaves. To check in the rig first: a moved map marker redraws at its new place, and whether the game puts it
+        on the compass when near (if so, it is hidden while that player's body is loaded, like a party member).
+      - A party member whose body is loaded here: objective hidden (instead of the marker following the copy), shown
+        again when the copy unloads.
+      - Text "Seen, near Whiterun": the place is the name of the location of the member's cell, read in our game
+        from the cell `NotifyPlayerCellChanged` gives (no protocol change); a cell with no named location gives the
+        name alone.
+- [ ] **Proximity voice chat** (Emma, 2026-10-10, for the public server; "I would rather a test run with our own
+      system and if it fails, then fall back to mumble"; no extra install for players). Step 0 passed, so no Mumble:
+      0. Feasibility, about an hour, before anything else: the game's `steam_api64.dll` (F:\SteamLibrary\steamapps\
+         common\SkyrimVR, 2.89.45.4, interface `SteamUser018`) exports StartVoiceRecording, GetVoice,
+         DecompressVoice and GetVoiceOptimalSampleRate (flat API with the interface pointer first, from
+         `SteamClient()->GetISteamUser(SteamAPI_GetHSteamUser(), SteamAPI_GetHSteamPipe(), "SteamUser018")`). A
+         client test build records, logs the bytes GetVoice returns each second, and plays your own voice back to you
+         after a second (a loop through DecompressVoice and XAudio2). Passes if: speech gives data, silence gives
+         none (Steam's own voice detection, so no push-to-talk, nothing on a keyboard), the playback is clear.
+         Needs Emma for two minutes with the headset's microphone. Fails: Mumble (step 8).
+         [x] Passed 2026-10-10 13:08, Emma: "heard my voice perfectly". Log: 0 bytes in the silent first second,
+         then 751, 4648, 4638, 4506 bytes a second while talking; 64 packets, 16609 bytes, 0 failed to decode at
+         24000 Hz; logs\voice_test.bin kept for the bot (step 5). Her first tries looked dead because the game hides
+         HUD messages while a menu is open: the test now also writes each step ("recording now, speak", "recording
+         stopped", "playing it back", "Steam heard nothing...") into the menu's chat box, and logs GetVoice's answers
+         per second. That change is written, not yet built (she was playing). For step 3: decoding the whole test at
+         once cost one 37 ms frame; live voice decodes a packet at a time.
+      1. Capture: `VoiceService` (client) records while connected and voice is on, reads GetVoice every frame and
+         sends what it returns. Steam's compressed voice is small: measured 4.5 to 4.7 KB a second while talking, none in silence.
+      2. Transport: a new `VoiceData` request (sequence number, bytes) sent unreliable (`kUnreliable`, which
+         TiltedConnect has and nothing of ours uses yet; a lost packet is a skipped 20 ms, never a delay), and
+         `NotifyVoiceData` (player id, sequence, bytes) from the server only to the players within range of the
+         speaker, so a voice never reaches anyone who could not hear it. Protocol change: everyone updates. Goes
+         through the relay like everything else.
+      3. Playback: per speaker, DecompressVoice to 16-bit PCM, about 80 ms of buffer to absorb network jitter, one
+         XAudio2 voice each, placed with X3DAudio: the listener is our headset, the source the speaker copy's head.
+         Full volume up to about 5 m, silent by about 30 m (to tune in play). Everyone in range hears you (Emma's
+         choice), party or not. Party channel (Emma: yes): the server also forwards a speaker to their party members at
+         any distance; a member whose body is not loaded here is played without position, a little quieter, like a
+         radio; when the body is loaded, proximity takes over.
+      4. Controls without a keyboard: in the urSovngarde menu on the VR dashboard: voice on or off, mute a player,
+         volume. Off until each player turns it on (Emma's choice): no microphone is opened before that, and the
+         choice is remembered. Mute is local and remembered.
+      5. Tests: the rig has no voice, so the feasibility test also saves a few seconds of Emma's compressed voice to
+         a file; the bot replays it as a player's voice (a new bot command), and the rig checks it arrives and is
+         placed (log: volume and direction per speaker as the bot walks away). Then one session with Seen.
+      6. Privacy: voice passes through the server and the relay and is never stored; the privacy page (hub
+         `LAUNCHER.md` section 9 and the website) says so before it ships.
+      7. Cost on a public server: the server forwards each speaker to those in range; 10 people talking near each
+         other is about 30 KB a second per listener at most.
+      8. Fallback, only if step 0 fails: Mumble positional audio, the client writing our position and head to
+         MumbleLink each frame (no network work), the launcher installing Mumble and joining the server's channel;
+         needs a Mumble server for the public server (a small VPS, UDP; Cloudflare cannot host it).

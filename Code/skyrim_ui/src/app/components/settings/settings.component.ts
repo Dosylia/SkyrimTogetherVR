@@ -76,6 +76,11 @@ export class SettingsComponent {
     this.isVersionOutdated = this.isGameVersionOutdated();
   }
 
+  testMicrophone() {
+    this.client.testMicrophone();
+    this.sound.play(Sound.Ok);
+  }
+
   close() {
     this.done.next();
     this.sound.play(Sound.Ok);

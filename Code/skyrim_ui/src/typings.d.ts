@@ -391,6 +391,11 @@ interface SkyrimTogether {
   teleportToPlayer(playerId: number): void;
 
   /**
+   * Record five seconds from the microphone through Steam's voice and play them back.
+   */
+  testMicrophone(): void;
+
+  /**
    * Reconnect the client.
    */
   reconnect(): void;

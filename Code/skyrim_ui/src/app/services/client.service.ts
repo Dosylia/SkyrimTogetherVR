@@ -277,6 +277,10 @@ export class ClientService implements OnDestroy {
     skyrimtogether.teleportToPlayer(playerId);
   }
 
+  public testMicrophone(): void {
+    skyrimtogether.testMicrophone();
+  }
+
   /**
    * Called when the UI is first initialized.
    */
