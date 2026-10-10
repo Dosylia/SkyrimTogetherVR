@@ -1414,7 +1414,8 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return true;
     }
 
-    // "mount": this bot's character mounts the NPC it owns (a horse registered with "npc temp <base> mount"), as a
+    // "mount": this bot's character mounts the NPC it owns, the last one registered when there are several (register the
+    // horse with "npc temp <base> mount" after any other NPC), as a
     // rider's game reports it (MountRequest); the other games make their copy of the rider ride their copy of the horse.
     if (name == "mount")
     {

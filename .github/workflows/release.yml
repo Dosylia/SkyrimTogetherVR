@@ -66,6 +66,13 @@ jobs:
           xmake build SkyrimServerRunner
           xmake build TPProcess
 
+      # The encoding round trips and the rest of TPTests, as windows.yml runs them: a tag whose branch run was skipped
+      # or failed must not publish a release with a broken message.
+      - name: Run the tests
+        run: |
+          xmake build TPTests
+          xmake run TPTests
+
       - name: Gather the client's run-time files
         run: |
           xmake install -o distrib SkyrimTogetherClientVR

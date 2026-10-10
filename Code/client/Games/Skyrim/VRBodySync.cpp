@@ -4337,7 +4337,9 @@ struct LocalStop
     BladeExtent Extent{}; // measured on frames it was not turned
     int SaidLength = -1;
     // Which side of each copy blade ours was on at the last frame end, while free, to see it cross one.
-    std::unordered_map<uint64_t, float> LastSide;
+    // Two lists reused frame after frame, so the frame end allocates nothing once warm.
+    std::vector<std::pair<uint64_t, float>> LastSide;
+    std::vector<std::pair<uint64_t, float>> Sides;
     // The blade it rests on (0: free), the side of it ours is held on (SideOf's sign), and what to say on letting go.
     uint64_t Key = 0;
     float HeldSide = 0.f;
@@ -4489,7 +4491,7 @@ void StopLocalBlades(const std::chrono::steady_clock::time_point aNow) noexcept
         // Free: did it pass through one of his blades since the last frame end, within the length of both?
         if (!stop.Key)
         {
-            std::unordered_map<uint64_t, float> sides;
+            stop.Sides.clear();
             for (const CopyBlade& his : s_copyBlades)
             {
                 if (glm::distance(his.Segment.Grip, ours.Grip) > ours.Length + his.Segment.Length + 20.f)
@@ -4497,8 +4499,8 @@ void StopLocalBlades(const std::chrono::steady_clock::time_point aNow) noexcept
                 glm::vec3 normal{};
                 const float sideNow = SideOf(ours, his.Segment, normal);
                 const float sign = sideNow > 0.f ? 1.f : sideNow < 0.f ? -1.f : 0.f;
-                sides[his.Key] = sign;
-                const auto before = stop.LastSide.find(his.Key);
+                stop.Sides.emplace_back(his.Key, sign);
+                const auto before = std::find_if(stop.LastSide.begin(), stop.LastSide.end(), [&his](const auto& acEntry) { return acEntry.first == his.Key; });
                 if (stop.Key || sign == 0.f || before == stop.LastSide.end() || before->second == 0.f || before->second == sign)
                     continue;
                 float t = 0.f, v = 0.f;
@@ -4528,7 +4530,7 @@ void StopLocalBlades(const std::chrono::steady_clock::time_point aNow) noexcept
                 spdlog::info("BladeStop: our {} blade met {:X}'s {} blade at ({:.0f}, {:.0f}, {:.0f}), {:.0f} units from our grip and {:.0f} from his; held on this side of it",
                              side ? "right" : "left", static_cast<uint32_t>(his.Key >> 1), his.Key & 1 ? "right" : "left", at.x, at.y, at.z, t, v);
             }
-            stop.LastSide.swap(sides);
+            stop.LastSide.swap(stop.Sides);
         }
 
         // Held: turned about the grip into the plane of his blade, resting on it on the side it came from.
