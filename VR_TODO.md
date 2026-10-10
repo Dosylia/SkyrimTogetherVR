@@ -172,8 +172,11 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
 - [x] **The weapon's visible blade** (2026-10-07, built with the corpse fix): `kWorldBoundOffset` is 0xE4; nothing
       reads it on a live path any more (`ReadWorldBound` has no caller), only the shape report's line. Was: `kWorldBoundOffset` 0xB0 is `previousWorld`; the world bound is at 0xE4 on VR
       (measured 2026-10-06). Batch into another item's build.
-- [!] **The arrow nocked on the other player's bow** (2026-10-09: blocked on a measurement only a person can make,
-      "Next session, a few arrows" under Actions). Cause known: the arrow on the string is an animation attachment
+- [ ] **The arrow nocked on the other player's bow** (measured 2026-10-10 in Emma's 11:40 session, Seen: "dosylia
+      loaded an arrow in the bow but seenfront does not see it"). A full VR draw goes 8, 9 (bow draw), 10 (arrow
+      attached), the arrow flies while the state is 10 (11:40:53.463, "Projectile launch: shooter 14"), then 0; it never
+      reaches 11, 12 or 13. So the state does move: send 9 and 10 to the other game and set them on the copy, then
+      check the arrow shows on its string. Was blocked on that measurement. Cause known: the arrow on the string is an animation attachment
       driven by the attack state (`ActorState::AttackState()`, 9 to 13), which nothing syncs; whether VR archery moves
       that state through a real draw is unknown (2026-09-27 saw only 8, 9, 10, 0 within a second: a bow raised, no
       arrow shot). The log line is in the build (`VRArchery: local attack state`, `CharacterService.cpp`). Then: sync
@@ -183,6 +186,11 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
 ## Waiting on a test or action
 
 ### Decisions
+
+- [!] **Party members on the map: four choices** (plan under "Party members on the map and compass"). (1) The
+      quest's name in the journal: "Fellow travellers", or another. (2) Who is shown: party members only (planned),
+      or everyone on a public server. (3) A member standing next to you: keep the compass marker, or hide it while
+      you can see them. (4) The text: the name alone ("Seen"), or with the place ("Seen, near Whiterun").
 
 - [x] **How releases are made: both ways** (Emma, 2026-10-10: "Both options should work"). (1) GitHub builds them
       when a `vX.Y.Z` tag is pushed: `release.yml` rewritten to make `make-release.ps1`'s layout (`urSovngarde`,
@@ -336,9 +344,8 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
 - [!] **Seen's mods match yours:** his newer VR Address Library crashed him on loading (Community Shaders patches the
       wrong spot); your combined `version-1-4-15-0.csv` fixes it (KNOWN_ISSUES section 1).
 - [x] **Seen's health bar in your fights** (8 and 9 Oct). Emma, 2026-10-09: "Health bar is fully fixed".
-- [!] **Next session, a few arrows:** draw a bow fully and shoot three or four arrows, at anything. Your log's
-      "VRArchery: local attack state" lines then say whether a VR draw moves the game's archery state (11 drawn,
-      12 releasing, 13 released), which decides how the arrow on the string is shown in the other game.
+- [x] **Next session, a few arrows:** done 2026-10-10. A VR draw goes 8, 9, 10 and the arrow flies at 10; it never
+      reaches 11 to 13. The nocked-arrow item is open again with this.
 
 ## Built, waiting for a real session
 
@@ -539,7 +546,7 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       Done in the work queue (0xE4, 2026-10-07).
 - [ ] The other player's hands sit slightly off (palms together, a little low): structural, `VRPose`.
 - [ ] Your own sword hitting where the blade is not (2026-09-24 screenshots). ["4. Position accuracy"]
-- [!] Nocked arrow on the other player's bow: waits for "Next session, a few arrows" (Actions); see the work queue.
+- [ ] Nocked arrow on the other player's bow: measured 2026-10-10 (the state moves 8, 9, 10); see the work queue.
       ["VRIK and HIGGS interactions"]
 - [x] Objects already in the world moved by hand (a cup on a table) are not seen moving; dropped items are. Done
       earlier (VR_HISTORY: movable objects within 400 units are watched and sent, 22ae2af; `live-world-object` green
@@ -717,3 +724,24 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       and showing objectives, VR addresses for the quest functions (the likely surprise), one VR session. Exact
       positions later would need a new message (everyone updates). Before it: try invite, accept and "teleport to" in
       VR once; never tried, our sessions were two players who knew where the other was.
+      Plan, 2026-10-10 (no code yet; Emma playing):
+      1. Records, in `GameFiles/Skyrim/SkyrimTogether.esp` with TES5VREdit (`E:\FUS\tools\SSEEdit 4.1.5f`): a misc
+         quest "Fellow travellers", started by the client on connect and stopped on disconnect; 7 reference aliases
+         (Member1..7, optional, "allow reserved"); 7 objectives, objective N aimed at alias N, text `<Alias=MemberN>`
+         so it shows the player's name; 7 persistent invisible markers (an activator with no model, so it can carry a
+         name) in a holding cell. Form ids written down once, used by the client.
+      2. Driving it from the client, all through papyrus natives the client already calls (`PAPYRUS_FUNCTION`), so
+         no new VR addresses: Quest.Start/Stop, ReferenceAlias.ForceRefTo, Quest.SetObjectiveDisplayed,
+         ObjectReference.SetDisplayName (SKSE VR) for the name. A new `PartyMarkerService`: once a second, for each
+         party member other than us, its slot's marker goes to that player's cell (`NotifyPlayerCellChanged`: centre
+         of the exterior cell, or the interior cell itself, where the game points at its door), its objective shown.
+         When the member's copy is loaded here, the alias points at the copy itself, exact and live. A member who
+         leaves the party or the server: objective hidden, slot freed.
+      3. Test in the rig: the bot in the party, then `teleport away`: papyrus checks the marker's position and
+         `IsObjectiveDisplayed`, a SHOT of the map (DevBench `menu`); `teleport back`: the alias on the copy. Then one
+         real session with Seen: the compass and the map in the headset.
+      4. Later, exact positions for far players: a server message with each party member's position every 2 s (a
+         protocol change, everyone updates); the public server's status push already sends x, y and heading.
+      Choices for Emma (under "Waiting on a test or action"): the quest's name; who is shown (party only, as planned,
+      or everyone on a public server); whether a member next to you keeps a compass marker; the objective text
+      (name alone, or "Seen travels near Whiterun").

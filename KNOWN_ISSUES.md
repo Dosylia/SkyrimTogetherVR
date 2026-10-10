@@ -433,7 +433,11 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   before naming a cause.
 - Seen, 11:15:44, at the main menu, not yet connected: `libcef.dll` int3. CEF's own log says it all: "GPU process launch
   failed: error_code=63" nine times in 30 ms, then "GPU process isn't usable. Goodbye." CEF could not start its helper
-  program at all. Emma: it is the crash when leaving (three that morning). Fixed in code, not yet built: CEF now runs
-  its GPU work in the game process (`disable-gpu`, `disable-gpu-compositing`, `in-process-gpu`, from
-  `UrSovngardeOverlayApp` in the client's `OverlayService.cpp`; the overlay is painted on the CPU anyway), so there is no GPU program to launch. To check after the
-  build: the menus still draw, and leaving no longer crashes. Hub report 20261010-091857-9cb48f47.
+  program at all. Emma: it is the crash when leaving (three that morning). Hub report 20261010-091857-9cb48f47.
+  **Open again.** The fix in 6dcc25a1 (CEF's GPU work in the game process: `disable-gpu`, `disable-gpu-compositing`,
+  `in-process-gpu`) was worse than the crash and is taken out. In the game the GPU thread could not make a GL context
+  and retried without end, logging every try ("Failed to create GLES3 context", "kFatalFailure", "Failed to create
+  SharedImageStub", all in the same millisecond): `logs/cef_debug.log` reached 8 GB between 11:40 and 12:02, E: had 0
+  bytes free, Skyrim's saves failed from 11:56 ("The save/load operation failed", empty `.ess.tmp` files; the last whole
+  save is the 11:43 autosave) and MO2 could not write its ini ("File is write protected"). Seen ran the same build. Any
+  next try is measured in the rig first: the size of `cef_debug.log` after ten minutes, and the menus drawn.

@@ -159,27 +159,14 @@ void OverlayService::CreateVR() noexcept
 }
 #endif
 
-// The overlay is painted on the CPU (OnPaint), so CEF needs no GPU process. When one could not be launched (2026-10-10,
-// both players: "GPU process launch failed: error_code=63" nine times in 30 ms while the game was leaving), CEF ended the
-// whole game ("GPU process isn't usable. Goodbye.", the crash at libcef.dll+7A52582). With its GPU work in the browser
-// process and software compositing, there is no GPU process to launch. Here rather than in TiltedUI, which is
-// upstream's repository.
-struct UrSovngardeOverlayApp final : OverlayApp
-{
-    using OverlayApp::OverlayApp;
-
-    void OnBeforeCommandLineProcessing(const CefString& aProcessType, CefRefPtr<CefCommandLine> aCommandLine) override
-    {
-        OverlayApp::OnBeforeCommandLineProcessing(aProcessType, aCommandLine);
-        aCommandLine->AppendSwitch("disable-gpu");
-        aCommandLine->AppendSwitch("disable-gpu-compositing");
-        aCommandLine->AppendSwitch("in-process-gpu");
-    }
-};
-
+// CEF keeps its own GPU process. 6dcc25a1 moved that work into the game ("disable-gpu", "disable-gpu-compositing",
+// "in-process-gpu") to stop the leaving crash at libcef.dll+7A52582; in the game process the GPU thread could not make
+// a GL context ("Failed to create GLES3 context ... kFatalFailure", "Failed to create SharedImageStub"), retried without
+// end and logged every try: cef_debug.log reached 8 GB in 22 minutes on 2026-10-10 and filled the disk, and saves then
+// failed. The leaving crash is open again (KNOWN_ISSUES); it only happens while the game is already closing.
 void OverlayService::CreateOverlay(OverlayApp::RenderProvider* apProvider) noexcept
 {
-    m_pOverlay = new UrSovngardeOverlayApp(apProvider, new ::OverlayClient(m_transport, apProvider->Create()));
+    m_pOverlay = new OverlayApp(apProvider, new ::OverlayClient(m_transport, apProvider->Create()));
 
     if (!m_pOverlay->Initialize())
     {
