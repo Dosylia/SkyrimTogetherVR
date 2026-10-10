@@ -1,0 +1,51 @@
+# Against a real game: the other players on the map and the compass (VR_TODO, "Players on the map").
+#
+#   python Tools\VR\live-check.py live-markers
+#
+# The bot joins the game's party (the server's automatic party), so it is a "Fellow travellers" objective: while its
+# body is in the game its marker waits in the holding cell; five cells away the body unloads and the marker follows
+# it. Leaving the party turns it into a world-map icon (map markers end in 5040 to 505F), never on the compass.
+# The DO papyrus lines name SkyrimTogether.esp's records at its place in Emma's load order (8A); they print what the
+# game answers (objective 1 shown, where party marker 1 and map marker 1 stand).
+log live markers
+waitfor connected 45
+waitfor known other 40
+wait 8
+
+log CHECK logged Player markers: forms found
+log CHECK logged quest Fellow travellers started
+log CHECK absent Player markers: .*(missing|not found|no map marker data)
+wait 2
+
+log -- near: its body is in the game, so no marker
+log CHECK absent Player markers: \w+ follows player
+wait 2
+
+log -- walking five cells away: its body leaves the game, its party marker follows it
+walk rel 20000 0 3000
+wait 14
+log CHECK logged Player markers: \w+50[2][0-6] follows player
+log CHECK logged Player markers: objective 1 for player \d+ shown: yes
+log DO papyrus Quest IsObjectiveDisplayed 8A005000 n:1
+log DO papyrus ObjectReference GetPositionX 8A005020
+log DO papyrus ObjectReference GetPositionY 8A005020
+log DO papyrus ObjectReference GetParentCell 8A005020
+wait 4
+
+log -- leaving the party: the party marker is put away, a map icon follows instead
+party leave
+wait 8
+log CHECK logged Player markers: \w+50[2][0-6] put away
+log CHECK logged Player markers: \w+50[45][0-9A-F] follows player
+log DO papyrus Quest IsObjectiveDisplayed 8A005000 n:1
+log DO papyrus ObjectReference GetPositionX 8A005040
+log DO papyrus ObjectReference GetParentCell 8A005040
+wait 2
+
+log -- back near: the icon is put away too
+walk rel -20000 0 3000
+wait 14
+log CHECK logged Player markers: \w+50[45][0-9A-F] put away
+wait 2
+log done
+stop

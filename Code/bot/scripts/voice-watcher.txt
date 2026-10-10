@@ -1,0 +1,29 @@
+# The listening half of the voice test; the actor's script says what it does and why.
+#
+# "party lead": this bot leads the party, so the actor joins it as a member on arriving (the server's automatic
+# party) and the party channel can be tested before it leaves.
+
+log voice watcher
+party lead
+waitfor connected 45
+record voice watcher
+voice on
+
+waitfor known other 40
+
+log near, in the party
+waitfor voices >= 38 40
+log far, in the party
+waitfor voices >= 78 60
+log back near, out of the party: the far phase between must have added nothing
+waitfor voices >= 118 90
+wait 6
+expect voices <= 122
+
+log the server says where the other player is, every two seconds
+expect whereabouts >= 10
+
+record off
+report bot-voice-watcher.txt
+log done
+stop

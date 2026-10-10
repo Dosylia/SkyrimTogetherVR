@@ -1,8 +1,22 @@
 #include <Services/VoiceService.h>
 
+#include <Events/ConnectedEvent.h>
+#include <Events/DisconnectedEvent.h>
 #include <Events/UpdateEvent.h>
 #include <PerfScope.h>
 #include <Services/OverlayService.h>
+#include <Services/PartyService.h>
+#include <Services/TransportService.h>
+#include <Components.h>
+#include <PlayerCharacter.h>
+#include <Forms/TESForm.h>
+#ifdef SKYRIMVR
+#include <Games/Skyrim/VRBodySync.h>
+#endif
+
+#include <Messages/NotifyVoiceData.h>
+#include <Messages/VoiceDataRequest.h>
+#include <Messages/VoiceStateRequest.h>
 #include <Utils.h>
 #include <World.h>
 
@@ -138,12 +152,68 @@ void TellPlayer(const std::string& acMessage) noexcept
 constexpr auto kTestLength = std::chrono::seconds(5);
 // Steam goes on giving the end of the speech for a moment after StopVoiceRecording.
 constexpr auto kDrainLength = std::chrono::milliseconds(600);
+
+// Live voice. Distances in game units, about 70 to the metre.
+constexpr float kFullVolumeDistance = 350.f; // 5 m
+constexpr float kSilentDistance = 2100.f;    // 30 m; the server stops sending a little further (34 m)
+constexpr float kHeadHeight = 120.f;         // a standing character's mouth above their feet
+// A party member heard from afar, or whose body is not in our game: centred and a little quieter, like a radio.
+constexpr float kRadioGain = 0.6f;
+// A voice the server says is near but whose body is not loaded here yet.
+constexpr float kUnplacedGain = 0.5f;
+// Held back after a silence before playing, to ride out the network's unevenness; played anyway after kJitterWait.
+constexpr uint32_t kJitterMs = 80;
+constexpr auto kJitterWait = std::chrono::milliseconds(150);
+// More than this queued and we are falling behind: new pieces are dropped until it drains.
+constexpr uint32_t kMaxQueuedMs = 400;
+constexpr auto kSpeakerIdle = std::chrono::seconds(30);
+
+float DistanceGain(float aDistance) noexcept
+{
+    if (aDistance <= kFullVolumeDistance)
+        return 1.f;
+    if (aDistance >= kSilentDistance)
+        return 0.f;
+    const float cFade = 1.f - (aDistance - kFullVolumeDistance) / (kSilentDistance - kFullVolumeDistance);
+    return cFade * cFade;
+}
+
+Actor* FindPlayerActor(World& aWorld, uint32_t aPlayerId) noexcept
+{
+    auto view = aWorld.view<FormIdComponent, PlayerComponent>();
+    for (const auto cEntity : view)
+    {
+        if (view.get<PlayerComponent>(cEntity).Id == aPlayerId)
+            return Cast<Actor>(TESForm::GetById(view.get<FormIdComponent>(cEntity).Id));
+    }
+    return nullptr;
+}
+
+// Where our ears are: the headset in VR, else the character's head facing its heading.
+bool ListenerPose(glm::vec3& aPosition, glm::vec3& aForward, glm::vec3& aRight) noexcept
+{
+#ifdef SKYRIMVR
+    if (VRBodySync::HeadsetPose(aPosition, aForward, aRight))
+        return true;
+#endif
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer)
+        return false;
+    const float cHeading = pPlayer->rotation.z;
+    aPosition = glm::vec3(pPlayer->position.x, pPlayer->position.y, pPlayer->position.z + kHeadHeight);
+    aForward = glm::vec3(std::sin(cHeading), std::cos(cHeading), 0.f);
+    aRight = glm::vec3(std::cos(cHeading), -std::sin(cHeading), 0.f);
+    return true;
+}
 } // namespace
 
 VoiceService::VoiceService(World& aWorld, entt::dispatcher& aDispatcher)
     : m_world(aWorld)
 {
     m_updateConnection = aDispatcher.sink<UpdateEvent>().connect<&VoiceService::OnUpdate>(this);
+    m_connectedConnection = aDispatcher.sink<ConnectedEvent>().connect<&VoiceService::OnConnected>(this);
+    m_disconnectedConnection = aDispatcher.sink<DisconnectedEvent>().connect<&VoiceService::OnDisconnected>(this);
+    m_voiceDataConnection = aDispatcher.sink<NotifyVoiceData>().connect<&VoiceService::OnVoiceData>(this);
 }
 
 void VoiceService::StartMicrophoneTest() noexcept
@@ -169,6 +239,8 @@ void VoiceService::StartMicrophoneTest() noexcept
     m_lastResult = -1;
     m_resultCounts.fill(0);
 
+    // The test reads Steam's voice itself; live voice takes the microphone back when it ends.
+    m_capturing = false;
     steam.Start(steam.User);
 
     const auto cNow = std::chrono::steady_clock::now();
@@ -183,12 +255,18 @@ void VoiceService::StartMicrophoneTest() noexcept
 
 void VoiceService::OnUpdate(const UpdateEvent&) noexcept
 {
-    if (m_testState == TestState::kIdle)
+    if (m_testState == TestState::kIdle && !m_capturing && m_speakers.empty() && !(m_enabled && m_connected))
         return;
 
     PerfScope perfScope("VoiceService::OnUpdate");
 
     const auto cNow = std::chrono::steady_clock::now();
+    UpdateCapture();
+    UpdateSpeakers(cNow);
+
+    if (m_testState == TestState::kIdle)
+        return;
+
     auto& steam = SteamVoice::Get();
 
     switch (m_testState)
@@ -361,12 +439,15 @@ void VoiceService::SaveRecording() const noexcept
     spdlog::info("Voice test: recording saved to {}", cPath.string());
 }
 
-bool VoiceService::Play(const std::vector<int16_t>& acSamples, uint32_t aSampleRate) noexcept
+bool VoiceService::EnsureAudio() noexcept
 {
     // XAudio2 2.9 is part of Windows 10 and 11; loaded by hand so the client needs no new import. Never released: the
     // engine lives as long as the game, and tearing it down while the game exits only risks a crash on the way out.
+    if (m_audioFailed)
+        return false;
     if (!m_pXAudio)
     {
+        m_audioFailed = true; // until it has fully started
         const HMODULE cModule = LoadLibraryW(L"xaudio2_9.dll");
         using TXAudio2Create = HRESULT(WINAPI*)(IXAudio2**, UINT32, XAUDIO2_PROCESSOR);
         const auto pCreate = cModule ? reinterpret_cast<TXAudio2Create>(GetProcAddress(cModule, "XAudio2Create")) : nullptr;
@@ -392,7 +473,20 @@ bool VoiceService::Play(const std::vector<int16_t>& acSamples, uint32_t aSampleR
             m_pXAudio = nullptr;
             return false;
         }
+
+        XAUDIO2_VOICE_DETAILS details{};
+        m_pMasteringVoice->GetVoiceDetails(&details);
+        m_outputChannels = std::max<uint32_t>(1, details.InputChannels);
+        spdlog::info("Voice: audio out ready, {} channels at {} Hz", m_outputChannels, details.InputSampleRate);
+        m_audioFailed = false;
     }
+    return true;
+}
+
+bool VoiceService::Play(const std::vector<int16_t>& acSamples, uint32_t aSampleRate) noexcept
+{
+    if (!EnsureAudio())
+        return false;
 
     WAVEFORMATEX format{};
     format.wFormatTag = WAVE_FORMAT_PCM;
@@ -433,4 +527,314 @@ bool VoiceService::Play(const std::vector<int16_t>& acSamples, uint32_t aSampleR
     m_playbackLength = std::chrono::milliseconds(m_playback.size() * 1000 / aSampleRate);
     spdlog::info("Voice test: playing {} ms back", m_playbackLength.count());
     return true;
+}
+
+void VoiceService::SetEnabled(bool aEnabled) noexcept
+{
+    if (aEnabled == m_enabled)
+        return;
+
+    m_enabled = aEnabled;
+    spdlog::info("Voice: turned {}", aEnabled ? "on" : "off");
+    if (!aEnabled)
+    {
+        StopCapture();
+        RemoveSpeakers();
+    }
+    SendVoiceState();
+}
+
+void VoiceService::SetVolume(float aVolume) noexcept
+{
+    m_volume = std::clamp(aVolume, 0.f, 2.f);
+}
+
+void VoiceService::SetPlayerMuted(uint32_t aPlayerId, bool aMuted) noexcept
+{
+    if (aMuted)
+    {
+        m_muted.insert(aPlayerId);
+        if (const auto it = m_speakers.find(aPlayerId); it != m_speakers.end())
+        {
+            if (it->second.pVoice)
+                it->second.pVoice->DestroyVoice();
+            m_speakers.erase(it);
+        }
+    }
+    else
+        m_muted.erase(aPlayerId);
+}
+
+void VoiceService::OnConnected(const ConnectedEvent&) noexcept
+{
+    m_connected = true;
+    m_sequence = 0;
+    SendVoiceState();
+}
+
+void VoiceService::OnDisconnected(const DisconnectedEvent&) noexcept
+{
+    m_connected = false;
+    StopCapture();
+    RemoveSpeakers();
+}
+
+void VoiceService::SendVoiceState() const noexcept
+{
+    if (!m_connected)
+        return;
+
+    VoiceStateRequest request{};
+    request.Enabled = m_enabled;
+    m_world.GetTransport().Send(request);
+}
+
+void VoiceService::UpdateCapture() noexcept
+{
+    auto& steam = SteamVoice::Get();
+    if (!m_enabled || !m_connected || m_testState != TestState::kIdle || !steam.IsReady())
+    {
+        if (m_capturing)
+            StopCapture();
+        return;
+    }
+
+    if (!m_capturing)
+    {
+        steam.Start(steam.User);
+        m_capturing = true;
+        m_readBuffer.resize(std::max<size_t>(m_readBuffer.size(), 8 * 1024));
+        spdlog::info("Voice: microphone on");
+    }
+
+    // Everything Steam has, every frame, so nothing waits: each GetVoice is one piece of a few hundred bytes.
+    for (int i = 0; i < 8; ++i)
+    {
+        uint32_t written = 0;
+        const int cResult = steam.GetVoice(steam.User, true, m_readBuffer.data(), static_cast<uint32_t>(m_readBuffer.size()), &written, false, nullptr, 0, nullptr, 0);
+        if (cResult == kVoiceBufferTooSmall)
+        {
+            m_readBuffer.resize(m_readBuffer.size() * 2);
+            continue;
+        }
+        if (cResult != kVoiceOK || written == 0 || written > VoiceDataRequest::kMaxBytes)
+            break;
+
+        VoiceDataRequest request{};
+        request.Sequence = m_sequence++;
+        request.Data.assign(m_readBuffer.begin(), m_readBuffer.begin() + written);
+        m_world.GetTransport().SendUnreliable(request);
+        ++m_sentThisMinute;
+    }
+}
+
+void VoiceService::StopCapture() noexcept
+{
+    if (!m_capturing)
+        return;
+
+    auto& steam = SteamVoice::Get();
+    if (steam.IsReady())
+        steam.Stop(steam.User);
+    m_capturing = false;
+    spdlog::info("Voice: microphone off");
+}
+
+void VoiceService::OnVoiceData(const NotifyVoiceData& acMessage) noexcept
+{
+    if (!m_enabled || acMessage.Data.empty() || m_muted.contains(acMessage.PlayerId))
+        return;
+
+    auto& steam = SteamVoice::Get();
+    if (!steam.IsReady() || !EnsureAudio())
+        return;
+    if (m_sampleRate == 0)
+        m_sampleRate = steam.OptimalSampleRate(steam.User);
+
+    Speaker& speaker = m_speakers[acMessage.PlayerId];
+    // Unreliable pieces can arrive late: one older than the last played is dropped.
+    if (speaker.HasSequence && static_cast<int32_t>(acMessage.Sequence - speaker.LastSequence) <= 0)
+        return;
+    speaker.LastSequence = acMessage.Sequence;
+    speaker.HasSequence = true;
+
+    const auto cNow = std::chrono::steady_clock::now();
+    speaker.LastHeard = cNow;
+    ++m_heardThisMinute;
+
+    if (m_decodeBuffer.size() < 32 * 1024)
+        m_decodeBuffer.resize(32 * 1024);
+    uint32_t written = 0;
+    int result = steam.Decompress(steam.User, acMessage.Data.data(), static_cast<uint32_t>(acMessage.Data.size()), m_decodeBuffer.data(), static_cast<uint32_t>(m_decodeBuffer.size()), &written, m_sampleRate);
+    if (result == kVoiceBufferTooSmall && written > m_decodeBuffer.size())
+    {
+        m_decodeBuffer.resize(written);
+        result = steam.Decompress(steam.User, acMessage.Data.data(), static_cast<uint32_t>(acMessage.Data.size()), m_decodeBuffer.data(), static_cast<uint32_t>(m_decodeBuffer.size()), &written, m_sampleRate);
+    }
+    if (result != kVoiceOK || written < sizeof(int16_t))
+        return;
+
+    const auto* pSamples = reinterpret_cast<const int16_t*>(m_decodeBuffer.data());
+    std::vector<int16_t> samples(pSamples, pSamples + written / sizeof(int16_t));
+
+    if (!speaker.pVoice)
+    {
+        WAVEFORMATEX format{};
+        format.wFormatTag = WAVE_FORMAT_PCM;
+        format.nChannels = 1;
+        format.nSamplesPerSec = m_sampleRate;
+        format.wBitsPerSample = 16;
+        format.nBlockAlign = format.nChannels * format.wBitsPerSample / 8;
+        format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
+
+        if (FAILED(m_pXAudio->CreateSourceVoice(&speaker.pVoice, &format)) || FAILED(speaker.pVoice->Start(0)))
+        {
+            spdlog::warn("Voice: could not open a voice for player {}", acMessage.PlayerId);
+            if (speaker.pVoice)
+                speaker.pVoice->DestroyVoice();
+            m_speakers.erase(acMessage.PlayerId);
+            return;
+        }
+        spdlog::info("Voice: hearing player {}", acMessage.PlayerId);
+        PlaceSpeaker(acMessage.PlayerId, speaker);
+    }
+
+    ReleasePlayed(speaker);
+    if (speaker.Queued.empty())
+    {
+        // Nothing playing: start again only once a little is gathered.
+        if (speaker.Waiting.empty())
+            speaker.WaitingSince = cNow;
+        speaker.Waiting.insert(speaker.Waiting.end(), samples.begin(), samples.end());
+        if (speaker.Waiting.size() >= m_sampleRate * kJitterMs / 1000)
+            Submit(speaker, std::move(speaker.Waiting));
+    }
+    else if (speaker.QueuedSamples < m_sampleRate * kMaxQueuedMs / 1000)
+        Submit(speaker, std::move(samples));
+}
+
+void VoiceService::ReleasePlayed(Speaker& aSpeaker) noexcept
+{
+    if (!aSpeaker.pVoice)
+        return;
+
+    XAUDIO2_VOICE_STATE state{};
+    aSpeaker.pVoice->GetState(&state, XAUDIO2_VOICE_NOSAMPLESPLAYED);
+    // XAudio2 finishes buffers in the order they were given.
+    while (aSpeaker.Queued.size() > state.BuffersQueued)
+    {
+        aSpeaker.QueuedSamples -= aSpeaker.Queued.front().size();
+        aSpeaker.Queued.pop_front();
+    }
+}
+
+void VoiceService::Submit(Speaker& aSpeaker, std::vector<int16_t>&& aSamples) noexcept
+{
+    if (!aSpeaker.pVoice || aSamples.empty() || aSpeaker.Queued.size() >= XAUDIO2_MAX_QUEUED_BUFFERS)
+    {
+        aSamples.clear();
+        return;
+    }
+
+    // Moved, not copied: the samples XAudio2 reads stay where they are while the deque grows.
+    auto& queued = aSpeaker.Queued.emplace_back(std::move(aSamples));
+    aSamples.clear();
+
+    XAUDIO2_BUFFER buffer{};
+    buffer.AudioBytes = static_cast<UINT32>(queued.size() * sizeof(int16_t));
+    buffer.pAudioData = reinterpret_cast<const BYTE*>(queued.data());
+    if (FAILED(aSpeaker.pVoice->SubmitSourceBuffer(&buffer)))
+    {
+        aSpeaker.Queued.pop_back();
+        return;
+    }
+    aSpeaker.QueuedSamples += queued.size();
+}
+
+void VoiceService::UpdateSpeakers(std::chrono::steady_clock::time_point aNow) noexcept
+{
+    for (auto it = m_speakers.begin(); it != m_speakers.end();)
+    {
+        Speaker& speaker = it->second;
+        ReleasePlayed(speaker);
+
+        // The end of a short phrase never reaches kJitterMs on its own.
+        if (speaker.Queued.empty() && !speaker.Waiting.empty() && aNow - speaker.WaitingSince >= kJitterWait)
+            Submit(speaker, std::move(speaker.Waiting));
+
+        if (speaker.Queued.empty() && speaker.Waiting.empty() && aNow - speaker.LastHeard >= kSpeakerIdle)
+        {
+            if (speaker.pVoice)
+                speaker.pVoice->DestroyVoice();
+            it = m_speakers.erase(it);
+            continue;
+        }
+
+        PlaceSpeaker(it->first, speaker);
+        ++it;
+    }
+
+    if (aNow - m_lastMinuteReport >= std::chrono::minutes(1))
+    {
+        if (m_sentThisMinute || m_heardThisMinute)
+            spdlog::info("Voice: last minute, {} pieces sent, {} heard from {} players", m_sentThisMinute, m_heardThisMinute, m_speakers.size());
+        m_sentThisMinute = 0;
+        m_heardThisMinute = 0;
+        m_lastMinuteReport = aNow;
+    }
+}
+
+void VoiceService::PlaceSpeaker(uint32_t aPlayerId, Speaker& aSpeaker) noexcept
+{
+    if (!aSpeaker.pVoice)
+        return;
+
+    const auto& partyMembers = m_world.GetPartyService().GetPartyMembers();
+    const bool cIsParty = std::find(partyMembers.begin(), partyMembers.end(), aPlayerId) != partyMembers.end();
+
+    float gain = cIsParty ? kRadioGain : kUnplacedGain;
+    float pan = 0.f; // -1 left, 1 right
+
+    glm::vec3 listener{}, forward{}, right{};
+    Actor* pActor = FindPlayerActor(m_world, aPlayerId);
+    if (pActor && ListenerPose(listener, forward, right))
+    {
+        const glm::vec3 cMouth(pActor->position.x, pActor->position.y, pActor->position.z + kHeadHeight);
+        const glm::vec3 cToSpeaker = cMouth - listener;
+        const float cDistance = glm::length(cToSpeaker);
+        gain = DistanceGain(cDistance);
+        if (cDistance > 1.f)
+            pan = std::clamp(glm::dot(cToSpeaker / cDistance, right), -1.f, 1.f);
+
+        // A party member stays heard at any distance: as a radio, centred, once their own voice would be quieter.
+        if (cIsParty && gain < kRadioGain)
+        {
+            pan *= gain / kRadioGain;
+            gain = kRadioGain;
+        }
+    }
+
+    // Equal power between left and right; channels past the first two get nothing.
+    std::array<float, XAUDIO2_MAX_AUDIO_CHANNELS> matrix{};
+    const uint32_t cChannels = std::min<uint32_t>(m_outputChannels, XAUDIO2_MAX_AUDIO_CHANNELS);
+    if (cChannels == 1)
+        matrix[0] = 1.f;
+    else
+    {
+        const float cAngle = (pan + 1.f) * glm::pi<float>() / 4.f;
+        matrix[0] = std::cos(cAngle);
+        matrix[1] = std::sin(cAngle);
+    }
+    aSpeaker.pVoice->SetOutputMatrix(nullptr, 1, cChannels, matrix.data());
+    aSpeaker.pVoice->SetVolume(gain * m_volume);
+}
+
+void VoiceService::RemoveSpeakers() noexcept
+{
+    for (auto& [id, speaker] : m_speakers)
+    {
+        if (speaker.pVoice)
+            speaker.pVoice->DestroyVoice();
+    }
+    m_speakers.clear();
 }

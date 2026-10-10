@@ -1,0 +1,45 @@
+# The speaking half of the voice test (VR_TODO, "Proximity voice chat", steps 2 and 5).
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-all-pairs.ps1 -Pairs voice -PairsAtOnce 1
+#
+# Four times 40 pieces of voice: near and in the party, far and in the party (the party channel, heard at any
+# distance), far after leaving the party (not heard: proximity only), near again outside the party (heard). The
+# watcher counts what reaches it: 120 is right, 160 means a voice reached someone too far away to hear it.
+# Filler pieces ("speak test"): the server routes them without looking inside, and no game decodes them here.
+
+log voice actor
+waitfor connected 45
+record voice actor
+voice on
+
+waitfor players >= 1 30
+log waiting for the watcher to turn its voice on
+wait 5
+
+log 1: near, in the party
+speak test 40
+wait 5
+
+log 2: five cells away, still in the party: the party channel
+walk rel 20000 0 3000
+wait 4
+speak test 40
+wait 5
+
+log 3: far and out of the party: nobody hears this
+party leave
+wait 3
+speak test 40
+wait 5
+
+log 4: back near, out of the party: heard by proximity
+walk rel -20000 0 3000
+wait 4
+speak test 40
+wait 8
+
+expect connected
+record off
+report bot-voice-actor.txt
+log done
+stop

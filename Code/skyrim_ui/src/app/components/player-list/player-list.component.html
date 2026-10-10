@@ -21,6 +21,18 @@
           <td>{{ player.name }}</td>
           <td class="actions-col">
             <button
+              *ngIf="voiceEnabled$ | async"
+              class="user-action-button"
+              (click)="toggleMute(player.name)"
+            >
+              {{
+                ((mutedNames$ | async)?.includes(player.name)
+                  ? 'COMPONENT.PARTY_LIST.UNMUTE'
+                  : 'COMPONENT.PARTY_LIST.MUTE'
+                ) | transloco
+              }}
+            </button>
+            <button
               [class.hidden]="player.isMember || !(isPartyLeader$ | async)"
               [disabled]="
                 player.hasBeenInvited ||

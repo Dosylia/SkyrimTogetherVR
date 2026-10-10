@@ -1,13 +1,10 @@
 name: Server image build and push
 
+# Upstream's workflow: it pushes to upstream's Docker Hub image (tiltedphoques/st-reborn-server), with secrets this fork
+# does not hold, so on our tags it only ever failed at the login ("Username and password required", v1.9.1). Manual
+# only; the Linux server ships with each release instead (release.yml, linux.yml).
 on:
   workflow_dispatch:
-  schedule:
-    # Every Friday at 1:00 p.m. UTC
-    - cron: '0 13 * * 5'
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
 
 env:
   REGISTRY_IMAGE: tiltedphoques/st-reborn-server

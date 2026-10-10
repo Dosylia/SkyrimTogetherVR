@@ -96,6 +96,10 @@ uint64_t SkeletonMotionFingerprint(Actor* apActor) noexcept;
 //! node cannot be read on this build. Tells whether the player is looking at something.
 float HeadsetAngleTo(const NiPoint3& acPosition) noexcept;
 
+//! Where the headset is in the world and where it faces, for placing other players' voices. False when the headset
+//! node cannot be read on this build.
+bool HeadsetPose(glm::vec3& aPosition, glm::vec3& aForward, glm::vec3& aRight) noexcept;
+
 //! TEMPORARY: one line about an actor's 3D for the invisible-copy diagnosis: root, its children, the skeleton root's
 //! world scale and position.
 std::string DescribeBody(Actor* apActor) noexcept;

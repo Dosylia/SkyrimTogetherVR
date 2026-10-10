@@ -27,6 +27,8 @@ struct TransportService : Client
     TP_NOCOPYMOVE(TransportService);
 
     bool Send(const ClientMessage& acMessage) const noexcept;
+    // For voice: a lost packet is a short gap, never a delay behind a resend.
+    bool SendUnreliable(const ClientMessage& acMessage) const noexcept;
 
     void OnConsume(const void* apData, uint32_t aSize) override;
     void OnConnected() override;

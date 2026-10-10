@@ -101,3 +101,8 @@ void Player::Send(const ServerMessage& acServerMessage) const
 {
     GameServer::Get()->Send(GetConnectionId(), acServerMessage);
 }
+
+void Player::SendUnreliable(const ServerMessage& acServerMessage) const
+{
+    GameServer::Get()->SendUnreliable(GetConnectionId(), acServerMessage);
+}

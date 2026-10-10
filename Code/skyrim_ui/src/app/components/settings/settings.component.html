@@ -43,6 +43,31 @@
     <section>
       <h2>{{ 'COMPONENT.SETTINGS.VOICE' | transloco }}</h2>
       <div class="setting">
+        <label for="voiceEnabled">{{
+          'COMPONENT.SETTINGS.VOICE_ENABLED' | transloco
+        }}</label>
+        <input
+          type="checkbox"
+          id="voiceEnabled"
+          [ngModel]="settings.voiceEnabled | async"
+          (ngModelChange)="settings.voiceEnabled.next($event)"
+        />
+      </div>
+      <div class="setting">
+        <label for="voiceVolume">{{
+          'COMPONENT.SETTINGS.VOICE_VOLUME' | transloco
+        }}</label>
+        <input
+          type="range"
+          id="voiceVolume"
+          min="0.0"
+          max="2.0"
+          step="0.1"
+          [ngModel]="settings.voiceVolume | async"
+          (ngModelChange)="settings.voiceVolume.next($event)"
+        />
+      </div>
+      <div class="setting">
         <label>{{ 'COMPONENT.SETTINGS.TEST_MICROPHONE_INFO' | transloco }}</label>
         <button data-style-ornament="simple" (click)="testMicrophone()">
           {{ 'COMPONENT.SETTINGS.TEST_MICROPHONE' | transloco }}

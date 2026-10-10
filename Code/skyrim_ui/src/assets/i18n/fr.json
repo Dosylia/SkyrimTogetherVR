@@ -70,7 +70,9 @@
         "NAME": "Nom",
         "LOCATION": "Localisation"
       },
-      "INVITE": "Inviter"
+      "INVITE": "Inviter",
+      "MUTE": "Couper",
+      "UNMUTE": "Rétablir"
     },
     "PLAYER_MANAGER": {
       "PLAYER_LIST": "Liste des joueurs",
@@ -106,6 +108,8 @@
     "SETTINGS": {
       "AUDIO": "Audio",
       "VOICE": "Voix",
+      "VOICE_ENABLED": "Chat vocal : les joueurs à moins de 30 m et votre groupe vous entendent",
+      "VOICE_VOLUME": "Volume des voix",
       "TEST_MICROPHONE_INFO": "Parlez cinq secondes, puis réécoutez-vous",
       "TEST_MICROPHONE": "Tester mon micro",
       "MUTE_UI": "Interface silencieuse",

@@ -55,6 +55,9 @@ jobs:
               with:
                   path: ~/.xmake/packages
                   key: ${{ matrix.runner }}-xmake-${{ hashFiles('**/xmake.lua') }}
+                  # The newest earlier cache when an xmake.lua edit changed the key (windows.yml says why).
+                  restore-keys: |
+                      ${{ matrix.runner }}-xmake-
 
             # Install xmake
             - name: Setup xmake

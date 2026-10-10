@@ -105,6 +105,8 @@ export class SettingService {
   public settings = {
     volume: new SliderSetting(this.storeService, 'audio_volume', 0.5),
     muted: new ToggleSetting(this.storeService, 'audio_muted', false),
+    voiceEnabled: new ToggleSetting(this.storeService, 'voice_enabled', false),
+    voiceVolume: new SliderSetting(this.storeService, 'voice_volume', 1),
     language: new SelectSetting(
       this.storeService,
       'language',

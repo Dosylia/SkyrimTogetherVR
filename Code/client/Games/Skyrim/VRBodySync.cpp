@@ -4066,6 +4066,19 @@ float HeadsetAngleTo(const NiPoint3& acPosition) noexcept
     return offAxis * 180.f / glm::pi<float>();
 }
 
+bool HeadsetPose(glm::vec3& aPosition, glm::vec3& aForward, glm::vec3& aRight) noexcept
+{
+    const NiTransform* pHmdTransform = HeadsetTransform();
+    if (!pHmdTransform)
+        return false;
+
+    const glm::mat3 rotation = ToGlm(pHmdTransform->rotate); // Skyrim: X right, Y forward, Z up
+    aPosition = ToGlm(pHmdTransform->translate);
+    aForward = rotation[1];
+    aRight = rotation[0];
+    return true;
+}
+
 std::string DescribeBody(Actor* apActor) noexcept
 {
     // Every step up the parents and every bone is checked with IsReadable; within one description the answers are

@@ -110,6 +110,22 @@ bool TransportService::Send(const ClientMessage& acMessage) const noexcept
     return false;
 }
 
+bool TransportService::SendUnreliable(const ClientMessage& acMessage) const noexcept
+{
+    if (!IsConnected())
+        return false;
+
+    Buffer buffer(1 << 14);
+    Buffer::Writer writer(&buffer);
+    writer.WriteBits(0, 8); // Write first byte as packet needs it
+
+    acMessage.Serialize(writer);
+    TiltedPhoques::PacketView packet(reinterpret_cast<char*>(buffer.GetWriteData()), writer.Size());
+
+    Client::Send(&packet, TiltedPhoques::kUnreliable);
+    return true;
+}
+
 void TransportService::OnConsume(const void* apData, uint32_t aSize)
 {
     ServerMessageFactory factory;

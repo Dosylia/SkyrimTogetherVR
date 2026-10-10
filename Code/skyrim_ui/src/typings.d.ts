@@ -396,6 +396,21 @@ interface SkyrimTogether {
   testMicrophone(): void;
 
   /**
+   * Voice chat on or off. Off, the microphone is closed and nobody is heard.
+   */
+  setVoiceEnabled(enabled: boolean): void;
+
+  /**
+   * Volume of other players' voices, 0 to 2 (1 is as recorded).
+   */
+  setVoiceVolume(volume: number): void;
+
+  /**
+   * Stop or start hearing one player.
+   */
+  setPlayerVoiceMuted(playerId: number, muted: boolean): void;
+
+  /**
    * Reconnect the client.
    */
   reconnect(): void;

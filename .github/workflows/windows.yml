@@ -61,6 +61,10 @@ jobs:
               with:
                   path: ~/AppData/Local/.xmake/packages
                   key: ${{ runner.os }}-xmake-${{ hashFiles('**/xmake.lua') }}
+                  # Any xmake.lua edit changes the key; without a fallback every dependency was rebuilt from nothing
+                  # (15 min on 2026-10-10). The newest earlier cache comes back instead and xmake builds only what changed.
+                  restore-keys: |
+                      ${{ runner.os }}-xmake-
 
             # Install xmake
             - name: Setup xmake
@@ -74,9 +78,20 @@ jobs:
               run: xmake config --plat=windows --arch=${{ matrix.arch }} --mode="$BUILD_MODE" --yes -vD
 
             # Build the client
+            # A push builds what urSovngarde ships, as release.yml does: the VR client (through its launcher), the
+            # server, the menu's process and the tests. Upstream's flat-Skyrim client is never shipped and took about
+            # half of the 21 minutes `xmake -y` needed (2026-10-10). The playable-build packaging below still wants
+            # everything, so it keeps the full build.
             - name: Build with xmake
               run: |
-                  xmake -y
+                  if [ "${{ inputs.upload-build-for-next-job }}" = "true" ]; then
+                      xmake -y
+                  else
+                      xmake build -y SkyrimImmersiveLauncherVR
+                      xmake build -y SkyrimServerRunner
+                      xmake build -y TPProcess
+                      xmake build -y TPTests
+                  fi
                   echo "STR_BUILD_DIR=build/windows/${{ matrix.arch }}/${BUILD_MODE}/" >> "$GITHUB_ENV"
 
             # The encoding round trips and the rest of TPTests
@@ -86,7 +101,12 @@ jobs:
             # Create distrib
             - name: Output distrib binaries via xmake
               run: |
-                  xmake install -o distrib
+                  if [ "${{ inputs.upload-build-for-next-job }}" = "true" ]; then
+                      xmake install -o distrib
+                  else
+                      xmake install -o distrib SkyrimTogetherClientVR
+                      xmake install -o distrib TPProcess
+                  fi
                   cp -rf distrib/bin/* "$STR_BUILD_DIR"
 
             # Building the Together UI

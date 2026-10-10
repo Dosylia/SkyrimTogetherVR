@@ -71,7 +71,9 @@
         "NAME": "Name",
         "LOCATION": "Location"
       },
-      "INVITE": "Invite"
+      "INVITE": "Invite",
+      "MUTE": "Mute",
+      "UNMUTE": "Unmute"
     },
     "PLAYER_MANAGER": {
       "PLAYER_LIST": "Player List",
@@ -113,6 +115,8 @@
       },
       "AUDIO": "Audio",
       "VOICE": "Voice",
+      "VOICE_ENABLED": "Voice chat: players within 30 m and your party hear you",
+      "VOICE_VOLUME": "Voice volume",
       "TEST_MICROPHONE_INFO": "Speak for five seconds, then hear it back",
       "TEST_MICROPHONE": "Test my microphone",
       "MUTE_UI": "Mute User Interface",

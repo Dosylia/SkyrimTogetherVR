@@ -17,6 +17,10 @@
 #include <Messages/NotifyDroppedItemRemoved.h>
 #include <Messages/NotifyDroppedItemMove.h>
 #include <Messages/ClashRequest.h>
+#include <Messages/VoiceDataRequest.h>
+#include <Messages/VoiceStateRequest.h>
+#include <Messages/NotifyVoiceData.h>
+#include <Messages/NotifyPlayerWhereabouts.h>
 #include <Messages/RequestOwnershipClaim.h>
 #include <Messages/RequestPlayerHealthUpdate.h>
 #include <Messages/MountRequest.h>
@@ -232,7 +236,7 @@ int Bot::Run() noexcept
     return 0;
 }
 
-template <class T> bool Bot::SendMsg(const T& acMessage) noexcept
+template <class T> bool Bot::SendMsg(const T& acMessage, bool aUnreliable) noexcept
 {
     if (!IsConnected())
         return false;
@@ -244,8 +248,22 @@ template <class T> bool Bot::SendMsg(const T& acMessage) noexcept
     acMessage.Serialize(writer);
     TiltedPhoques::PacketView packet(reinterpret_cast<char*>(buffer.GetWriteData()), static_cast<uint32_t>(writer.Size()));
 
-    Client::Send(&packet);
+    Client::Send(&packet, aUnreliable ? TiltedPhoques::kUnreliable : TiltedPhoques::kReliable);
     return true;
+}
+
+void Bot::UpdateSpeech(Clock::time_point aNow) noexcept
+{
+    const auto cElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(aNow - m_speechStart).count();
+    while (m_speechNext < m_speech.size() && m_speech[m_speechNext].AtMs <= cElapsedMs)
+    {
+        VoiceDataRequest request{};
+        request.Sequence = m_voiceSequence++;
+        request.Data.assign(m_speech[m_speechNext].Bytes.begin(), m_speech[m_speechNext].Bytes.end());
+        SendMsg(request, true);
+        if (++m_speechNext == m_speech.size())
+            spdlog::info("[script] speak: all {} pieces sent", m_speech.size());
+    }
 }
 
 void Bot::OnConsume(const void* apData, uint32_t aSize)
@@ -383,6 +401,8 @@ void Bot::Tick() noexcept
         }
         if (!m_replaying && now - m_lastMovement >= kMovementPeriod)
             SendMovement();
+        if (m_speechNext < m_speech.size())
+            UpdateSpeech(now);
         if (m_healthRestorePending && now >= m_healthRestoreAt)
         {
             m_healthRestorePending = false;
@@ -1091,6 +1111,30 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
                          message.Item.Count, message.CellId.BaseId, message.Position.x, message.Position.y, message.Position.z);
             Record(Collect::Spawn, fmt::format("drop {} {:X}", message.Id, message.Item.BaseId.BaseId));
         }
+        return;
+    }
+
+    if (opcode == NotifyPlayerWhereabouts::Opcode)
+    {
+        const auto& message = static_cast<const NotifyPlayerWhereabouts&>(acMessage);
+        for (const auto& entry : message.Players)
+        {
+            if (entry.PlayerId == m_playerId)
+                continue;
+            if (m_whereabouts++ == 0)
+                spdlog::info("Whereabouts: player {} at ({:.0f}, {:.0f}, {:.0f}) in cell {:X}, place '{}'", entry.PlayerId, entry.Position.x, entry.Position.y, entry.Position.z,
+                             entry.CellId.BaseId, entry.Place.c_str());
+            break;
+        }
+        return;
+    }
+
+    if (opcode == NotifyVoiceData::Opcode)
+    {
+        const auto& message = static_cast<const NotifyVoiceData&>(acMessage);
+        ++m_voicesHeard;
+        if (m_voicesHeardFrom[message.PlayerId]++ == 0)
+            spdlog::info("Voice: hearing player {} (piece {}, {} bytes)", message.PlayerId, message.Sequence, message.Data.size());
         return;
     }
 
@@ -2133,6 +2177,56 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return true;
     }
 
+    // "voice on|off": voice turned on or off in this bot's menu (VoiceStateRequest). Off, it neither speaks nor hears.
+    if (name == "voice")
+    {
+        VoiceStateRequest request{};
+        request.Enabled = args.empty() || args[0] != "off";
+        SendMsg(request);
+        spdlog::info("[script] voice {}", request.Enabled ? "on" : "off");
+        return true;
+    }
+
+    // "speak [file]": replays a client's microphone test recording (logs\voice_test.bin; the default is that name in
+    // the current folder) as this bot's voice, piece by piece with its own timing, unreliable like a client.
+    // "speak test <n>": n pieces of filler, 60 ms apart, for the server's routing only (no game decodes them).
+    if (name == "speak" && !args.empty() && args[0] == "test")
+    {
+        const uint32_t cCount = args.size() > 1 ? static_cast<uint32_t>(std::strtoul(args[1].c_str(), nullptr, 10)) : 40;
+        m_speech.clear();
+        for (uint32_t i = 0; i < cCount; ++i)
+            m_speech.push_back(VoicePiece{i * 60, std::vector<uint8_t>(260, static_cast<uint8_t>(i))});
+        m_speechNext = 0;
+        m_speechStart = Clock::now();
+        spdlog::info("[script] speak: {} test pieces", cCount);
+        return true;
+    }
+    if (name == "speak")
+    {
+        const std::string cPath = args.empty() ? std::string("voice_test.bin") : args[0];
+        std::ifstream file(cPath, std::ios::binary);
+        if (!file)
+        {
+            spdlog::error("[script] speak: cannot open {}", cPath);
+            return true;
+        }
+        m_speech.clear();
+        for (;;)
+        {
+            uint32_t atMs = 0, size = 0;
+            if (!file.read(reinterpret_cast<char*>(&atMs), sizeof(atMs)) || !file.read(reinterpret_cast<char*>(&size), sizeof(size)) || size > VoiceDataRequest::kMaxBytes)
+                break;
+            VoicePiece piece{atMs, std::vector<uint8_t>(size)};
+            if (!file.read(reinterpret_cast<char*>(piece.Bytes.data()), size))
+                break;
+            m_speech.push_back(std::move(piece));
+        }
+        m_speechNext = 0;
+        m_speechStart = Clock::now();
+        spdlog::info("[script] speak: {} pieces from {}, {} ms", m_speech.size(), cPath, m_speech.empty() ? 0 : m_speech.back().AtMs);
+        return true;
+    }
+
     // "clash other|<hex> [left|right]": this character's hand met that character's weapon (ClashRequest), as a client
     // says it when the other player's sword touches one of its HIGGS bodies.
     if (name == "clash")
@@ -2228,6 +2322,15 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
     {
         m_keepLeadership = true;
         spdlog::info("[script] keeping the party's leadership if the server gives it");
+        return true;
+    }
+
+    // "party leave": leaves the party it is in, as the party menu's "leave" does.
+    if (name == "party" && !args.empty() && args[0] == "leave")
+    {
+        m_leftParty = true;
+        SendMsg(PartyLeaveRequest{});
+        spdlog::info("[script] leaving the party");
         return true;
     }
 
@@ -2864,6 +2967,40 @@ std::optional<bool> Bot::Evaluate(const std::vector<std::string>& acArgs, std::s
             return std::nullopt;
         const float value = static_cast<float>(m_objectMoves);
         aOutWhy = fmt::format("{} world-object move(s) relayed", m_objectMoves);
+        const std::string& op = acArgs[1];
+        if (op == "==") return value == wanted;
+        if (op == ">=") return value >= wanted;
+        if (op == "<=") return value <= wanted;
+        if (op == ">") return value > wanted;
+        if (op == "<") return value < wanted;
+        return std::nullopt;
+    }
+
+    if (what == "whereabouts")
+    {
+        // whereabouts <op> <n>: the server's every-two-seconds list of where players are, counted when it names another.
+        float wanted = 0.f;
+        if (acArgs.size() < 3 || !ParseFloat(acArgs[2], wanted))
+            return std::nullopt;
+        const float value = static_cast<float>(m_whereabouts);
+        aOutWhy = fmt::format("{} whereabouts naming another player", m_whereabouts);
+        const std::string& op = acArgs[1];
+        if (op == "==") return value == wanted;
+        if (op == ">=") return value >= wanted;
+        if (op == "<=") return value <= wanted;
+        if (op == ">") return value > wanted;
+        if (op == "<") return value < wanted;
+        return std::nullopt;
+    }
+
+    if (what == "voices")
+    {
+        // voices <op> <n>: pieces of other players' voices the server relayed to this bot (NotifyVoiceData).
+        float wanted = 0.f;
+        if (acArgs.size() < 3 || !ParseFloat(acArgs[2], wanted))
+            return std::nullopt;
+        const float value = static_cast<float>(m_voicesHeard);
+        aOutWhy = fmt::format("{} voice piece(s) relayed from {} player(s)", m_voicesHeard, m_voicesHeardFrom.size());
         const std::string& op = acArgs[1];
         if (op == "==") return value == wanted;
         if (op == ">=") return value >= wanted;

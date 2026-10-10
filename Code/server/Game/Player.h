@@ -51,6 +51,12 @@ struct Player
     void SetHiddenFromPublicPage(bool aHidden) noexcept { m_hiddenFromPublicPage = aHidden; }
 
     void Send(const ServerMessage& acServerMessage) const;
+    // For voice: a lost packet is a short gap, never a delay behind a resend.
+    void SendUnreliable(const ServerMessage& acServerMessage) const;
+
+    // Voice turned on in this player's urSovngarde menu (VoiceStateRequest); off, they neither speak nor hear.
+    [[nodiscard]] bool IsVoiceEnabled() const noexcept { return m_voiceEnabled; }
+    void SetVoiceEnabled(bool aEnabled) noexcept { m_voiceEnabled = aEnabled; }
 
     // When the last movement snapshot came from this client. A paused client sends none: the mod's update runs off
     // the Papyrus VM, which the game suspends. Its actors are handed to whoever is near them meanwhile.
@@ -74,4 +80,5 @@ private:
     std::chrono::steady_clock::time_point m_lastMovementAt{};
     String m_place;
     bool m_hiddenFromPublicPage{false};
+    bool m_voiceEnabled{false};
 };

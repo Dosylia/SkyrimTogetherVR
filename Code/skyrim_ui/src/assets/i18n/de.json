@@ -69,7 +69,9 @@
         "NAME": "Name",
         "LOCATION": "Standort"
       },
-      "INVITE": "Einladen"
+      "INVITE": "Einladen",
+      "MUTE": "Stummschalten",
+      "UNMUTE": "Wieder hören"
     },
     "PLAYER_MANAGER": {
       "PLAYER_LIST": "Spielerliste",
@@ -111,6 +113,8 @@
       },
       "AUDIO": "Audio",
       "VOICE": "Sprache",
+      "VOICE_ENABLED": "Sprachchat: Spieler im Umkreis von 30 m und deine Gruppe hören dich",
+      "VOICE_VOLUME": "Lautstärke der Stimmen",
       "TEST_MICROPHONE_INFO": "Fünf Sekunden sprechen, dann anhören",
       "TEST_MICROPHONE": "Mikrofon testen",
       "MUTE_UI": "UI Stummschalten",

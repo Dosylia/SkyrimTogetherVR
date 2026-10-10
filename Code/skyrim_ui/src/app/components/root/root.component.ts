@@ -18,6 +18,7 @@ import { GroupComponent } from '../group/group.component';
 import { controlsAnimation } from './controls.animation';
 import { notificationsAnimation } from './notifications.animation';
 import { map } from 'rxjs/operators';
+import { VoiceService } from '../../services/voice.service';
 
 const REVEAL_EFFECT_DURATION_MS = 10000 // todo: pass value from C++?
 
@@ -57,6 +58,7 @@ export class RootComponent implements OnInit {
     private readonly translocoService: TranslocoService,
     private readonly settingService: SettingService,
     public readonly overlay: Overlay, // used for mockup
+    private readonly voiceService: VoiceService, // sends the voice settings to the game from the start
   ) {
     this.translocoService.setActiveLang(
       this.settingService.settings.language.getValue(),

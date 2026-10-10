@@ -281,6 +281,18 @@ export class ClientService implements OnDestroy {
     skyrimtogether.testMicrophone();
   }
 
+  public setVoiceEnabled(enabled: boolean): void {
+    skyrimtogether.setVoiceEnabled(enabled);
+  }
+
+  public setVoiceVolume(volume: number): void {
+    skyrimtogether.setVoiceVolume(volume);
+  }
+
+  public setPlayerVoiceMuted(playerId: number, muted: boolean): void {
+    skyrimtogether.setPlayerVoiceMuted(playerId, muted);
+  }
+
   /**
    * Called when the UI is first initialized.
    */

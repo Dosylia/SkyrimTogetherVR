@@ -159,7 +159,7 @@ private:
 
     using Clock = std::chrono::steady_clock;
 
-    template <class T> bool SendMsg(const T& acMessage) noexcept;
+    template <class T> bool SendMsg(const T& acMessage, bool aUnreliable = false) noexcept;
 
     void Tick() noexcept;
     void SendAuthentication() noexcept;
@@ -275,6 +275,21 @@ private:
     //! Moves relayed to this bot by the server, which only sends them to players in range.
     uint32_t m_dropMoves{};
     uint32_t m_clashes{}; //!< clashes relayed to this bot (NotifyClash)
+    //! "speak": a recording made by the client's microphone test (logs\voice_test.bin), replayed as this bot's voice
+    //! with its own timing. Each piece: when, in ms from the start, and Steam's compressed bytes.
+    struct VoicePiece
+    {
+        uint32_t AtMs{};
+        std::vector<uint8_t> Bytes;
+    };
+    std::vector<VoicePiece> m_speech;
+    size_t m_speechNext{};
+    Clock::time_point m_speechStart{};
+    uint32_t m_voiceSequence{};
+    uint32_t m_voicesHeard{}; //!< pieces of other players' voices relayed to this bot (NotifyVoiceData)
+    uint32_t m_whereabouts{}; //!< NotifyPlayerWhereabouts received that named another player
+    std::map<uint32_t, uint32_t> m_voicesHeardFrom; //!< the same, per speaker
+    void UpdateSpeech(Clock::time_point aNow) noexcept;
     bool m_keepLeadership{false}; //!< "party lead": keep the party's leadership when the server gives it
     GameId m_npcReference{}; //!< the reference the last "npc" registered
     bool m_npcFlying{}; //!< "npcfly": its movement updates say it is flying

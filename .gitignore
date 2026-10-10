@@ -8,6 +8,9 @@ vsxmake2019
 vsxmake2022
 vsxmake2026
 .xmake
+# setup-xmake keeps xmake itself here in CI (actions-cache-folder). Not ignored, it made the release build of v1.9.1
+# "-dirty" and make-release.ps1 refused to package it.
+.xmake-cache
 vs2019
 
 build

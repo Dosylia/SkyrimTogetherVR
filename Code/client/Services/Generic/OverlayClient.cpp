@@ -86,6 +86,23 @@ bool OverlayClient::OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefR
             ProcessToggleDebugUI();
         else if (eventName == "testMicrophone")
             World::Get().GetRunner().Queue([]() { World::Get().ctx().at<VoiceService>().StartMicrophoneTest(); });
+        else if (eventName == "setVoiceEnabled")
+        {
+            const bool cEnabled = eventArgs->GetBool(0);
+            World::Get().GetRunner().Queue([cEnabled]() { World::Get().ctx().at<VoiceService>().SetEnabled(cEnabled); });
+        }
+        else if (eventName == "setVoiceVolume")
+        {
+            // A whole number from JavaScript arrives as an int.
+            const float cVolume = eventArgs->GetType(0) == VTYPE_INT ? static_cast<float>(eventArgs->GetInt(0)) : static_cast<float>(eventArgs->GetDouble(0));
+            World::Get().GetRunner().Queue([cVolume]() { World::Get().ctx().at<VoiceService>().SetVolume(cVolume); });
+        }
+        else if (eventName == "setPlayerVoiceMuted")
+        {
+            const uint32_t cPlayerId = eventArgs->GetInt(0);
+            const bool cMuted = eventArgs->GetBool(1);
+            World::Get().GetRunner().Queue([cPlayerId, cMuted]() { World::Get().ctx().at<VoiceService>().SetPlayerMuted(cPlayerId, cMuted); });
+        }
 
         return true;
     }

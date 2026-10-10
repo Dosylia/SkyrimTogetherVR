@@ -4,6 +4,8 @@ import { map } from 'rxjs/operators';
 import { ClientService } from 'src/app/services/client.service';
 import { GroupService } from 'src/app/services/group.service';
 import { PlayerListService } from 'src/app/services/player-list.service';
+import { SettingService } from 'src/app/services/setting.service';
+import { VoiceService } from 'src/app/services/voice.service';
 import { Player } from '../../models/player';
 
 @Component({
@@ -16,11 +18,15 @@ export class PlayerListComponent {
   playerList$: Observable<(Player & { isMember: boolean })[]>;
   playerListLength$: Observable<number>;
   isPartyLeader$: Observable<boolean>;
+  voiceEnabled$ = this.settingService.settings.voiceEnabled.asObservable();
+  mutedNames$ = this.voiceService.mutedNames.asObservable();
 
   constructor(
     private readonly playerListService: PlayerListService,
     private readonly clientService: ClientService,
     private readonly groupService: GroupService,
+    private readonly settingService: SettingService,
+    private readonly voiceService: VoiceService,
   ) {
     this.playerList$ = combineLatest([
       this.playerListService.playerList.asObservable().pipe(pluck('players')),
@@ -57,5 +63,9 @@ export class PlayerListComponent {
 
   public sendPartyInvite(inviteeId: number) {
     this.playerListService.sendPartyInvite(inviteeId);
+  }
+
+  public toggleMute(name: string) {
+    this.voiceService.toggleMute(name);
   }
 }

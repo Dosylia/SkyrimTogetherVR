@@ -721,7 +721,23 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       shared modlist. (3) Fights across the two: a flat block has to count in the defender's rule, which knows only
       VR blade contact. (4) The flat build untested since the fork, against the current Skyrim SE; testing needs an
       SE copy. Only once VR to VR is solid.
-- [ ] **Party members on the map and compass** (Emma, 2026-10-10: "Start now"; she and Seen try invite, accept and teleport in the next session) (Emma, 2026-10-09, for a public server: "how hard would it be marked on
+- [x] **Party members on the map and compass** (built and tested in the rig 2026-10-10 afternoon, waiting for a real
+      session: Emma and Seen look at the compass and the map in the headset). What was built, against the plan below:
+      the records come from `Tools/VR/player-markers.py` (Python, not xEdit: it writes the quest, the holding cell,
+      7 party markers with their own activators and 32 map markers into `GameFiles/Skyrim/SkyrimTogether.esp` at
+      fixed object ids 0x5000 to 0x505F); exact positions came now, not later: the protocol changed anyway for voice,
+      so the server sends `NotifyPlayerWhereabouts` every 2 s (each player's world, cell, position and place name,
+      `server/Services/WhereaboutsService`); `client/Services/PlayerMarkerService` moves the markers (MoveTo), names
+      them natively (the activator's name for the objective text, ExtraMapMarker's for the icon; no SKSE natives),
+      shows objective N through the game's Quest.SetObjectiveDisplayed, and puts a marker away in the holding cell
+      while that player's body is in our game. Rig (`live-markers.txt`, 10 checks, 0 failed): forms found, quest
+      started; bot near, no marker; five cells away its party marker follows it and objective 1 is displayed
+      (IsObjectiveDisplayed true, marker at its x); leaving the party puts that away and a map marker follows instead;
+      back near, the map marker is put away. Found on the way: an objective shown in the frame the quest is started
+      is never displayed (the quest is still starting); it is now shown once the quest runs, and checked again every
+      2 s. Not seen yet: the compass and the map themselves (the rig has no headset view of them), and whether a map
+      marker near you also shows on the compass (it is put away while the body is loaded, which covers the loaded
+      area). The map icon is type 11 (a standing stone), a guess for Emma to look at. Was: (Emma, 2026-10-10: "Start now"; she and Seen try invite, accept and teleport in the next session) (Emma, 2026-10-09, for a public server: "how hard would it be marked on
       the map? Some that look good without breaking immersion"). Upstream has no player markers: only the player
       list, parties with "teleport to" and the member's place in the party menu, and shared custom waypoints
       (`MapService`). Plan: Skyrim's own quest markers, so the VR map and compass need nothing: a "Fellow
@@ -794,6 +810,16 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
          once cost one 37 ms frame; live voice decodes a packet at a time.
       1. Capture: `VoiceService` (client) records while connected and voice is on, reads GetVoice every frame and
          sends what it returns. Steam's compressed voice is small: measured 4.5 to 4.7 KB a second while talking, none in silence.
+      Steps 1 to 5 built 2026-10-10 afternoon: `VoiceDataRequest`, `VoiceStateRequest`, `NotifyVoiceData` (unreliable,
+      a 16 KB send path on both sides instead of the 1 MB one); server `VoiceService` (heard within 2400 units, about
+      34 m, or by the party at any distance; only between players with voice on; 60 pieces a second at most per
+      speaker); client `VoiceService` (capture while on and connected, decode per piece, 80 ms gathered after a
+      silence, 400 ms most queued, volume full to 5 m and silent at 30 m, left-right from the headset, a far party
+      member as a centred radio at 0.6); menu: Voice on/off (off by default), voice volume, Mute per player in the
+      player list, kept by name. Bot pair `voice` (run-all-pairs -Pairs voice): 40 pieces each of near in the party,
+      far in the party, far out of the party, near out of the party: 118 of 120 heard, none from the far one out of
+      the party: PASS. Not yet heard by a person: Emma turns Voice on and a bot speaks her recording (`speak
+      <path to voice_test.bin>`), then one session with Seen.
       2. Transport: a new `VoiceData` request (sequence number, bytes) sent unreliable (`kUnreliable`, which
          TiltedConnect has and nothing of ours uses yet; a lost packet is a skipped 20 ms, never a delay), and
          `NotifyVoiceData` (player id, sequence, bytes) from the server only to the players within range of the
