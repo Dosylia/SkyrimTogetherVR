@@ -22,7 +22,21 @@ Write-Host "Collecting urSovngarde logs..."
 
 # Client logs (the rotated ones hold earlier sessions of the same day).
 Get-ChildItem (Join-Path $ClientFolder 'logs') -Filter 'tp_client*.log' -ErrorAction SilentlyContinue | ForEach-Object { Add-File $_.FullName }
-Add-File (Join-Path $ClientFolder 'logs\cef_debug.log')
+# CEF's log, its last 5 MB at most. On 2026-10-10 it grew to 8 GB in one session; copied whole it filled the disk and
+# Compress-Archive, which cannot take a file over 2 GB, left the copy behind in %TEMP%.
+$cef = Join-Path $ClientFolder 'logs\cef_debug.log'
+$cefTail = 5MB
+if ((Test-Path $cef) -and (Get-Item $cef).Length -gt $cefTail) {
+    $in = [IO.File]::Open($cef, 'Open', 'Read', 'ReadWrite')
+    try {
+        $in.Seek(-$cefTail, 'End') | Out-Null
+        $out = [IO.File]::Create((Join-Path $staging 'cef_debug.log'))
+        try { $in.CopyTo($out) } finally { $out.Close() }
+    } finally { $in.Close() }
+    Write-Host "  + cef_debug.log (its last 5 MB of $([math]::Round((Get-Item $cef).Length / 1MB)) MB)"
+} else {
+    Add-File $cef
+}
 Add-File (Join-Path $ClientFolder 'logs\dashboard_frame.bmp')
 
 # Every SKSE crash log (Crash Logger) from the last day, not just the newest.

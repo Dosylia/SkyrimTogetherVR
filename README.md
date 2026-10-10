@@ -23,7 +23,6 @@ by the two of us; still early, and only ever tested with two players at once.
   the parry rule exist).
 - Some NPC and quest situations still differ between the two games (an NPC invisible for one player, quest
   dialogue heard twice). `VR_TODO.md` and `KNOWN_ISSUES.md` hold the full list.
-- The Linux build of the dedicated server does not build on the current code.
 
 Needed: Skyrim VR 1.4.15, SKSE VR, the VR Address Library for SKSEVR, and `uGridsToLoad = 5` (the default). The
 release's `README.md` explains the install with the launcher, Mod Organizer 2, Vortex or by hand.

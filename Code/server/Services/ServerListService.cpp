@@ -54,6 +54,11 @@ void ServerListService::OnPlayerLeave(const PlayerLeaveEvent& acEvent) noexcept
 
 void ServerListService::Announce() noexcept
 {
+    // Upstream's list (skyrim-together.com), not ours. Without bAnnounceServer it was still told about the server every
+    // minute, as not public, and a 403 from it stops this server (PostAnnouncement): no reason to ask it at all.
+    if (!bAnnounceServer)
+        return;
+
     std::thread([&]() {
         auto* pServer = GameServer::Get();
         auto pc = static_cast<uint16_t>(m_world.GetPlayerManager().Count());

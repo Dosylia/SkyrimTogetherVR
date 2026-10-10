@@ -120,7 +120,11 @@ controllers: `input vrTrackedSet`, one frame = HMD and both controllers, a 3x4 `
       (protocol change), the client's place updates (PlayerService, TransportService) and the server's
       `PublicStatusService` (off by default), and two new crash lines in `Code/client/CrashHandler.cpp` for the
       launcher's reports ("VectoredExceptionHandler: in <module>+0x<offset>, version x" and "... stack ...", from the
-      new helpers above `LogCrashContext`; crash path only). Build all five together (client, launcher, server, runner, bot); a
+      new helpers above `LogCrashContext`; crash path only). Also, for Seen's public server: `Code/tests/xmake.lua` keeps
+      `smalldump.cpp` and dbghelp to Windows (the Linux CI has failed at Build on every run since c5d3236e, which added
+      them; with the change, a Debian 12 Docker build of the tree on 2026-10-10 built every Linux target, TPTests passed
+      all 40 cases and the server started), and `ServerListService::Announce` no longer contacts upstream's list when
+      `bAnnounceServer` is off (a 403 from it stops the server). Build all five together (client, launcher, server, runner, bot); a
       compile error in those files goes to that session (tiltedevolution-09). Deploy, then tell Emma: her friends need
       the new client from the tools folder before joining a server from this build. The blade stop is in the same tree,
       unproven: prove it in the rig first, or keep it from turning anything, before this build reaches the tools folder.
