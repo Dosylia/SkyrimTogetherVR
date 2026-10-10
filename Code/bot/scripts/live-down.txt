@@ -1,0 +1,29 @@
+# "X is down": a party member's health reaching zero shows a line in the game (Emma, 2026-10-10: a message, no revive).
+#
+#   python Tools\VR\live-check.py live-down
+#
+# The game connects first and leads the party; this bot joins it, reports full health to the party, then zero, as a
+# player going down does (RequestPlayerHealthUpdate, sent by a real client twice a second when it changes).
+log live down
+waitfor connected 45
+expect known me
+waitfor known other 40
+wait 8
+
+log -- full health, then down
+partyhealth 100
+wait 3
+partyhealth 0
+wait 3
+log CHECK logged Party: .+ is down
+
+log -- back up, then down again: one line each time
+partyhealth 100
+wait 3
+partyhealth 0
+wait 3
+log CHECK logged Party: .+ is down
+partyhealth 100
+wait 2
+log done
+stop

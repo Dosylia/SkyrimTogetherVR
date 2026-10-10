@@ -49,6 +49,10 @@ bool PlaceCorpse(Actor* apActor, const glm::vec3& acWanted) noexcept;
 //! Whether this player's HIGGS bodies, or what they hold, touched another player's weapon body at that point (game
 //! units) in the last half second: a hit landed there landed on the weapon, not on its owner.
 bool IsWeaponTouchAt(const glm::vec3& acPoint) noexcept;
+//! Whether one of this player's blades rests on a blade of that copy (the blade stop), or did in the last 300 ms, and a
+//! hit at that point (game units) lies along where the hand holds that blade: the blade the other player sees never
+//! reached him. With no point (zero or not a number), any blade resting on his counts.
+bool IsBladeStoppedAt(uint32_t aCopyFormId, const glm::vec3& acPoint) noexcept;
 //! The game's sparks of a blade on metal, at a clash's point, for a second; false when none were made.
 bool SparkClash(const glm::vec3& acPoint) noexcept;
 //! The game's blade-block sound, at a clash's point; false when it could not be played.

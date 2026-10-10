@@ -1,0 +1,45 @@
+# An equip of the weapon a copy already holds: does the copy's hand stay full? (VR_TODO, "An equip of a weapon the
+# copy already holds may leave its hand empty".)
+#
+#   python Tools\VR\live-check.py live-equip-twice
+#
+# On 2026-10-03 the bot's copy arrived already holding the iron sword and the bot equipped it again: the game then
+# said the sword was equipped and the right hand held nothing. On 2026-10-09 Emma's copy in Seen's game held no weapon
+# for two minutes amid repeated equips. Here: the same sword equipped once, again, then twice at once.
+log live equip twice
+waitfor connected 45
+collect equipment spawn
+expect known me
+waitfor known other 40
+wait 8
+log CHECK copy exists
+
+additem 12EB7 1
+wait 4
+log CHECK copy has 12EB7
+
+log -- the sword in the right hand
+equip 12EB7
+wait 6
+log CHECK copy righthand 12EB7
+
+log -- the same sword equipped again
+equip 12EB7
+wait 6
+log CHECK copy equipped 12EB7
+log CHECK copy righthand 12EB7
+
+log -- twice more, at once
+equip 12EB7
+equip 12EB7
+wait 6
+log CHECK copy equipped 12EB7
+log CHECK copy righthand 12EB7
+# The checks are asked of the game while the script goes on: without this wait the unequip below arrived before the
+# last check was answered, and it read an empty hand (2026-10-10, both runs).
+wait 3
+
+unequip 12EB7
+wait 4
+log done
+stop

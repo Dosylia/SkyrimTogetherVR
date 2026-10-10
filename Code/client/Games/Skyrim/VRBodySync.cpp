@@ -3422,10 +3422,107 @@ float NearestHandToBody(void* apBodyRoot) noexcept
     }
     return nearest;
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Blades as segments, for the blade stop (StopLocalBlades). A weapon's blade runs along its node's +Y (VR_HISTORY P1:
+// the visible blade's bound and the body's centre of mass both lie there), from the grip to as far as its bound
+// reaches: an iron sword's bound is 31.9 units around a point 21.9 along +Y, so 53.8.
+struct Blade
+{
+    glm::vec3 Grip{};
+    glm::vec3 Axis{}; // unit length
+    float Length = 0.f;
+};
+
+// How far a weapon's blade reaches along its node's +Y, read where the node's world transform and its bound agree:
+// before anything of ours has moved it this frame (the bound is the game's, from its own update).
+struct BladeExtent
+{
+    void* pNode = nullptr; // the weapon's own node, hanging under WEAPON or SHIELD
+    float Length = 0.f;
+    float Radius = 0.f;
+    float Along = 0.f;
+};
+
+// False for what is not held at one end and long along +Y: no bound, or one centred off that axis (a shield).
+bool MeasureBlade(void* apNode, BladeExtent& aOut) noexcept
+{
+    const NiTransform& world = At<NiTransform>(apNode, kWorldOffset);
+    const glm::vec3 grip = ToGlm(world.translate);
+    const NiBoundRead bound = ReadWorldBound(apNode, grip);
+    const glm::vec3 axis = ToGlm(world.rotate)[1];
+    const float axisLength = glm::length(axis);
+    if (!bound.Valid || bound.Radius < 8.f || bound.Radius > 150.f || !(axisLength > 0.5f))
+        return false;
+    const float along = glm::dot(bound.Centre - grip, axis / axisLength);
+    if (!(along >= 0.4f * bound.Radius))
+        return false;
+    aOut = BladeExtent{apNode, along + bound.Radius, bound.Radius, along};
+    return true;
+}
+
+Blade BladeAt(const BladeExtent& acExtent) noexcept
+{
+    const NiTransform& world = At<NiTransform>(acExtent.pNode, kWorldOffset);
+    return Blade{ToGlm(world.translate), glm::normalize(ToGlm(world.rotate)[1]), acExtent.Length};
+}
+
+bool IsFinite(const glm::vec3& acValue) noexcept
+{
+    return std::isfinite(acValue.x) && std::isfinite(acValue.y) && std::isfinite(acValue.z);
+}
+
+// Which side of his blade ours is on: the sign of our blade's direction against the plane through our grip and his
+// blade's line, whose unit normal is put in aNormal. It changes sign when our blade, or our grip, passes through his
+// line. 0 when the plane is not defined (our grip on his line).
+float SideOf(const Blade& acOurs, const Blade& acHis, glm::vec3& aNormal) noexcept
+{
+    const glm::vec3 normal = glm::cross(acHis.Grip - acOurs.Grip, acHis.Axis);
+    const float length = glm::length(normal);
+    if (!(length > 1.f))
+        return 0.f;
+    aNormal = normal / length;
+    return glm::dot(acOurs.Axis, aNormal);
+}
+
+// Where two lines come closest: aT along the first (from acA along acU) and aV along the second (from acB along acW),
+// both directions of unit length. False when they are within about 10 degrees of parallel.
+bool LineParameters(const glm::vec3& acA, const glm::vec3& acU, const glm::vec3& acB, const glm::vec3& acW, float& aT, float& aV) noexcept
+{
+    const float b = glm::dot(acU, acW);
+    const float denominator = 1.f - b * b;
+    if (!(denominator >= 0.03f))
+        return false;
+    const glm::vec3 r = acA - acB;
+    const float d = glm::dot(acU, r);
+    const float e = glm::dot(acW, r);
+    aT = (b * e - d) / denominator;
+    aV = (e - b * d) / denominator;
+    return std::isfinite(aT) && std::isfinite(aV);
+}
+
+float DistanceToBlade(const glm::vec3& acPoint, const Blade& acBlade) noexcept
+{
+    const float t = glm::clamp(glm::dot(acPoint - acBlade.Grip, acBlade.Axis), 0.f, acBlade.Length);
+    return glm::distance(acPoint, acBlade.Grip + acBlade.Axis * t);
+}
+
+// The copies' drawn blades at this frame end, once they are posed (RecordCopyBlades). Frame end only.
+struct CopyBlade
+{
+    uint64_t Key = 0; // form id << 1 | side (0 left, 1 right)
+    Blade Segment{};
+};
+std::vector<CopyBlade> s_copyBlades;
 } // namespace
 
 namespace VRBodySync
 {
+// The blade stop, after HandParries below; OnFrameEnd calls these.
+std::array<BladeExtent, 2> MeasureCopyBlades(const Rig& acRig) noexcept;
+void RecordCopyBlades(uint32_t aFormId, Actor* apActor, const std::array<BladeExtent, 2>& acExtents) noexcept;
+void StopLocalBlades(std::chrono::steady_clock::time_point aNow) noexcept;
+
 // TEMPORARY placement note: this runs from the game thread, where the actor list is safe to walk, rather than at
 // the renderer's frame end where the body sync lives. A frame-old transform is nothing for a haptic pulse.
 void BeginWeaponTouch() noexcept
@@ -3616,8 +3713,10 @@ void OnFrameEnd() noexcept
         it = stillPosed ? std::next(it) : s_rigs.erase(it);
     }
 
+    s_copyBlades.clear();
     if (poses.empty())
     {
+        StopLocalBlades(std::chrono::steady_clock::now());
         ReleaseUnseenWeaponBodies();
         return;
     }
@@ -3876,6 +3975,7 @@ void OnFrameEnd() noexcept
             return bone.pNode || bone.pEntry ? ToGlm(bone.World().translate) : glm::vec3{std::numeric_limits<float>::quiet_NaN()};
         };
         const std::array<glm::vec3, 2> animatedHands{animatedAt(VRPose::kLeftHand), animatedAt(VRPose::kRightHand)};
+        const std::array<BladeExtent, 2> bladeExtents = MeasureCopyBlades(rig);
         PoseActor(rig, pose, worldOffset);
         ReachHands(rig, pose);
         PlaceWeapons(rig, pose, formId, now);
@@ -3901,6 +4001,7 @@ void OnFrameEnd() noexcept
         }
         LogPhysicsOnce(formId, rig);
         UpdateWeaponBodies(formId, pActor, rig, &animatedWeapons);
+        RecordCopyBlades(formId, pActor, bladeExtents);
         LogRagdollHands(formId, rig, animatedHands);
         if (!isBody && pActor->GetExtension() && pActor->GetExtension()->IsRemotePlayer())
             RecordDrawnPose(formId, pActor, rig);
@@ -3945,6 +4046,7 @@ void OnFrameEnd() noexcept
         }
     }
 
+    StopLocalBlades(now);
     ReleaseUnseenWeaponBodies();
 }
 
@@ -4155,6 +4257,341 @@ bool HandParries(const uint8_t aSide) noexcept
         s_shield = std::any_of(shields.Entries.begin(), shields.Entries.end(), [](const Inventory::Entry& acEntry) { return acEntry.IsWorn(); });
     }
     return s_shield;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The blade stop (VR_TODO "How your equipped sword meets his: (1)"). Emma, 2026-10-08, after a fight with Seen: "if I
+// meet my enemy sword I shouldn't be able to still go past it, or it defeats the purpose"; 2026-10-10: start it.
+//
+// Both swords are keyframed to hands, the player's to the controller and the copy's to its owner's pose, so Havok sees
+// them touch (the clash) and neither can push the other: the blade the player saw went straight through his. Here, at
+// the frame end, once every copy is posed, each drawn blade is a segment (Blade), and the moment the player's crosses
+// one of his it is held on the side it came from: what is drawn of the player's weapon is turned about the grip until
+// it rests on his blade, for as long as the hand is past it. It lets go when the hand comes back, when the touch
+// slides off the end of either blade or reaches the player's own hand, or when it would have to turn more than 60
+// degrees. Only world transforms are written, which the game draws anew from the hand every frame, plus the grip sent
+// to the other player (DrawnGripRotation), so he sees it rest on his blade too; the controller and the hand are not
+// touched. A hit that blade lands on him meanwhile is dropped (IsBladeStoppedAt): the blade he sees never reached him.
+constexpr float kBladeMaxTurnDegrees = 60.f;
+constexpr float kBladeGuard = 8.f; // units from the grip: nearer than that, his blade is at the player's hand
+constexpr float kBladeRest = 1.5f; // units ours is held off his blade's line, about half of two blades' thickness
+constexpr float kBladeSlack = 2.f; // units past the end of either blade a touch still counts
+
+std::array<BladeExtent, 2> MeasureCopyBlades(const Rig& acRig) noexcept
+{
+    std::array<BladeExtent, 2> extents{};
+    for (size_t side = 0; side < 2; ++side)
+        if (void* pAttach = acRig.Attach[side].pNode)
+            for (const RigBone& below : acRig.AttachBelow[side])
+                if (below.pNode && At<void*>(below.pNode, kParentOffset) == pAttach && MeasureBlade(below.pNode, extents[side]))
+                    break;
+    return extents;
+}
+
+void RecordCopyBlades(const uint32_t aFormId, Actor* apActor, const std::array<BladeExtent, 2>& acExtents) noexcept
+{
+    // Drawn, asked to sheathe or sheathing, as for its weapon bodies (UpdateWeaponBodies).
+    const uint32_t weaponState = apActor->actorState.flags2 >> 5 & 7;
+    if (weaponState < 3 || weaponState > 5)
+        return;
+    static std::unordered_map<uint64_t, int> s_saidLength;
+    for (uint32_t side = 0; side < 2; ++side)
+    {
+        if (!acExtents[side].pNode)
+            continue;
+        const CopyBlade blade{(static_cast<uint64_t>(aFormId) << 1) | side, BladeAt(acExtents[side])};
+        if (!IsFinite(blade.Segment.Grip) || !IsFinite(blade.Segment.Axis))
+            continue;
+        s_copyBlades.push_back(blade);
+        if (int& said = s_saidLength[blade.Key]; said != static_cast<int>(acExtents[side].Length))
+        {
+            said = static_cast<int>(acExtents[side].Length);
+            spdlog::info("BladeStop: {:X}'s {} weapon reaches {:.1f} units from its grip (a bound of {:.1f} around a point {:.1f} along it)", aFormId, side ? "right" : "left",
+                         acExtents[side].Length, acExtents[side].Radius, acExtents[side].Along);
+        }
+    }
+}
+
+struct LocalStop
+{
+    // The first-person attach node (WEAPON, SHIELD), searched twice a second as CaptureWeapons does.
+    void* pAttach = nullptr;
+    void* pAttachVTable = nullptr;
+    std::chrono::steady_clock::time_point SearchAt{};
+    BladeExtent Extent{}; // measured on frames it was not turned
+    int SaidLength = -1;
+    // Which side of each copy blade ours was on at the last frame end, while free, to see it cross one.
+    std::unordered_map<uint64_t, float> LastSide;
+    // The blade it rests on (0: free), the side of it ours is held on (SideOf's sign), and what to say on letting go.
+    uint64_t Key = 0;
+    float HeldSide = 0.f;
+    std::chrono::steady_clock::time_point Since{};
+    float WorstDegrees = 0.f;
+    uint32_t Frames = 0;
+    uint32_t NotDrawnAnew = 0;
+    // This frame end's turn, and the weapon node's rotation as written, to tell whether the game drew it anew since.
+    bool Turned = false;
+    NiMatrix3 WrittenRoot{};
+};
+std::array<LocalStop, 2> s_localStops{};
+
+// What other threads read: the grip as sent (CaptureWeapons, from the game's update) and the hit check (the game's
+// damage code).
+struct SharedStop
+{
+    bool Turned = false;
+    glm::mat3 Turn{1.f};
+    NiMatrix3 WrittenAttach{};
+    Blade Real{}; // the blade where the hand holds it, not where it is drawn
+    uint32_t On = 0;
+    std::chrono::steady_clock::time_point DropHitsUntil{};
+};
+std::mutex s_sharedStopsLock;
+std::array<SharedStop, 2> s_sharedStops{};
+
+// The weapon drawn in that hand, as the player sees it: the node hanging under the first-person attach node, read
+// from its children every frame (a weapon swapped between two searches is then never a stale pointer). Null when
+// nothing hangs there.
+void* LocalWeaponNode(PlayerCharacter* apPlayer, LocalStop& aStop, const size_t aSide, const std::chrono::steady_clock::time_point aNow) noexcept
+{
+    const bool cLost = aStop.pAttach && !StillTheSame(aStop.pAttach, aStop.pAttachVTable);
+    if (aNow >= aStop.SearchAt || cLost)
+    {
+        aStop.SearchAt = aNow + std::chrono::milliseconds(500);
+        aStop.pAttach = nullptr;
+        aStop.pAttachVTable = nullptr;
+        if (void* pHand = FirstPersonHand(apPlayer, aSide))
+        {
+            void* pForearm = At<void*>(pHand, kParentOffset);
+            void* pAttach = FindShallowest(pForearm ? pForearm : pHand, kAttachNames[aSide]);
+            if (pAttach && AsNode(pAttach))
+            {
+                aStop.pAttach = pAttach;
+                aStop.pAttachVTable = *static_cast<void**>(pAttach);
+            }
+        }
+    }
+    if (!aStop.pAttach)
+        return nullptr;
+    void** pChildren = At<void**>(aStop.pAttach, kChildrenOffset + 0x8);
+    const uint16_t slots = At<uint16_t>(aStop.pAttach, kChildrenOffset + 0x10);
+    for (uint16_t i = 0; pChildren && i < slots && i < 8; ++i)
+        if (pChildren[i])
+            return pChildren[i];
+    return nullptr;
+}
+
+const CopyBlade* FindCopyBlade(const uint64_t aKey) noexcept
+{
+    for (const CopyBlade& blade : s_copyBlades)
+        if (blade.Key == aKey)
+            return &blade;
+    return nullptr;
+}
+
+void LetGo(const size_t aSide, LocalStop& aStop, const char* acpWhy, const std::chrono::steady_clock::time_point aNow) noexcept
+{
+    if (aStop.Key)
+        spdlog::info("BladeStop: our {} blade let go of {:X}'s {} blade after {} ms: {}; it was held up to {:.0f} degrees from where the hand had it, over {} frame ends ({} "
+                     "of them not drawn anew by the game)",
+                     aSide ? "right" : "left", static_cast<uint32_t>(aStop.Key >> 1), aStop.Key & 1 ? "right" : "left",
+                     std::chrono::duration_cast<std::chrono::milliseconds>(aNow - aStop.Since).count(), acpWhy, aStop.WorstDegrees, aStop.Frames, aStop.NotDrawnAnew);
+    aStop.Key = 0;
+    aStop.Turned = false;
+    aStop.LastSide.clear();
+}
+
+// Turns the attach node and everything below it about the grip. Only while a blade rests on another, and walked live
+// from the attach node each time: no list of nodes is kept from one frame to the next.
+void TurnDrawnWeapon(void* apAttach, const glm::vec3& acPivot, const glm::mat3& acTurn) noexcept
+{
+    static std::vector<void*> s_nodes;
+    s_nodes.clear();
+    s_nodes.push_back(apAttach);
+    CollectNodeDescendants(apAttach, s_nodes);
+    for (void* pNode : s_nodes)
+    {
+        NiTransform& world = At<NiTransform>(pNode, kWorldOffset);
+        world.rotate = FromGlm(acTurn * ToGlm(world.rotate));
+        world.translate = FromGlm(acPivot + acTurn * (ToGlm(world.translate) - acPivot));
+    }
+}
+
+void StopLocalBlades(const std::chrono::steady_clock::time_point aNow) noexcept
+{
+    PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    const uint32_t weaponState = pPlayer ? pPlayer->actorState.flags2 >> 5 & 7 : 0;
+    const bool cDrawn = pPlayer && weaponState >= 3 && weaponState <= 5 && !pPlayer->actorState.IsDeadOrDying();
+
+    std::array<SharedStop, 2> shared{};
+    for (size_t side = 0; side < 2; ++side)
+    {
+        LocalStop& stop = s_localStops[side];
+        void* pNode = cDrawn ? LocalWeaponNode(pPlayer, stop, side, aNow) : nullptr;
+        const TESForm* pHeld = pNode ? pPlayer->GetEquippedWeapon(static_cast<uint32_t>(side)) : nullptr;
+        if (!pNode || !pHeld || pHeld->formType != FormType::Weapon)
+        {
+            LetGo(side, stop, "nothing is drawn in that hand", aNow);
+            continue;
+        }
+
+        // Not drawn anew since our last turn (it still has the rotation we wrote): what is drawn is that turn still,
+        // and nothing is weighed until the game draws it from the hand again.
+        const NiTransform& world = At<NiTransform>(pNode, kWorldOffset);
+        if (stop.Turned && std::memcmp(&world.rotate, &stop.WrittenRoot, sizeof(NiMatrix3)) == 0)
+        {
+            ++stop.NotDrawnAnew;
+            std::lock_guard lock(s_sharedStopsLock);
+            shared[side] = s_sharedStops[side];
+            continue;
+        }
+        stop.Turned = false;
+
+        // Measured where nothing of ours has turned it: the game's transform and its bound agree.
+        if (!stop.Key || stop.Extent.pNode != pNode)
+        {
+            if (!MeasureBlade(pNode, stop.Extent))
+            {
+                LetGo(side, stop, "the weapon has no blade to measure", aNow);
+                stop.Extent = BladeExtent{};
+                continue;
+            }
+            if (stop.SaidLength != static_cast<int>(stop.Extent.Length))
+            {
+                stop.SaidLength = static_cast<int>(stop.Extent.Length);
+                spdlog::info("BladeStop: our {} weapon {:X} reaches {:.1f} units from the grip (a bound of {:.1f} around a point {:.1f} along it)", side ? "right" : "left",
+                             pHeld->formID, stop.Extent.Length, stop.Extent.Radius, stop.Extent.Along);
+            }
+        }
+        const Blade ours = BladeAt(stop.Extent);
+        if (!IsFinite(ours.Grip) || !IsFinite(ours.Axis))
+        {
+            LetGo(side, stop, "the weapon's transform is not usable", aNow);
+            continue;
+        }
+
+        // Free: did it pass through one of his blades since the last frame end, within the length of both?
+        if (!stop.Key)
+        {
+            std::unordered_map<uint64_t, float> sides;
+            for (const CopyBlade& his : s_copyBlades)
+            {
+                if (glm::distance(his.Segment.Grip, ours.Grip) > ours.Length + his.Segment.Length + 20.f)
+                    continue;
+                glm::vec3 normal{};
+                const float sideNow = SideOf(ours, his.Segment, normal);
+                const float sign = sideNow > 0.f ? 1.f : sideNow < 0.f ? -1.f : 0.f;
+                sides[his.Key] = sign;
+                const auto before = stop.LastSide.find(his.Key);
+                if (stop.Key || sign == 0.f || before == stop.LastSide.end() || before->second == 0.f || before->second == sign)
+                    continue;
+                float t = 0.f, v = 0.f;
+                if (!LineParameters(ours.Grip, glm::normalize(ours.Axis - sideNow * normal), his.Segment.Grip, his.Segment.Axis, t, v) || t < kBladeGuard ||
+                    t > ours.Length + kBladeSlack || v < -kBladeSlack || v > his.Segment.Length + kBladeSlack)
+                    continue;
+                stop.Key = his.Key;
+                stop.HeldSide = before->second;
+                stop.Since = aNow;
+                stop.WorstDegrees = 0.f;
+                stop.Frames = 0;
+                stop.NotDrawnAnew = 0;
+                const glm::vec3 at = his.Segment.Grip + his.Segment.Axis * v;
+                spdlog::info("BladeStop: our {} blade met {:X}'s {} blade at ({:.0f}, {:.0f}, {:.0f}), {:.0f} units from our grip and {:.0f} from his; held on this side of it",
+                             side ? "right" : "left", static_cast<uint32_t>(his.Key >> 1), his.Key & 1 ? "right" : "left", at.x, at.y, at.z, t, v);
+            }
+            stop.LastSide.swap(sides);
+        }
+
+        // Held: turned about the grip into the plane of his blade, resting on it on the side it came from.
+        if (stop.Key)
+        {
+            const char* pWhy = nullptr;
+            glm::mat3 turn{1.f};
+            float degrees = 0.f;
+            const CopyBlade* pHis = FindCopyBlade(stop.Key);
+            glm::vec3 normal{};
+            const float sideNow = pHis ? SideOf(ours, pHis->Segment, normal) : 0.f;
+            float t = 0.f, v = 0.f;
+            if (!pHis)
+                pWhy = "his blade is no longer drawn here";
+            else if (sideNow == 0.f)
+                pWhy = "the hand is on his blade's line";
+            else if (sideNow * stop.HeldSide > 0.f)
+                pWhy = "the hand came back";
+            else if (!LineParameters(ours.Grip, glm::normalize(ours.Axis - sideNow * normal), pHis->Segment.Grip, pHis->Segment.Axis, t, v))
+                pWhy = "the blades lie along each other";
+            else if (t < kBladeGuard)
+                pWhy = "his blade reached the hand";
+            else if (t > ours.Length + kBladeSlack)
+                pWhy = "it slid off the end of ours";
+            else if (v < -kBladeSlack || v > pHis->Segment.Length + kBladeSlack)
+                pWhy = "it slid off the end of his";
+            else
+            {
+                const glm::vec3 held = glm::normalize(glm::normalize(ours.Axis - sideNow * normal) + stop.HeldSide * (kBladeRest / t) * normal);
+                turn = RotationBetween(ours.Axis, held);
+                degrees = DegreesOf(turn);
+                if (!(degrees <= kBladeMaxTurnDegrees))
+                    pWhy = "the hand pushed it past (more than 60 degrees)";
+            }
+            if (pWhy)
+            {
+                LetGo(side, stop, pWhy, aNow);
+                continue;
+            }
+
+            TurnDrawnWeapon(stop.pAttach, ours.Grip, turn);
+            stop.Turned = true;
+            stop.WrittenRoot = world.rotate;
+            stop.WorstDegrees = std::max(stop.WorstDegrees, degrees);
+            ++stop.Frames;
+            shared[side].Turned = true;
+            shared[side].Turn = turn;
+            shared[side].WrittenAttach = At<NiTransform>(stop.pAttach, kWorldOffset).rotate;
+            shared[side].Real = ours;
+            shared[side].On = static_cast<uint32_t>(stop.Key >> 1);
+            shared[side].DropHitsUntil = aNow + std::chrono::milliseconds(300);
+        }
+    }
+
+    std::lock_guard lock(s_sharedStopsLock);
+    for (size_t side = 0; side < 2; ++side)
+    {
+        // A hit along a blade that has just been let go still counts as stopped for its last 300 ms.
+        const auto cKeepHits = s_sharedStops[side].DropHitsUntil;
+        const uint32_t cKeepOn = s_sharedStops[side].On;
+        const Blade cKeepReal = s_sharedStops[side].Real;
+        s_sharedStops[side] = shared[side];
+        if (!shared[side].Turned && aNow < cKeepHits)
+        {
+            s_sharedStops[side].DropHitsUntil = cKeepHits;
+            s_sharedStops[side].On = cKeepOn;
+            s_sharedStops[side].Real = cKeepReal;
+        }
+    }
+}
+
+// The grip as drawn, from the first-person attach node's rotation as the game's update reads it: turned the way the
+// blade stop turned it at the last frame end, unless it still has that turn (not drawn anew since).
+glm::mat3 DrawnGripRotation(const size_t aSide, const NiMatrix3& acRead) noexcept
+{
+    std::lock_guard lock(s_sharedStopsLock);
+    const SharedStop& stop = s_sharedStops[aSide];
+    if (!stop.Turned || std::memcmp(&acRead, &stop.WrittenAttach, sizeof(NiMatrix3)) == 0)
+        return ToGlm(acRead);
+    return stop.Turn * ToGlm(acRead);
+}
+
+bool IsBladeStoppedAt(const uint32_t aCopyFormId, const glm::vec3& acPoint) noexcept
+{
+    const auto cNow = std::chrono::steady_clock::now();
+    // No point to go by (none written, or not a number): any blade resting on his counts.
+    const bool cNoPoint = !IsFinite(acPoint) || glm::dot(acPoint, acPoint) < 1.f;
+    std::lock_guard lock(s_sharedStopsLock);
+    for (const SharedStop& stop : s_sharedStops)
+        if (stop.On == aCopyFormId && cNow < stop.DropHitsUntil && (cNoPoint || DistanceToBlade(acPoint, stop.Real) <= 20.f))
+            return true;
+    return false;
 }
 
 bool TakeClash(Clash& aOut) noexcept
@@ -4465,6 +4902,8 @@ void CaptureWeapons(PlayerCharacter* apPlayer, void* apRoot, const BoneNodes& ac
 
         const NiTransform& hand = At<NiTransform>(pHand, kWorldOffset);
         const NiTransform& grip = At<NiTransform>(found.pAttach, kWorldOffset);
+        // As drawn: a blade resting on his (the blade stop) is sent resting there, so he sees it stopped too.
+        const glm::mat3 gripRotation = DrawnGripRotation(side, grip.rotate);
         const glm::mat3 inverseHand = glm::transpose(ToGlm(hand.rotate));
         const glm::vec3 at = inverseHand * (ToGlm(grip.translate) - ToGlm(hand.translate)) / std::max(hand.scale, 0.05f);
         const bool cLog = aNow >= s_nextLog[side];
@@ -4480,7 +4919,7 @@ void CaptureWeapons(PlayerCharacter* apPlayer, void* apRoot, const BoneNodes& ac
         }
 
         held[side] = true;
-        rotation[side] = glm::normalize(glm::quat_cast(inverseHand * ToGlm(grip.rotate)));
+        rotation[side] = glm::normalize(glm::quat_cast(inverseHand * gripRotation));
         offset[side] = at;
 
         // The measurement: how far the copy's weapon was from this one before it was sent.

@@ -66,6 +66,12 @@ function Assert-VersionsMatch($botExe, $release) {
 $release = Join-Path $PSScriptRoot '..\..\build\windows\x64\release'
 $release = (Resolve-Path $release).Path
 
+# The bot reads its scripts from the release folder and nothing in the build puts them there: the tracked ones are
+# copied in, as run-all-pairs.ps1 does, or a script added to the repo is "Missing" here (npc-twice, 2026-10-09).
+$scriptDest = Join-Path $release 'scripts'
+if (-not (Test-Path $scriptDest)) { New-Item -ItemType Directory -Path $scriptDest | Out-Null }
+Copy-Item -Path (Join-Path $PSScriptRoot '..\..\Code\bot\scripts\*.txt') -Destination $scriptDest -Force
+
 $bot = Join-Path $release 'STBot.exe'
 $serverExe = Join-Path $release 'urSovngardeServer.exe'
 foreach ($needed in @($bot, $serverExe)) {

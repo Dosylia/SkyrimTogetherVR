@@ -581,7 +581,7 @@ void CharacterService::OnMountRequest(const PacketEvent<MountRequest>& acMessage
 
     if (riderIt == view.end() || mountIt == view.end() || cRiderEntity == cMountEntity)
     {
-        spdlog::debug("Rejected mount request from player {:X} because rider {:X} or mount {:X} is invalid", acMessage.pPlayer->GetId(), message.RiderId, message.MountId);
+        spdlog::info("Rejected mount request from player {:X} because rider {:X} or mount {:X} is invalid", acMessage.pPlayer->GetId(), message.RiderId, message.MountId);
         return;
     }
 
@@ -595,7 +595,7 @@ void CharacterService::OnMountRequest(const PacketEvent<MountRequest>& acMessage
     const auto& mountOwner = view.get<OwnerComponent>(*mountIt);
     if (riderOwner.GetOwner() != acMessage.pPlayer || riderOwner.OwnershipEpoch != message.RiderOwnershipEpoch || mountOwner.OwnershipEpoch != message.MountOwnershipEpoch)
     {
-        spdlog::debug(
+        spdlog::info(
             "Rejected stale mount request from player {:X} for rider {:X} at epoch {} and mount {:X} at epoch {}; current epochs are {} and {}",
             acMessage.pPlayer->GetId(), message.RiderId, message.RiderOwnershipEpoch, message.MountId, message.MountOwnershipEpoch,
             riderOwner.OwnershipEpoch, mountOwner.OwnershipEpoch);
@@ -605,7 +605,7 @@ void CharacterService::OnMountRequest(const PacketEvent<MountRequest>& acMessage
     const auto& mountCell = view.get<CellIdComponent>(*mountIt);
     if (!acMessage.pPlayer->GetCellComponent().IsInRange(mountCell, view.get<CharacterComponent>(*mountIt).IsDragon()))
     {
-        spdlog::debug("Rejected mount request from player {:X} because mount {:X} is out of range", acMessage.pPlayer->GetId(), message.MountId);
+        spdlog::info("Rejected mount request from player {:X} because mount {:X} is out of range", acMessage.pPlayer->GetId(), message.MountId);
         return;
     }
 
@@ -618,6 +618,8 @@ void CharacterService::OnMountRequest(const PacketEvent<MountRequest>& acMessage
 
     if (!GameServer::Get()->SendToPlayersInRange(notify, cMountEntity, acMessage.GetSender()))
         spdlog::error("{}: SendToPlayersInRange failed", __FUNCTION__);
+    else
+        spdlog::info("Mount: rider {:X} mounts {:X}; told the players in range", message.RiderId, message.MountId);
 }
 
 void CharacterService::OnNewPackageRequest(const PacketEvent<NewPackageRequest>& acMessage) const noexcept

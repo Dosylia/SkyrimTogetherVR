@@ -1,0 +1,20 @@
+# A copy is hidden until it has been put where its owner is, then shown (SpawnReveal, 2026-10-10: copies "fade in"
+# instead of popping).
+#
+#   python Tools\VR\live-check.py live-reveal
+#
+# This bot arrives next to the player: the game makes a copy of it, hides it when its 3D arrives, and must show it
+# once the first movement update places it (or after 1.5 s at most). The picture says it is drawn.
+log live reveal
+waitfor connected 45
+collect spawn
+expect known me
+waitfor known other 40
+wait 6
+log CHECK copy exists
+log CHECK copy 3d
+log CHECK logged SpawnReveal: copy \w+ shown
+log SHOT reveal of copy
+wait 2
+log done
+stop

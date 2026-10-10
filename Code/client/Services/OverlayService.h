@@ -103,6 +103,10 @@ private:
     World& m_world;
     TransportService& m_transport;
 
+    // Each other player's name and last health in the party, for "X is down" (Emma, 2026-10-10: a message, no revive).
+    TiltedPhoques::Map<uint32_t, String> m_playerNames;
+    TiltedPhoques::Map<uint32_t, float> m_playerHealth;
+
     bool m_active = false;
     bool m_inGame = false;
     // What the page has actually been told. The overlay loads asynchronously, so the first enterGame used to be sent

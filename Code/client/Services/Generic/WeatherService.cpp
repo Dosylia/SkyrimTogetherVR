@@ -137,6 +137,11 @@ void WeatherService::OnWeatherChange(const NotifyWeatherChange& acMessage) noexc
     Sky::Get()->ForceWeather(pWeather);
 
     m_cachedWeatherId = weatherId;
+
+    // Whether a party member's game takes the leader's weather on VR was never seen (VR_TODO, "Weather and time");
+    // with this and the leader's line below, a session's two logs say it. Weather changes a few times an hour.
+    const TESWeather* pNow = Sky::Get()->GetWeather();
+    spdlog::info("Weather: the party leader's weather {:X} applied, the sky now has {:X}", weatherId, pNow ? pNow->formID : 0);
 }
 
 void WeatherService::RunWeatherUpdates(const double acDelta) noexcept
@@ -178,6 +183,7 @@ void WeatherService::RunWeatherUpdates(const double acDelta) noexcept
         }
 
         m_transport.Send(request);
+        spdlog::info("Weather: ours is now {:X}, sent to the party as its leader", pWeather->formID);
     }
     else
     {

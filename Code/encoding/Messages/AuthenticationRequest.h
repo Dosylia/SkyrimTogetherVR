@@ -24,7 +24,7 @@ struct AuthenticationRequest final : ClientMessage
     {
         return GetOpcode() == achRhs.GetOpcode() && DiscordId == achRhs.DiscordId && SKSEActive == achRhs.SKSEActive && MO2Active == achRhs.MO2Active && Token == achRhs.Token && Version == achRhs.Version && Protocol == achRhs.Protocol && UserMods == achRhs.UserMods && Username == achRhs.Username &&
                WorldSpaceId == achRhs.WorldSpaceId && CellId == achRhs.CellId && Level == achRhs.Level
-            && PlayerTime == achRhs.PlayerTime;
+            && PlayerTime == achRhs.PlayerTime && HideFromPublicPage == achRhs.HideFromPublicPage;
     }
 
     uint64_t DiscordId{};
@@ -41,4 +41,7 @@ struct AuthenticationRequest final : ClientMessage
     GameId CellId{};
     uint16_t Level{};
     TimeModel PlayerTime{};
+    //! The player asked, in the launcher, to be left out of the public server page's list and map. In the
+    //! authentication rather than a later message so that not even the first push names them.
+    bool HideFromPublicPage{};
 };

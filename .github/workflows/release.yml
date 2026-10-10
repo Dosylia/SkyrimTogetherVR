@@ -1,45 +1,121 @@
 name: Create GitHub Release
 
+# A vX.Y.Z tag on main builds the same three zips that Tools/VR/make-release.ps1 makes on Emma's PC (the
+# "urSovngarde", "Server" and "urSovngarde mod" folders, with the licence files) and publishes them as the release.
+# Emma, 2026-10-10: releases are made both ways, by this and by make-release.ps1 on her PC. Until that day this
+# workflow published upstream's flat-Skyrim layout.
+#
+# The client's folder is gathered the way xmake installs it (the CEF and Discord files, the menu's cursor) plus the
+# built menu, then handed to make-release.ps1; tested on 2026-10-10 against a release made from Emma's own folder:
+# the same 29 entries.
+#
+# Run by hand (Actions, "Create GitHub Release", Run workflow) it builds the zips as an artifact and publishes
+# nothing: a way to try a branch before tagging it.
+#
+# The Linux server is left out until it builds again (VR_TODO, "The Linux build of the dedicated server").
+
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
 
 jobs:
   build-windows:
-    uses: ./.github/workflows/windows-playable-build.yml
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
 
-  build-linux:
-    uses: ./.github/workflows/linux.yml
-    with:
-      build-mode: release
-      upload-build-for-next-job: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The version is git describe, which needs the tags.
+          fetch-depth: 0
+
+      - name: Checkout submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --force --recursive --depth=1
+
+      - name: The tag is on main
+        if: github.ref_type == 'tag'
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          git checkout -B main HEAD
+
+      - name: Cache xmake dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/AppData/Local/.xmake/packages
+          key: ${{ runner.os }}-xmake-${{ hashFiles('**/xmake.lua') }}
+
+      - name: Setup xmake
+        uses: xmake-io/github-action-setup-xmake@v1
+        with:
+          xmake-version: 3.1.0
+          actions-cache-folder: ".xmake-cache"
+          actions-cache-key: windows-2022
+
+      - name: Configure xmake and install dependencies
+        run: xmake config --plat=windows --arch=x64 --mode=release --yes -vD
+
+      - name: Build the client, the server and the menu's process
+        run: |
+          xmake build SkyrimImmersiveLauncherVR
+          xmake build SkyrimServerRunner
+          xmake build TPProcess
+
+      - name: Gather the client's run-time files
+        run: |
+          xmake install -o distrib SkyrimTogetherClientVR
+          xmake install -o distrib TPProcess
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/iron
+          cache-dependency-path: Code/skyrim_ui/pnpm-lock.yaml
+          cache: pnpm
+
+      - name: Build the in-game menu
+        run: |
+          pnpm --prefix Code/skyrim_ui/ install
+          pnpm --prefix Code/skyrim_ui/ deploy:production
+          cp -r Code/skyrim_ui/dist/UI distrib/bin/
+
+      - name: Package the release
+        shell: pwsh
+        run: ./Tools/VR/make-release.ps1 -ClientFolder distrib/bin
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: urSovngarde-release
+          path: build/release/*.zip
+          if-no-files-found: error
 
   publish:
-    needs: [build-windows, build-linux]
+    needs: build-windows
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Download release assets
+      - name: Download the zips
         uses: actions/download-artifact@v8
         with:
+          name: urSovngarde-release
           path: release-files
-          pattern: '{release-asset-linux-*,SkyrimTogether-*}'
-          merge-multiple: true
 
-      - name: Verify release assets
+      - name: Verify the zips
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          expected_assets=(
-            "SkyrimTogether-${version}-windows-x64.zip"
-            "SkyrimTogether-${version}-windows-x64-debug-symbols.zip"
-            "urSovngardeServer-${version}-linux-amd64.tar.gz"
-            "urSovngardeServer-${version}-linux-arm64.tar.gz"
-          )
-
-          for asset in "${expected_assets[@]}"; do
-            test -f "release-files/$asset"
+          for suffix in "" "-update" "-server"; do
+            test -f "release-files/urSovngarde-${GITHUB_REF_NAME}${suffix}.zip"
           done
 
       - name: Create GitHub Release
@@ -47,9 +123,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" \
             ./release-files/* \
             --verify-tag \
             --generate-notes \
-            --title "Skyrim Together $version"
+            --title "urSovngarde $GITHUB_REF_NAME"

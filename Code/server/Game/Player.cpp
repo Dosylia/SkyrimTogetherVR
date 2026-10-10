@@ -27,6 +27,8 @@ Player::Player(Player&& aRhs) noexcept
     , m_party{std::exchange(aRhs.m_party, {})}
     , m_questLog{std::exchange(aRhs.m_questLog, {})}
     , m_cell{std::exchange(aRhs.m_cell, {})}
+    , m_place{std::exchange(aRhs.m_place, {})}
+    , m_hiddenFromPublicPage{aRhs.m_hiddenFromPublicPage}
 {
 }
 

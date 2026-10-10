@@ -1,6 +1,7 @@
 #include <TiltedOnlinePCH.h>
 
 #include <Systems/InterpolationSystem.h>
+#include <Systems/SpawnReveal.h>
 #include <Components.h>
 
 #include <AI/AIProcess.h>
@@ -432,6 +433,7 @@ void InterpolationSystem::Update(Actor* apActor, InterpolationComponent& aInterp
 #endif
 
     apActor->ForcePosition(position);
+    SpawnReveal::Placed(apActor);
     // A creature of another kind than the owner's (see MarkForeignGraph) keeps its own animation state.
     if (!aInterpolationComponent.ForeignGraph)
         apActor->LoadAnimationVariables(second.Variables);

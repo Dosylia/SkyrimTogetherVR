@@ -233,9 +233,11 @@ private:
     //! because handing an actor back and forth on purpose is the thing it measures.
     bool m_acceptOwnership{false};
     bool m_followHostCell{true}; // false after `stay`
-    //! The cookie of an NPC this bot asked the server to register, kept apart from m_cookie so the response for
-    //! its own character and the response for the NPC can be told apart.
-    uint32_t m_npcCookie{};
+    //! The NPCs this bot asked the server to register and has no answer for yet: cookie to reference. Kept apart from
+    //! m_cookie so the response for its own character and the response for an NPC can be told apart. One per request:
+    //! with a single cookie, a second "npc" sent before the first was answered overwrote it and the first answer was
+    //! dropped (live-copies-left-2's two bears 10 ms apart, one "NPC registered", 2026-10-06).
+    std::map<uint32_t, GameId> m_npcCookies;
     std::string m_serverVersion;
 
     glm::vec3 m_position{};

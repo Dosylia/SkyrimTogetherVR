@@ -344,6 +344,7 @@ TEST_CASE("Packets", "[encoding.packets]")
         sendMessage.Token = "TesSt";
         sendMessage.Version = "v1.8.1-104-g9da1af5c-dirty.f8f11b7";
         sendMessage.Protocol = "0a1b2c3d";
+        sendMessage.HideFromPublicPage = true;
         sendMessage.UserMods.ModList.push_back({"Hello", 42});
         sendMessage.UserMods.ModList.push_back({"Hi", 14});
         sendMessage.UserMods.ModList.push_back({"Test", 8});

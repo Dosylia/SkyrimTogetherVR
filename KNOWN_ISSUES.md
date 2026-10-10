@@ -256,7 +256,10 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   connection ends. Not handled: the server's message arriving before the game has the actor loaded again (never
   seen; the log line is `a copy of it stands here too; not handled`).
 
-- **The game grows with every loading screen, in Emma's modlist -- found 2026-10-03, not ours.** Four round trips
+- **The game grows with every loading screen, in Emma's modlist -- found 2026-10-03, not ours.** (2026-10-10: DynDOLOD
+  DLL NG **Alpha-43** ends the thread leak: over four round trips threads stayed at about 193, against 222 to 296 on
+  Alpha-32, and private memory grew half as much, 10.0 to 10.7 GB against 9.7 to 11.2; VR_TODO, "Long sessions
+  grow".) Four round trips
   between Mistwatch and Windhelm's docks by console (`cow Tamriel 34 8` and back) took the game from 8.6 to 10.4 GB
   of private memory and from 236 to 287 threads; connected or not made no difference (8.6 to 10.3 GB over three
   trips connected). The threads are DynDOLOD's: `DynDOLOD.DLL` (DynDOLOD DLL NG Alpha-32; MO2 lists Alpha-33) starts

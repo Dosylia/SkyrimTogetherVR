@@ -1,0 +1,33 @@
+# Mounts, as the other player sees them: this bot brings a horse and mounts it, and the game's copy of the bot must ride
+# the game's copy of the horse (VR_TODO, "Mounts: untested", 2026-10-10).
+#
+#   python Tools\VR\live-check.py live-mount
+#
+# The rider's game sends MountRequest; the server checks the horse is a mount and in range, gives it to the rider's
+# player, and sends NotifyMount; the other games run the mount package on their copy of the rider.
+log live mount
+waitfor connected 45
+collect spawn ownership
+expect known me
+waitfor known other 40
+wait 5
+
+log -- a horse of this bot's (Skyrim.esm 68D5B), registered as a mount
+npc temp 68D5B mount
+waitfor owned == 1 20
+wait 8
+log CHECK npc exists
+log CHECK copy unmounted
+
+log -- the bot steps away from its horse, then mounts it
+walk rel 150 0
+wait 4
+mount
+wait 12
+log CHECK copy mounted
+wait 20
+log CHECK copy mounted
+log SHOT riding of copy
+wait 2
+log done
+stop

@@ -58,6 +58,7 @@ enum ClientOpcode : unsigned char
     kRequestDroppedItemMove,
     kRequestWorldObjectMove,
     kClashRequest,
+    kPlayerPlaceRequest,
     kClientOpcodeMax
 };
 

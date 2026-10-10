@@ -18,6 +18,8 @@
 #include <Messages/NotifyDroppedItemMove.h>
 #include <Messages/ClashRequest.h>
 #include <Messages/RequestOwnershipClaim.h>
+#include <Messages/RequestPlayerHealthUpdate.h>
+#include <Messages/MountRequest.h>
 #include <Messages/NotifyClash.h>
 #include <Messages/NotifyWorldObjectMove.h>
 #include <Messages/ActivateRequest.h>
@@ -911,13 +913,14 @@ void Bot::HandleMessage(const ServerMessage& acMessage) noexcept
         // An NPC this bot registered, rather than its own character. Recorded as an ordinary actor it owns, so
         // the ownership-churn pair has something that is not a player to hand back and forth: a player character
         // cannot be claimed at all (CharacterService::CanClaimOwnership refuses IsPlayer and IsMount).
-        if (m_npcCookie && message.Cookie == m_npcCookie)
+        if (const auto pending = m_npcCookies.find(message.Cookie); pending != m_npcCookies.end())
         {
             KnownActor& npc = Actor(message.ServerId);
             npc.IsPlayer = false;
             npc.OwnedByUs = message.Owner;
             npc.OwnershipEpoch = message.OwnershipEpoch;
-            npc.Ref = m_npcReference; // so that "claim ref:<hex>" finds this bot's own NPC too
+            npc.Ref = pending->second; // so that "claim ref:<hex>" finds this bot's own NPC too
+            m_npcCookies.erase(pending);
             npc.LastChange = Clock::now();
             spdlog::info("NPC registered as actor {:X} (owner {}) at epoch {}", message.ServerId, message.Owner ? "yes" : "no", message.OwnershipEpoch);
             Record(Collect::Ownership, fmt::format("npc {:X} owner {} epoch {}", message.ServerId, message.Owner ? 1 : 0, message.OwnershipEpoch));
@@ -1366,6 +1369,22 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         return Seconds(now - m_commandStart) >= seconds;
     }
 
+    // "infront <distance>": straight to <distance> units in front of the host (its heading), at the host's height. The
+    // bot never changes height otherwise (MoveTowards keeps z), so its copy can stand inside a hillside the host
+    // walked up (live-blade, 2026-10-10: 156 units under the player, out of reach of a scripted swing).
+    if (name == "infront")
+    {
+        if (const KnownPlayer* pHost = Host())
+        {
+            const float distance = arg(0, 70.f);
+            m_position = pHost->Position + glm::vec3(std::sin(pHost->Rotation.y), std::cos(pHost->Rotation.y), 0.f) * distance;
+            spdlog::info("[script] {:.0f} units in front of the host, at ({:.0f}, {:.0f}, {:.0f})", distance, m_position.x, m_position.y, m_position.z);
+        }
+        else
+            spdlog::error("[script] infront: no host known");
+        return true;
+    }
+
     if (name == "equip" || name == "unequip")
     {
         uint32_t baseId = 0;
@@ -1392,6 +1411,40 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
     if (name == "health")
     {
         SendHealth(arg(0, m_maxHealth));
+        return true;
+    }
+
+    // "mount": this bot's character mounts the NPC it owns (a horse registered with "npc temp <base> mount"), as a
+    // rider's game reports it (MountRequest); the other games make their copy of the rider ride their copy of the horse.
+    if (name == "mount")
+    {
+        const KnownActor* pHorse = nullptr;
+        for (const auto& actor : m_actors)
+            if (actor.OwnedByUs && !actor.IsPlayer && actor.ServerId != m_serverId)
+                pHorse = &actor;
+        if (!pHorse || !m_hasCharacter)
+        {
+            spdlog::error("[script] mount: no horse of ours (npc temp <base> mount) or no character yet");
+            return true;
+        }
+        MountRequest request{};
+        request.RiderId = m_serverId;
+        request.RiderOwnershipEpoch = m_ownershipEpoch;
+        request.MountId = pHorse->ServerId;
+        request.MountOwnershipEpoch = pHorse->OwnershipEpoch;
+        SendMsg(request);
+        spdlog::info("[script] mounting actor {:X} (epoch {})", pHorse->ServerId, pHorse->OwnershipEpoch);
+        return true;
+    }
+
+    // "partyhealth <fraction>": the health a party member reports to its party (RequestPlayerHealthUpdate), what a
+    // real client sends twice a second when it changes; 0 is a player gone down ("X is down", 2026-10-10).
+    if (name == "partyhealth")
+    {
+        RequestPlayerHealthUpdate request{};
+        request.Percentage = arg(0, 1.f);
+        SendMsg(request);
+        spdlog::info("[script] party health {:.2f} sent", request.Percentage);
         return true;
     }
 
@@ -2224,14 +2277,19 @@ bool Bot::StepCommand(const Command& acCommand, const bool aFirstTick) noexcept
         }
 
         std::random_device device;
-        m_npcCookie = device();
+        uint32_t cookie = device();
+        while (cookie == 0 || cookie == m_cookie || m_npcCookies.count(cookie))
+            cookie = device();
 
         AssignCharacterRequest request{};
-        request.Cookie = m_npcCookie;
+        request.Cookie = cookie;
         // "npc <hex> dragon": registered as a dragon (CharacterComponent::IsDragon on the server).
         request.IsDragon = !args.empty() && args.back() == "dragon";
-        request.ReferenceId = temporary ? GameId(std::numeric_limits<uint32_t>::max(), 0xFF000000u | (m_npcCookie & 0x00FFFFFFu)) : GameId(m_skyrimModId, baseId);
+        // "npc temp <base> mount": registered as a horse one can ride (CharacterComponent::IsMount on the server).
+        request.IsMount = !args.empty() && args.back() == "mount";
+        request.ReferenceId = temporary ? GameId(std::numeric_limits<uint32_t>::max(), 0xFF000000u | (cookie & 0x00FFFFFFu)) : GameId(m_skyrimModId, baseId);
         m_npcReference = request.ReferenceId;
+        m_npcCookies[cookie] = request.ReferenceId;
         request.FormId = captured ? m_captureBase : GameId(m_skyrimModId, baseId);
         request.CellId = m_cell;
         request.WorldSpaceId = m_worldSpace;

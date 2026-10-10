@@ -57,6 +57,7 @@
 #include <Messages/RequestFactionsChanges.h>
 #include <Messages/NotifyFactionsChanges.h>
 #include <Messages/NotifyRemoveCharacter.h>
+#include <Systems/SpawnReveal.h>
 #include <Messages/RequestOwnershipTransfer.h>
 #include <Messages/NotifyOwnershipTransfer.h>
 #include <Messages/RequestOwnershipClaim.h>
@@ -835,6 +836,7 @@ void CharacterService::OnUpdate(const UpdateEvent& acUpdateEvent) noexcept
         RunWeaponTouch();
     }
     RunWaitingCopies();
+    SpawnReveal::Tick();
 
     {
         PerfScope perfScope("CharacterService::RunFactionsUpdates");
@@ -1938,7 +1940,10 @@ void CharacterService::OnNotifyMount(const NotifyMount& acMessage) const noexcep
     if (!pMount)
         return;
 
-    pRider->InitiateMountPackage(pMount);
+    const bool cAccepted = pRider->InitiateMountPackage(pMount);
+    // Mounts were untested until 2026-10-10 (`live-mount`); this says the order arrived, was given, and what the game said.
+    spdlog::info("Mount: copy {:X} of rider {:X} told to ride copy {:X} of mount {:X}; the game {}", pRider->formID, acMessage.RiderId, pMount->formID,
+                 acMessage.MountId, cAccepted ? "accepted it" : "refused it");
 }
 
 void CharacterService::OnInitPackageEvent(const InitPackageEvent& acEvent) const noexcept
@@ -3371,6 +3376,11 @@ void CharacterService::RunRemoteUpdates() noexcept
             pActor->FixVampireLordModel();
 
         readyEntities.push_back(entity);
+
+        // A player's copy is not drawn until the interpolation has put it where its owner is (SpawnReveal). Not an
+        // NPC's: one standing still sends no movement, and in the rig every NPC copy then appeared 1.5 s late.
+        if (waitingFor3D.SpawnRequest.IsPlayer)
+            SpawnReveal::HideUntilPlaced(pActor);
 
         spdlog::info("Applied 3D for actor, form id: {:X}", pActor->formID);
     }

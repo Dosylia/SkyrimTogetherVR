@@ -21,9 +21,10 @@ log walking five cells east
 walk rel 20000 0 3000
 log giving the other player time to lose health where it cannot be sent to me
 wait 10
-# Out of range: the change must not have arrived. The copy is either still held at its old health or gone; neither
-# may read 55 yet, or the check on the way back proves nothing.
+# Out of range: the change must not have arrived, and since 2026-10-10 the server removes what a viewer walked away
+# from (PlayerService, the grid shift), so the copy is gone rather than held at its old health.
 expect not health other <= 60
+expect not known other
 
 log and back again
 walk rel -20000 0 3000

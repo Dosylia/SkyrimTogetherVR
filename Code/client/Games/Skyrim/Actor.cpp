@@ -1196,6 +1196,12 @@ bool TP_MAKE_THISCALL(HookDamageActor, Actor, float aDamage, Actor* apHitter, bo
                 spdlog::info("PvP: a hit of {:.0f} on remote player {:X}'s weapon, not on {:X}; not sent", realDamage, apThis->formID, apThis->formID);
                 return false;
             }
+            // The blade stop: the blade that landed it is drawn resting on his, so on neither screen did it reach him.
+            if (VRBodySync::IsBladeStoppedAt(apThis->formID, glm::vec3{pLastHit[0], pLastHit[1], pLastHit[2]}))
+            {
+                spdlog::info("PvP: a hit of {:.0f} on remote player {:X} by a blade resting on his; not sent", realDamage, apThis->formID);
+                return false;
+            }
 #endif
             if (realDamage >= 1.f)
                 spdlog::info("PvP: hit remote player {:X} for {:.0f}", apThis->formID, realDamage);

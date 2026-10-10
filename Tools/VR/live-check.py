@@ -48,7 +48,7 @@ The bot's script does not stop while the driver is busy with that, so its own `w
 `log DO papyrus <Script> <Function> <self> [form ...]` calls a native function on a reference (ids in hex; a number as n:<value>,
 a float as f:<value>, a bool as b:true or b:false).
 
-`log CHECK copy|npc equipped|unequipped <hex>` asks the game whether its copy has that item equipped (not for the left hand: the
+`log CHECK copy|npc mounted|unmounted` asks whether the copy rides (IsOnMount). `log CHECK copy|npc equipped|unequipped <hex>` asks the game whether its copy has that item equipped (not for the left hand: the
 game's IsEquipped does not count it); `lefthand|righthand <hex>` asks which weapon is in that hand; `has <hex>` whether it owns one.
 `log CHECK distinct <most> <regular expression with one group>` passes when the client has logged at least one and
 at most that many different values of the group since the script began.
@@ -536,6 +536,11 @@ class Run:
                     inside = papyrus('Actor', 'IsInFaction', form, [{'form': '0x' + words[2]}])
                     ok = isinstance(inside, bool) and inside is (what == 'infaction')
                     detail = 'actor %s, IsInFaction(%s) %s' % (form, words[2], inside)
+                elif what in ('mounted', 'unmounted'):
+                    # "copy mounted": the game's copy is riding (Actor.IsOnMount), for a rider's MountRequest (2026-10-10).
+                    riding = papyrus('Actor', 'IsOnMount', form, [])
+                    ok = isinstance(riding, bool) and riding is (what == 'mounted')
+                    detail = 'actor %s, IsOnMount %s' % (form, riding)
                 elif what == 'has':
                     # "copy has <hex>": the copy's inventory holds at least one.
                     n = papyrus('ObjectReference', 'GetItemCount', form, [{'form': '0x' + words[2]}])
@@ -597,7 +602,7 @@ class Run:
             m = re.search(r'NPC registered as actor ([0-9A-Fa-f]+)', line)
             if m:
                 self.npc_id = m.group(1)
-            m = re.search(r'\[script\] (CHECK .*|DO face .*|DO console .*|DO key .*|DO load last|DO server restart.*|DO sleep \d+|DO papyrus .*|DO pickup own|DO drop .*|DO grab .*|DO walk .*|DO bring .*|DO sample .*|DO menu .*|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
+            m = re.search(r'\[script\] (CHECK .*|DO face .*|DO console .*|DO key .*|DO swing .*|DO load last|DO server restart.*|DO sleep \d+|DO papyrus .*|DO pickup own|DO drop .*|DO grab .*|DO walk .*|DO bring .*|DO sample .*|DO menu .*|DO god on|DO god off|DO combat on|DO combat off|SHOT .*|--.*|done)$', line.rstrip())
             if m:
                 text = m.group(1)
                 if text.startswith('CHECK '):
@@ -616,6 +621,84 @@ class Run:
                     else:
                         print('   FAIL  god mode could not be set', flush=True)
                         self.results.append((False, text.strip(), 'console did not confirm'))
+                elif text.startswith('DO swing ') and ' through copy' in text:
+                    # "DO swing right|left through copy <ms> [past <m>] [hold <ms>]": the same swing, aimed: the middle of
+                    # the copy's sword (or its right hand, where the bot's "handtargets" put it) is turned into room space
+                    # from the copy's and the player's positions and headings (papyrus), about 70 game units a metre, and
+                    # the controller sweeps right to left from 45 cm before it to <past> metres beyond (45 cm), then
+                    # stays there for <hold> ms (none).
+                    words = text.split()
+                    try:
+                        side, ms = words[2], int(words[5])
+                        options = dict(zip(words[6::2], words[7::2]))
+                        past = float(options.get('past', 0.45))
+                        hold = int(options.get('hold', 0))
+                        copy, why = self.subject('copy')
+                        if not copy:
+                            raise RuntimeError('no copy: %s' % why)
+                        def pos(form):
+                            return [papyrus('ObjectReference', 'Get' + a, form) for a in ('PositionX', 'PositionY', 'PositionZ', 'AngleZ')]
+                        cx, cy, cz, ca = pos(copy)
+                        px, py, pz, pa = pos('14')
+                        ca, pa = math.radians(ca), math.radians(pa)
+                        # The middle of the copy's sword (its body's centre of mass, from the client's VRWeaponBody line),
+                        # or else its right hand: its local right, forward, up turned by its heading.
+                        centre = latest_blade_centre(session_lines(), copy)
+                        if centre:
+                            hx, hy, hz = centre
+                        else:
+                            hx = cx + 15 * math.cos(ca) + 20 * math.sin(ca)
+                            hy = cy - 15 * math.sin(ca) + 20 * math.cos(ca)
+                            hz = cz + 80
+                        dx, dy, dz = hx - px, hy - py, hz - pz
+                        right = dx * math.cos(pa) - dy * math.sin(pa)
+                        forward = dx * math.sin(pa) + dy * math.cos(pa)
+                        rx, ry, rz = right / 70.0, dz / 70.0, -forward / 70.0
+                        print('   (the copy\'s %s is %.0f right, %.0f forward, %.0f up of the player: room (%.2f, %.2f, %.2f))' % ('blade' if centre else 'right hand', right, forward, dz, rx, ry, rz), flush=True)
+                        # The hand passes 45 cm short of it, so the middle of the player's own blade crosses it.
+                        text = 'DO swing %s %.3f %.3f %.3f %.3f %d hold %d' % (side, rx + 0.45, rx - past, ry, min(-0.2, rz + 0.45), ms, hold)
+                    except Exception as e:
+                        print('   FAIL  swing through copy: %s' % e, flush=True)
+                        self.results.append((False, text.strip(), str(e)))
+                        text = ''
+                if text.startswith('DO swing '):
+                    # "DO swing right|left <x0> <x1> <y> <z> <ms> [hold <ms>]": that controller moves from x0 to x1 (metres
+                    # in room space: x right, y up, -z forward) at height y and depth z over <ms>, then stays at x1 for
+                    # the hold, the headset standing at 1.6 m looking forward, the other hand resting low at its side
+                    # (DevBench `input vrTrackedSet`, one sequence of 20 ms frames built on the current frame). The blade
+                    # work's way to swing a sword (2026-10-10). The driver does not wait for it; the bot's script waits.
+                    words = text.split()
+                    try:
+                        side, other = words[2], ('left' if words[2] == 'right' else 'right')
+                        x0, x1, y, z, ms = float(words[3]), float(words[4]), float(words[5]), float(words[6]), int(words[7])
+                        hold = int(words[9]) if len(words) > 9 and words[8] == 'hold' else 0
+                        base = tool('input', {'action': 'observe', 'device': 'vrTrackedSet'})['frame']
+                        steps = max(2, ms // 20)
+                        frames = []
+                        for i in range(steps + 1 + hold // 20):
+                            f = json.loads(json.dumps(base))
+                            f.pop('seq', None)
+                            f['tMs'] = int(i * ms / steps) if i <= steps else ms + (i - steps) * 20
+                            f['hmd']['matrix'] = [1, 0, 0, 0, 0, 1, 0, 1.6, 0, 0, 1, 0]
+                            f[side]['matrix'] = [1, 0, 0, x0 + (x1 - x0) * min(i, steps) / steps, 0, 1, 0, y, 0, 0, 1, z]
+                            f[other]['matrix'] = [1, 0, 0, -0.25 if other == 'left' else 0.25, 0, 1, 0, 1.0, 0, 0, 1, -0.1]
+                            for d in ('hmd', 'left', 'right'):
+                                f[d].update({'available': True, 'connected': True, 'valid': True, 'trackingResult': 200})
+                                # SteamVR switches idle controllers off, and then they come without an index or a state.
+                                if f[d].get('index') is None:
+                                    f[d]['index'] = {'hmd': 0, 'left': 2, 'right': 3}[d]
+                                for key in ('velocity', 'angularVelocity'):
+                                    f[d].setdefault(key, [0.0, 0.0, 0.0])
+                                if d != 'hmd' and not f[d].get('controller'):
+                                    f[d]['controller'] = {'axes': [[0.0, 0.0]] * 5, 'packetNumber': 1, 'pressed': 0, 'touched': 0}
+                            for d in ('left', 'right'):
+                                f[d]['controller']['packetNumber'] = (base[d].get('controller') or {}).get('packetNumber', 1) + i + 1
+                            frames.append(f)
+                        r = tool('input', {'action': 'sequence', 'device': 'vrTrackedSet', 'frames': frames, 'owner': 'live-check'}, timeout=15)
+                        print('   (%s hand swings from %.2f to %.2f over %d ms%s: %s)' % (side, x0, x1, ms, ', then holds %d ms' % hold if hold else '', 'queued' if r.get('queued') else r), flush=True)
+                    except Exception as e:
+                        print('   FAIL  swing: %s' % type(e).__name__, flush=True)
+                        self.results.append((False, text.strip(), type(e).__name__))
                 elif text.startswith('DO key '):
                     parts = text.split()
                     try:

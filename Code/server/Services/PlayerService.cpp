@@ -10,6 +10,7 @@
 #include <Messages/EnterExteriorCellRequest.h>
 #include <Messages/EnterInteriorCellRequest.h>
 #include <Messages/CharacterSpawnRequest.h>
+#include <Messages/NotifyRemoveCharacter.h>
 #include <Messages/PlayerRespawnRequest.h>
 #include <Messages/NotifyInventoryChanges.h>
 #include <Messages/NotifyPlayerRespawn.h>
@@ -60,6 +61,8 @@ void PlayerService::HandleGridCellShift(const PacketEvent<ShiftGridCellRequest>&
     auto& message = acMessage.Packet;
 
     const GameId oldCell = pPlayer->GetCellComponent().Cell;
+    // Where the viewer was, to tell what has just left its range (see the removal below).
+    const CellIdComponent previous = pPlayer->GetCellComponent();
 
     CellIdComponent cell = CellIdComponent{message.PlayerCell, message.WorldSpaceId, message.CenterCoords};
     pPlayer->SetCellComponent(cell);
@@ -100,6 +103,38 @@ void PlayerService::HandleGridCellShift(const PacketEvent<ShiftGridCellRequest>&
 
         pPlayer->Send(spawnMessage);
     }
+
+    RemoveWhatLeftRange(pPlayer, previous);
+}
+
+// What a viewer walked away from is removed from its view, as the other direction always was
+// (CharacterService::OnCharacterExteriorCellChange): until 2026-10-10 a viewer kept copies of everything it left behind,
+// and nothing corrected one that stays put, a corpse above all (`rangeback`, 2026-09-30). Only what was in range of where
+// it was and is not of where it is now, so nothing is removed that it never had. Called by both exterior handlers, each
+// with the place it had before it: a client sends the cell entry first and the grid shift after, and the entry alone
+// already moves the viewer (the first try, in the shift alone, never removed anything).
+void PlayerService::RemoveWhatLeftRange(Player* apPlayer, const CellIdComponent& acPrevious) const noexcept
+{
+    if (!acPrevious.WorldSpaceId)
+        return;
+
+    const auto& now = apPlayer->GetCellComponent();
+    auto characterView = m_world.view<CellIdComponent, CharacterComponent, OwnerComponent>();
+    for (auto character : characterView)
+    {
+        if (characterView.get<OwnerComponent>(character).GetOwner() == apPlayer)
+            continue;
+
+        const auto& characterCellComponent = characterView.get<CellIdComponent>(character);
+        const bool isDragon = characterView.get<CharacterComponent>(character).IsDragon();
+        if (!acPrevious.IsInRange(characterCellComponent, isDragon) || now.IsInRange(characterCellComponent, isDragon))
+            continue;
+
+        NotifyRemoveCharacter removeMessage;
+        removeMessage.ServerId = World::ToInteger(character);
+        apPlayer->Send(removeMessage);
+        spdlog::debug("'{}' walked away from character {:X}; removed from its view", apPlayer->GetUsername().c_str(), removeMessage.ServerId);
+    }
 }
 
 void PlayerService::HandleExteriorCellEnter(const PacketEvent<EnterExteriorCellRequest>& acMessage) const noexcept
@@ -118,7 +153,9 @@ void PlayerService::HandleExteriorCellEnter(const PacketEvent<EnterExteriorCellR
             m_world.GetDispatcher().trigger(CharacterExteriorCellChangeEvent{pPlayer, entity, message.WorldSpaceId, message.CurrentCoords});
         }
 
+        const CellIdComponent previous = pPlayer->GetCellComponent();
         pPlayer->SetCellComponent(cell);
+        RemoveWhatLeftRange(pPlayer, previous);
 
         // Give this player back everything that is in range of where they now are.
         //
@@ -256,14 +293,15 @@ void PlayerService::OnPlayerRespawnRequest(const PacketEvent<PlayerRespawnReques
 
             acMessage.pPlayer->Send(notifyPlayerRespawn);
         }
-
-        // Let all other players in cell respawn this player, since the body state seems to be bugged otherwise
-        NotifyRespawn notifyRespawn{};
-        notifyRespawn.ActorId = World::ToInteger(*character);
-
-        if (!GameServer::Get()->SendToPlayersInRange(notifyRespawn, *character, acMessage.GetSender()))
-            spdlog::error("{}: SendToPlayersInRange failed", __FUNCTION__);
     }
+
+    // Let all other players in cell respawn this player, since the body state seems to be bugged otherwise. Outside
+    // the inventory lookup above: a character the server holds no inventory for respawns for everyone else too.
+    NotifyRespawn notifyRespawn{};
+    notifyRespawn.ActorId = World::ToInteger(*character);
+
+    if (!GameServer::Get()->SendToPlayersInRange(notifyRespawn, *character, acMessage.GetSender()))
+        spdlog::error("{}: SendToPlayersInRange failed", __FUNCTION__);
 
     // The respawn above rebuilds the body, but the health the server keeps for this character is still whatever it
     // was when they died, and nothing here ever put it back. Every copy built from that point on -- someone walking

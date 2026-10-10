@@ -1,34 +1,62 @@
-## SkyrimTogether VR
+## urSovngarde
 
-A fork of Tilted Online (Skyrim Together Reborn) with the goal of adding Skyrim VR support.
-This is an active work-in-progress by two full-stack developers learning C++ and reverse engineering along the way. Nothing is playable yet.
+Co-op for Skyrim VR: a port of Skyrim Together Reborn (Tilted Online) to Skyrim VR 1.4.15. Playable, and played
+by the two of us; still early, and only ever tested with two players at once.
 
-## What this is
+## What works
 
-Skyrim Together Reborn is an open-source co-op mod for Skyrim Special Edition. This fork attempts to port it to Skyrim VR, which uses a different executable with different memory addresses and VR-specific engine classes.
+- Playing together in Skyrim VR through a dedicated server, the world's NPCs, fights, deaths and items shared.
+- The other player's body follows their real head and hands (VRIK), with their weapons held where they hold them.
+- Sword against sword: both players feel it in the controller, hear it and see sparks, and a hit is dropped when the
+  defender's blade met the attacker's just before it landed. Only a weapon or a shield parries.
+- Dead bodies lie in the same place in both worlds and can be dragged, seen by both.
+- A player's follower stays with that player's game; a dragon flying in one game is not taken over by the other
+  until it lands.
+- Builds that speak the same network messages connect to each other whatever their version.
+- The urSovngarde launcher: finds Skyrim VR and the mod manager (Mod Organizer 2, Vortex or none), installs and
+  updates the mod, checks the setup, plays, hosts with a six-letter invite code and joins with one, through our relay
+  so that no port has to be opened. Crash reports are sent only with the player's consent.
 
-## What is done
+## Known issues
 
-VR build target (SkyrimTogetherClientVR) compiles clean
-Dual-ID macro system in place — every address hook has an SSE slot and a VR slot
-VR address library loader — reads version-1-4-15-0.csv from SKSE plugins instead of the SSE binary format, then fills any gaps from a supplemental table (VRAddressOverrides.h) derived by cross-referencing this project's SSE address IDs against a community SSE↔VR binary-diff table
-VR launcher target (SkyrimImmersiveLauncherVR) wired up (still fails to link — pre-existing CEF runtime-library mismatch, not VR-specific)
-Nearly all engine addresses mapped to their VR equivalents this way: 267 of 275 function/global hooks, and 2771 of 2818 RTTI type descriptors. The remaining ~55 (8 hooks + 47 RTTI types) aren't in the community binary-diff data and need real reverse engineering (Ghidra) to find
-One real VR struct-layout difference found and fixed (PlayerControls::Data offset 0x20 -> 0x24)
+- Blades do not physically stop each other yet: an equipped sword passes through the other one (only feedback and
+  the parry rule exist).
+- Some NPC and quest situations still differ between the two games (an NPC invisible for one player, quest
+  dialogue heard twice). `VR_TODO.md` and `KNOWN_ISSUES.md` hold the full list.
+- The Linux build of the dedicated server does not build on the current code.
 
-## What is missing
-
-~8 engine addresses and ~47 RTTI type descriptors still need VR mapping via reverse engineering (Ghidra) — the bulk of the address work is done, this is the long tail
-Other VR-specific engine class hierarchy/struct-layout differences almost certainly exist beyond the one found so far (PlayerControls) and haven't been systematically audited
-No VR input or controller support (headset pose, motion controllers, room-scale movement) — this is new code, not address porting, and is the biggest remaining piece of work before it's playable in VR
-Not installable or testable yet — untested against the actual game; even with most addresses mapped, first launch may still crash on something undiscovered
-Networking: the dedicated server (Code/server) is engine-agnostic and already works over UDP for SE; VR-specific player state (headset/hand poses) will need new sync fields once VR input exists, but this is additive, not a rewrite
+Needed: Skyrim VR 1.4.15, SKSE VR, the VR Address Library for SKSEVR, and `uGridsToLoad = 5` (the default). The
+release's `README.md` explains the install with the launcher, Mod Organizer 2, Vortex or by hand.
 
 ## Building
 
-See the original build guide. To build the VR client:
-bashxmake build SkyrimTogetherClientVR
-Original project
+On Windows 10 or 11 (x64), the same steps the Windows build on GitHub Actions takes (`.github/workflows/windows.yml`).
+
+Needed: Visual Studio 2022 with "Desktop development with C++", [xmake](https://xmake.io) 3.1.0 or newer, Git, and
+Node.js 20 with pnpm for the in-game menu.
+
+```
+git clone --recursive https://github.com/Dosylia/SkyrimTogetherVR.git
+cd SkyrimTogetherVR
+xmake config --plat=windows --arch=x64 --mode=release --yes
+xmake -y
+```
+
+The programs land in `build\windows\x64\release`: `urSovngarde.exe` (the client, which starts the game),
+`TPProcess.exe` (the in-game menu's browser), `urSovngardeServer.exe` and `STServer.dll` (the server).
+`xmake install -o distrib` gathers them with the files they need at run time (the Chromium Embedded Framework).
+
+The in-game menu (`Code/skyrim_ui`), into `Code/skyrim_ui/dist/UI`:
+
+```
+pnpm --prefix Code/skyrim_ui install
+pnpm --prefix Code/skyrim_ui deploy:production
+```
+
+The game files (`SkyrimTogether.esp` and the rest) are in `GameFiles/Skyrim` and install as a mod. A release as
+published is packaged by `Tools/VR/make-release.ps1`.
+
+## Original project
 All core multiplayer logic is from Skyrim Together Reborn by the TiltedPhoques team.
 
 ## License

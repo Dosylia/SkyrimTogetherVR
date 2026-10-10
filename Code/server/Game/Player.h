@@ -43,6 +43,13 @@ struct Player
 
     void SetCellComponent(const CellIdComponent& aCellComponent) noexcept;
 
+    // For the public server page only (PublicStatusService): where the player's game says they are (PlayerPlaceRequest),
+    // and whether they asked, in the launcher, to be left out of the page (AuthenticationRequest).
+    [[nodiscard]] const String& GetPlace() const noexcept { return m_place; }
+    void SetPlace(String aPlace) noexcept { m_place = std::move(aPlace); }
+    [[nodiscard]] bool IsHiddenFromPublicPage() const noexcept { return m_hiddenFromPublicPage; }
+    void SetHiddenFromPublicPage(bool aHidden) noexcept { m_hiddenFromPublicPage = aHidden; }
+
     void Send(const ServerMessage& acServerMessage) const;
 
     // When the last movement snapshot came from this client. A paused client sends none: the mod's update runs off
@@ -65,4 +72,6 @@ private:
     uint32_t m_stringCacheId{0};
     uint16_t m_level{0};
     std::chrono::steady_clock::time_point m_lastMovementAt{};
+    String m_place;
+    bool m_hiddenFromPublicPage{false};
 };

@@ -14,6 +14,7 @@ void AuthenticationRequest::SerializeRaw(TiltedPhoques::Buffer::Writer& aWriter)
     CellId.Serialize(aWriter);
     Serialization::WriteVarInt(aWriter, Level);
     PlayerTime.Serialize(aWriter);
+    Serialization::WriteBool(aWriter, HideFromPublicPage);
 }
 
 void AuthenticationRequest::DeserializeRaw(TiltedPhoques::Buffer::Reader& aReader) noexcept
@@ -32,4 +33,5 @@ void AuthenticationRequest::DeserializeRaw(TiltedPhoques::Buffer::Reader& aReade
     CellId.Deserialize(aReader);
     Level = Serialization::ReadVarInt(aReader) & 0xFFFF;
     PlayerTime.Deserialize(aReader);
+    HideFromPublicPage = Serialization::ReadBool(aReader);
 }

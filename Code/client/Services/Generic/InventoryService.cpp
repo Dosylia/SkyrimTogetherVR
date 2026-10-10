@@ -325,6 +325,21 @@ void InventoryService::OnNotifyEquipmentChanges(const NotifyEquipmentChanges& ac
     }
     else
     {
+        // A weapon already in that hand is not equipped again: the game's equip of the weapon a copy holds empties the
+        // hand while it goes on saying the weapon is equipped (`live-equip-twice`, 2026-10-10: without this, the right
+        // hand was empty after a second equip and after a third, 2 of 8 checks failed; with it, 8 of 8). First seen
+        // 2026-10-03 (`live-equip` after `live-game-drops`); Emma's copy in Seen's game held no weapon for two minutes
+        // amid repeated equips on 2026-10-09.
+        if (pItem->formType != FormType::Armor)
+        {
+            const uint32_t hand = pEquipSlot == DefaultObjectManager::Get().leftEquipSlot ? 0 : 1;
+            if (pActor->GetEquippedWeapon(hand) == pItem)
+            {
+                spdlog::info("Equipment sync: remote actor {:X} already holds {:X} in the {} hand; equip skipped", pActor->formID, pItem->formID, hand == 0 ? "left" : "right");
+                return;
+            }
+        }
+
         // Unequip all armor first, since the game won't auto unequip armor
         Inventory wornArmor{};
         if (pItem->formType == FormType::Armor)

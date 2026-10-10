@@ -14,10 +14,11 @@ $ErrorActionPreference = 'Stop'
 # 2026-10-05 zip carried a behaviours zip from Emma's folder and the linker's .map (the launcher's install test,
 # 2026-10-07): a .map and a stray .zip are never part of the client.
 # The programs' old names (before 2026-10-09) and the build's own files are left out too: those come from the build.
-$skip = @('logs', 'cache', 'SkyrimTogetherVR.exe', 'SkyrimTogetherVR.pdb', 'urSovngarde.exe', 'urSovngarde.pdb')
+# Nor anything set aside before a change: `.old-*`, or `.before-*` (`UI.before-logo`, a whole old menu, 2026-10-09).
+$skip = @('logs', 'cache', 'SkyrimTogetherVR.exe', 'SkyrimTogetherVR.pdb', 'urSovngarde.exe', 'urSovngarde.pdb', 'EarlyLoad.dll')
 $clientFiles = @(Get-ChildItem $ClientFolder | Where-Object {
     $skip -notcontains $_.Name -and
-    $_.Name -notmatch '\.old|\.running|^crash_.*\.dmp$|\.threaddiag\.|\.map$|\.zip$'
+    $_.Name -notmatch '\.old|\.before-|\.running|^crash_.*\.dmp$|\.threaddiag\.|\.map$|\.zip$'
 })
 if ($ListOnly) {
     $clientFiles | ForEach-Object { $_.Name }
@@ -53,6 +54,7 @@ $clientFiles | ForEach-Object { Copy-Item $_.FullName (Join-Path $client $_.Name
 Copy-Item (Join-Path $buildFolder 'urSovngarde.exe') $client -Force
 Copy-Item (Join-Path $buildFolder 'urSovngarde.pdb') $client -Force
 Copy-Item (Join-Path $buildFolder 'TPProcess.exe') $client -Force
+Copy-Item (Join-Path $buildFolder 'EarlyLoad.dll') $client -Force
 Copy-Item (Join-Path $PSScriptRoot 'collect-logs.*') $client
 Copy-Item (Join-Path $PSScriptRoot 'setup-connect.*') $client
 Copy-Item (Join-Path $PSScriptRoot 'update.*') $client
@@ -64,8 +66,11 @@ New-Item -ItemType Directory -Force (Join-Path $server 'config') | Out-Null
 foreach ($file in 'urSovngardeServer.exe', 'STServer.dll') {
     Copy-Item (Join-Path $buildFolder $file) $server
 }
-(Get-Content (Join-Path $buildFolder 'config\STServer.ini')) -replace '^(sPassword|sAdminPassword)=.*$', '$1=' |
-    Set-Content (Join-Path $server 'config\STServer.ini')
+# The settings are a tracked file, not the build folder's STServer.ini: that one is whatever the last test left, and on
+# 2026-10-09 it had PvP on from the fights. Emma, 2026-10-10: PvP off, difficulty 2 (Adept), the name "urSovngarde
+# Server", the code's defaults otherwise. The server rewrites the file at its first start (comments would go, which is
+# why it has none) and adds any setting a newer build has with its default.
+Copy-Item (Join-Path $PSScriptRoot 'STServer.default.ini') (Join-Path $server 'config\STServer.ini')
 Copy-Item (Join-Path $PSScriptRoot 'host-server.*') $server
 
 # Game files, installed as an MO2 mod.
@@ -76,6 +81,29 @@ Copy-Item (Join-Path $PSScriptRoot 'README-release.md') (Join-Path $staging 'REA
 foreach ($readme in 'README-mod-manager.md', 'README-vortex.md', 'README-manual.md', 'README-host.md') {
     Copy-Item (Join-Path $PSScriptRoot $readme) $staging
 }
+
+# The licence and where the source is, in each of the three zips (2026-10-09). The GPL asks that whoever receives the
+# programs gets the licence text and access to the source of that very build; the repository's LICENSE is only a
+# notice naming the licence, and no zip said where the source was (Nexus asks for it too). The commit is clean
+# (checked above) but only reachable once pushed. THIRD-PARTY.txt names the bundled CEF, DirectX and Discord files.
+$commit = (git -C $RepoRoot rev-parse HEAD).Trim()
+$repoUrl = (git -C $RepoRoot remote get-url origin).Trim() -replace '\.git$', ''
+$sourceText = @(
+    "urSovngarde $version is free software: the GNU General Public License, version 3 or later (GPL-3.0.txt), with",
+    "the notice in LICENSE.txt. The third-party files of the full download are listed in its THIRD-PARTY.txt.",
+    '',
+    'The source code of this exact build:',
+    "  $repoUrl/tree/$commit",
+    'How to build it: the "Building" section of README.md in that repository.'
+)
+function Add-Licence([string]$Folder) {
+    Copy-Item (Join-Path $RepoRoot 'LICENSE') (Join-Path $Folder 'LICENSE.txt')
+    Copy-Item (Join-Path $PSScriptRoot 'licences\GPL-3.0.txt') $Folder
+    $sourceText | Set-Content -Encoding ASCII (Join-Path $Folder 'SOURCE.txt')
+}
+Add-Licence $staging
+Copy-Item (Join-Path $PSScriptRoot 'licences\THIRD-PARTY.txt') $staging
+Add-Licence $server
 
 $zip = Join-Path $OutputFolder "$standaloneName.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
@@ -95,6 +123,8 @@ Copy-Item (Join-Path $buildFolder 'urSovngarde.exe') $bridge
 Copy-Item (Join-Path $buildFolder 'urSovngarde.pdb') $bridge
 Copy-Item (Join-Path $buildFolder 'urSovngarde.exe') (Join-Path $bridge 'SkyrimTogetherVR.exe')
 Copy-Item (Join-Path $buildFolder 'urSovngarde.pdb') (Join-Path $bridge 'SkyrimTogetherVR.pdb')
+# update.ps1 places only the program files it knows, so these three stay in the zip.
+Add-Licence $bridge
 Compress-Archive -Path (Join-Path $bridge '*') -DestinationPath $updateZip
 Remove-Item $bridge -Recurse -Force
 

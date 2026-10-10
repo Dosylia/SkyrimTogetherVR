@@ -1,0 +1,18 @@
+# Two NPCs asked for in the same instant are both registered and both this bot's (2026-10-09).
+#
+#   powershell -ExecutionPolicy Bypass -File Tools\VR\run-bot-tests.ps1 -Script npc-twice.txt
+#
+# The bot kept one cookie for its "npc" requests, so a second request sent before the first was answered overwrote it
+# and the first answer was dropped: live-copies-left-2 asked for two bears 10 ms apart and only ever owned one.
+log npc twice
+waitfor connected 45
+collect spawn ownership
+expect known me
+log two temporary bears at once
+npc temp 23A8A
+npc temp 23A8A
+waitfor owned == 2 20
+expect owned == 2
+wait 2
+log done
+stop

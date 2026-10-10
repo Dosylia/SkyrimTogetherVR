@@ -1,0 +1,54 @@
+# The blade stop (VR_TODO, "How your equipped sword meets his: (1)"): the player's EQUIPPED sword, moved by a scripted
+# controller swing (DevBench vrTrackedSet, "DO swing"), sweeps across the copy's drawn sword.
+#
+#   python Tools\VR\live-check.py live-blade
+#
+# Step 1 (2026-10-10): the swing reaches the copy's blade and the game sees it ("Clash: our right ... met the ... weapon").
+# The steps after it measure how far the blade passes through his, then hold it against his.
+log live blade
+waitfor connected 45
+log DO console set gamehour to 13
+expect known me
+waitfor known other 40
+wait 3
+# The copy draws an iron sword (as in live-clash).
+additem 12EB7
+equip 12EB7
+wait 1
+draw on
+wait 1
+teleport away
+wait 6
+teleport back
+wait 8
+log CHECK logged Player copy \w+ came with its weapon drawn
+# 70 units in front of the player, at its height (the bot's copy otherwise keeps the height it started at).
+infront 70
+wait 3
+capture other 12
+wait 1
+handtargets -15 15 70 15 20 80
+holdpose on
+replay me 2
+wait 3
+log CHECK logged VRWeaponBody: actor \w+ right weapon .* is a body in the world now
+log DO face copy
+wait 2
+log DO papyrus Actor DrawWeapon 14
+wait 4
+# Right to left across the copy's sword, ending 15 cm past it and staying there: the player's blade is to rest on his
+# (BladeStop), what the player sees photographed while it does.
+log DO swing right through copy 1500 past 0.15 hold 4000
+wait 3
+log CHECK logged Clash: our right
+log CHECK logged BladeStop: our right blade met \w+'s (left|right) blade
+log SHOT held
+wait 4
+log CHECK logged BladeStop: our right blade let go
+# All the way through, 45 cm past: held, then let go once the hand has gone too far.
+log DO swing right through copy 1500
+wait 4
+holdpose off
+wait 2
+log done
+stop

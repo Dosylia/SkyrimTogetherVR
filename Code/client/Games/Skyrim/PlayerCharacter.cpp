@@ -127,10 +127,17 @@ NiPoint3 PlayerCharacter::RespawnPlayer() noexcept
     }
 
     // If we find an override position for this respawn cell, we will use that instead of COC.
-    if (!CellRespawnOverrides::GetRespawnPos(pCell, pos))
+    const bool cOverride = CellRespawnOverrides::GetRespawnPos(pCell, pos);
+    if (!cOverride)
     {
         pCell->GetCOCPlacementInfo(&pos, &rot, true);
     }
+
+    // The overrides are found by the cell's editor id, which Skyrim VR may not keep at run time (VR_TODO,
+    // "per-dungeon respawn positions"); an empty name here means they can never apply on VR.
+    const char* cpEditorId = pCell->GetFormEditorID();
+    spdlog::info("RespawnPlayer: in cell {:X} '{}', at {}", pCell->formID, cpEditorId ? cpEditorId : "",
+                 cOverride ? "its override position" : "its COC marker");
 
     MoveTo(pCell, pos);
 

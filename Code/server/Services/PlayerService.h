@@ -27,6 +27,8 @@ protected:
     void OnPlayerLevelRequest(const PacketEvent<PlayerLevelRequest>& acMessage) const noexcept;
 
 private:
+    void RemoveWhatLeftRange(Player* apPlayer, const CellIdComponent& acPrevious) const noexcept;
+
     World& m_world;
 
     entt::scoped_connection m_gridCellShiftConnection;

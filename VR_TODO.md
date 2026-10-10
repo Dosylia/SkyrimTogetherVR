@@ -103,6 +103,18 @@ its `TODO.md`. What stays here is the mod's own part:
       and its update notice would announce it. Question under "Needs Emma". Was: release packaging for VR (the
       workflows still name upstream's SE files).
 
+## Now (Emma, 2026-10-10 morning): the blade and body upgrade, all of it
+
+"Need to work on the blade and body upgrade" and "Need all of them": the loop works these first and does not stop
+to ask which to start. In this order, each in steps, each step tested in the rig (DevBench 1.27 drives the VR
+controllers: `input vrTrackedSet`, one frame = HMD and both controllers, a 3x4 `matrix` pose each, buttons and axes):
+1. The blade stop (Decisions, "How your equipped sword meets his: (1)").
+2. Handling a living NPC the other game runs: send the pull (Decisions).
+3. Grabbing the other player: a buzz on the grabbed hand (Decisions).
+4. Party members on the map and compass (Later).
+5. Mounts: the rider's copy put on the horse directly (Sync).
+6. The skill book that cannot be taken after the other player touched it (Sync).
+
 ## Work queue (2026-10-07)
 
 Emma's answers of 2026-10-07: a player's follower always belongs to that player's game; a dragon flying in the other
@@ -128,32 +140,55 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       Was: **A player's follower belongs to that player's game**, whoever else is near or whatever loading screen is
       between (Lydia, 2026-10-03 15:09: 92 hand-overs in 15 s). Server ownership rule; a rig test with a follower.
       ["Who runs a follower", "Shared follower"]
-- [ ] **A dragon flying in the other game is never taken over** (the party leader's claim skips it until it lands or
-      dies; the Mistwatch dragon fell dead, 2026-10-03 09:06). ["Dragons taken over in flight"]
-- [ ] **The crash on travelling away with PLANCK and our copies left behind** (`+0x3AC1A8`, `+0xCBFD24`;
+- [x] **A dragon flying in the other game is never taken over** (2026-10-09, bot pair `dragonfly` green on
+      v1.9.0-3-g22c24c5b, 6 of 6 checks): the server refuses a claim on a dragon whose owner's movement says it flies
+      (`CharacterService.cpp`, "it is a dragon flying in its owner's game"; the client sends `Movement::Flying` from
+      `actorState.IsFlying()`, `AnimationSystem.cpp`); the leader's claims for 8 s of flight got nothing, and 5 s after
+      "landed" the dragon was the leader's. Owed: a real dragon in a session (the client's flying flag is untested in
+      game). Was: the party leader's claim skips it until it lands or dies; the Mistwatch dragon fell dead,
+      2026-10-03 09:06. ["Dragons taken over in flight"]
+- [ ] **The crash on travelling away with PLANCK and our copies left behind** (2026-10-10: `live-copies-left-3`, which crashed on 2026-10-03, passes on today's build with PLANCK 0.6.6 twice and with 0.8.1; watch real sessions for `+0x3AC1A8` / `+0xCBFD24`) (`+0x3AC1A8`, `+0xCBFD24`;
       `live-copies-left-2`). How PLANCK keeps track of the actors it ragdolls, then our copies leave in a way it notices.
-      [KNOWN_ISSUES, "Crash within a second of travelling away"]
+      [KNOWN_ISSUES, "Crash within a second of travelling away"] (2026-10-10, PLANCK's source read,
+      github.com/adamhynek/activeragdoll) It keeps raw `Actor*` in a dozen tables (`g_activeActors`, bump, shove,
+      grab, collision tables in `main.cpp`); an actor destroyed without passing its clean-up leaves a dangling one,
+      which fits a contact with "a body whose owner is no longer an actor". Emma has **PLANCK 0.6.6** (2024-11-08);
+      it is at **0.8.1** (2026-07-29), 99 commits later, among them "RemoveRagdoll on cell detach instead of
+      detachhavok on process change" (2025-01-09, the clean-up moved to when a cell is detached, the moment our
+      left-behind copies go), "add lock around active actors set", "Remove actors from the world if their AI is not
+      active", "Refactor ragdoll add/remove", "fix crash", "Make things safer". 0.8.1 needs HIGGS 1.6 or newer; she
+      has 1.10. The test is ready: `live-copies-left-3` crashes on 0.6.6 in a fresh session. "PLANCK 0.8.1 in the
+      rig" under Needs Emma.
 - [x] **The weapon's visible blade** (2026-10-07, built with the corpse fix): `kWorldBoundOffset` is 0xE4; nothing
       reads it on a live path any more (`ReadWorldBound` has no caller), only the shape report's line. Was: `kWorldBoundOffset` 0xB0 is `previousWorld`; the world bound is at 0xE4 on VR
       (measured 2026-10-06). Batch into another item's build.
-- [ ] **The arrow nocked on the other player's bow**: cause known, not built. ["Nocked arrow not shown on the other
-      player's bow"] Batch into another item's build.
+- [!] **The arrow nocked on the other player's bow** (2026-10-09: blocked on a measurement only a person can make,
+      "Next session, a few arrows" under Actions). Cause known: the arrow on the string is an animation attachment
+      driven by the attack state (`ActorState::AttackState()`, 9 to 13), which nothing syncs; whether VR archery moves
+      that state through a real draw is unknown (2026-09-27 saw only 8, 9, 10, 0 within a second: a bow raised, no
+      arrow shot). The log line is in the build (`VRArchery: local attack state`, `CharacterService.cpp`). Then: sync
+      the state if it moves; attach the arrow by hand on the receiving side if it never leaves 0 (bigger). ["Nocked
+      arrow not shown on the other player's bow"]
 
 ## Needs Emma
 
 ### Decisions
 
-- [!] **How releases are made.** (1) GitHub builds them when you push a tag: `release.yml` rewritten to make
-      `make-release.ps1`'s layout (`Skyrim Together VR`, `Server`, `Skyrim Together mod`) from the build and the UI;
-      (2) `make-release.ps1` on your PC, uploaded by hand, and `release.yml` switched off until then. Until one is
-      chosen, do not push a `vX.Y.Z` tag: it would publish upstream's SE layout.
-- [!] **Join friends 3, our relay** (decided 2026-10-07: our own relay; plan in the urSovngarde section above).
-      Where it runs is settled: the existing IONOS VPS with Plesk (Emma, 2026-10-07), set up by Seen from the guide;
-      its traffic allowance against the measured traffic (step 1) is the one thing to watch. Two choices left:
-      (1) Relay always (one path to test and to explain), or direct when the host's port is open and
-      the relay otherwise (saves the extra hop for those hosts, two paths to test). (2) When a session with Seen
-      could be, each on his own connection: needed once to measure (it can also be measured with the rig) and once
-      at the end.
+- [x] **How releases are made: both ways** (Emma, 2026-10-10: "Both options should work"). (1) GitHub builds them
+      when a `vX.Y.Z` tag is pushed: `release.yml` rewritten to make `make-release.ps1`'s layout (`urSovngarde`,
+      `Server`, `urSovngarde mod`, the licence files) from the build and the UI; (2) `make-release.ps1` on her PC stays
+      as it is. Done 2026-10-10: `release.yml` builds the VR client, server and menu process, gathers the client's
+      run-time files with `xmake install` (`SkyrimTogetherClientVR`, `TPProcess`), builds the menu with pnpm and runs
+      `make-release.ps1 -ClientFolder distrib/bin`; a tag on main publishes the three zips, a run by hand only builds
+      them. Tested here: the same gathering on this PC gave the same 29 entries as a release from Emma's folder; the
+      YAML parses (PyYAML). Not yet run on GitHub: "Try the release workflow" under Actions. The Linux server is out
+      of it until it builds.
+- [!] **Join friends 3, our relay: direct first** (Emma, 2026-10-10; 2026-10-10 night: not started here, the
+      launcher's `relay/*`, `join/mod.rs`, `join/hub.rs` and `session.rs` are mid-change in the other launcher session,
+      uncommitted; the decision is written in the launcher's TODO for that session, or for here once it lands). Connect directly when the host's port is open,
+      through the relay otherwise (two paths to test). The relay runs on the IONOS VPS; its traffic allowance against
+      the measured traffic is the one thing to watch. A session with Seen on his own connection is still wanted once
+      to measure and once at the end. No UPnP (Emma, 2026-10-10: the relay covers closed ports).
 - [x] **Only a weapon or shield blocks** (Emma, 2026-10-09: "only a sword or shield should block"). A touch of his
       weapon counts when that hand holds a weapon (the game's hand object is a WEAP), the left hand a worn shield
       (read at most once a second: it walks the inventory), or something held with HIGGS's grab; a bare, spell or torch
@@ -172,7 +207,12 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       none in the hand", then "the weapon is not out"), so his game saw none of her blade meeting his and his rule
       blocked nothing; her arrows (Orcish, Steel) were equipped and unequipped on the copy 35 times in two minutes.
       Not fixed: needs a look at why the copy's weapon was taken out of the world while she fought with it.
-- [!] **How your equipped sword meets his.** A sword grabbed with HIGGS is stopped by his; an equipped one passes
+      2026-10-10: a likely cause found and fixed: an equip of the weapon a copy already holds empties its hand
+      (`live-equip-twice`, Tooling). Seen's log of that fight has her copy equipping items it already held
+      (`0:12FCD` three times with no unequip between, `0:4F912` twice with one); whether those were hand weapons was
+      not looked up. To watch in the next fight: "equip skipped" lines in the watcher's log, and whether her blade
+      still meets his.
+- [ ] **How your equipped sword meets his: (1), the physical stop** (Emma, 2026-10-10: "Yes, start it"). A sword grabbed with HIGGS is stopped by his; an equipped one passes
       through (two keyframed bodies). (1) B&S-like: the equipped sword becomes a dynamic body held to the hand, what
       you see follows it, his blade stops yours -- the most work; (2) feedback only: buzz, sound, sparks and the
       defender's rule, no physical stop -- what exists now; (3) fight with grabbed swords. [Physics queue]
@@ -188,27 +228,79 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       launcher's `serverDir` pointing there; `overwrite\Root` keeps 1.6 MB of small files. Hosting from the new place
       is allowed by the existing "Skyrim Together Server (UDP 10578)" firewall rule. Still to see: the next start's
       RootBuilder time. Worth a launcher check later: dumps piling up in a RootBuilder modlist's overwrite.
-- [!] **A stiffer PLANCK?** His ragdoll follows his pose 8-14 units loose because PLANCK's ragdolls follow softly
-      (your `activeragdoll.ini` is at the defaults: `positionGain = 0.05`, `hierarchyGain = 0.6`, `poweredTau = 0.8`).
-      Stiffer means his body (what your sword hits) is tighter, and every NPC reacts more stiffly to hits. May I try
-      e.g. `positionGain = 0.2` in the rig?
-- [!] **Handling a living NPC the other game runs.** Today your grab or shove is undone at once and he sees nothing;
-      only damage gets through. (1) your game takes it over while your hand holds it (seen by both, AI switches games
-      mid-fight); (2) your pull is sent to his game, which applies it (smoother AI, a delay, much new work); (3) leave it.
-- [!] **Grabbing or pushing the other player.** Nothing reaches him today; his real hands cannot be moved. A buzz on
-      the grabbed hand, a stagger when shoved, or nothing?
-- [!] **Long sessions grow** (~0.4 GB and 12 threads per loading screen, DynDOLOD DLL NG's threads; it ends in a
-      freeze or a driver crash). Try DynDOLOD DLL NG Alpha-33, and/or `MemoryManager = true` in EngineFixesVR.ini --
-      both machines the same. Which?
-- [!] **A message when the other player goes down** ("X is down"), and maybe revive by activating them? (asked
-      2026-10-01)
+- [x] **A stiffer PLANCK, tried in the rig** (2026-10-10): no gain, her setting stays. `live-hands`, the
+      "VRRagdoll: ... ragdoll hands" lines (8 each run, both hands): at `positionGain = 0.05` (hers) left 18.5-45.2,
+      right 13.0-41.6, median 18.7 units from the drawn hands; at 0.2 left 20.4-45.0, right 5.3-42.9, median 20.6.
+      Drawn hands unchanged ("hands within 80": median 65.5 and 65.4). Her `activeragdoll.ini` changed for that run
+      only and restored byte for byte (`activeragdoll.ini.bak-20261010-gain`). The gap is not PLANCK's position gain.
+      Was: (Emma, 2026-10-10: "Try it in the rig"). His ragdoll follows his pose
+      8-14 units loose because PLANCK's ragdolls follow softly (`activeragdoll.ini` at the defaults: `positionGain =
+      0.05`, `hierarchyGain = 0.6`, `poweredTau = 0.8`). Measure e.g. `positionGain = 0.2` in the rig, revert, and
+      give her the numbers to decide (stiffer also means every NPC reacts more stiffly to hits).
+- [ ] **Handling a living NPC the other game runs: (2), send the pull** (Emma, 2026-10-10). Today a grab or shove is
+      undone at once and the other player sees nothing; now the pull is sent to the game that runs the NPC, which
+      applies it (smoother AI, some delay, much new work).
+- [ ] **Grabbing the other player: a buzz on the grabbed hand** (Emma, 2026-10-10; no stagger). His real hands
+      cannot be moved; his controller on the hand held vibrates. (2026-10-10, read so far) The way is the clash's:
+      a `GrabRequest` from the grabber's game, passed on by the server as `NotifyGrab` to the one grabbed, whose game
+      pulses that hand (`VRHaptics::Pulse`, as `FeelClash`); new messages, so a protocol change (everyone updates).
+      Not a clash: a clash also plays a sound and sparks, and the parry rule only reads local contacts (`ClashEvent`),
+      so a grab cannot open a parry. Detection: the mod has no HIGGS interface, but `HiggsBodyHolding(body)` finds the
+      HIGGS hand holding a dynamic body; the copy's ragdoll bodies are keyframed ("motion type 2" in the VRRagdoll
+      lines), and whether HIGGS can hold one at all is unknown ("can be bent a little by your hand"). Next: the rig,
+      DevBench 1.27's `vrTrackedSet` puts the right controller on the copy's hand and presses grip, a diagnostic
+      says whether any of the copy's bodies is held. Two things found for that step: `HiggsBodyHolding` reads Havok's
+      constraint lists and is only safe inside the physics step (its own note), so the check needs a hook there, not
+      the frame end where the ragdoll hands are measured; and `vrTrackedSet` frames carry poses in OpenVR tracking
+      space (room), so placing a hand on the copy means standing the bot's copy at a known offset in front of the
+      player (DevBench README; `input` schema: frames of `tMs`, `originCode`, `hmd`, `left`, `right`, each controller
+      with pose, `packetNumber`, `pressed`, `touched`, five axes).
+- [x] **Long sessions grow: DynDOLOD DLL NG, newer version tried** (2026-10-10, rig, game alone, four round trips
+      `cow Tamriel 34 8` and back, 45 s each). Alpha-32 (installed): threads 222, 247, 271, 296 and private memory
+      9.7, 10.1, 10.6, 11.2 GB at each return. **Alpha-43** (Emma's download, 2026-09-09, newer than the Alpha-33
+      asked for): threads 201, 193, 192, 193 (no leak) and 10.0, 10.3, 10.7, 10.7 GB (half the growth, flat on the
+      last trip). Modlist switched for that run only and restored byte for byte (`modlist.txt.bak-20261010-
+      dyndolod43`); Alpha-43 kept as `E:\FUS\DynDOLOD DLL NG Alpha-43 (tested 2026-10-10, ready to install)`.
+      Distant LOD not looked at. To do: both of you install it (replace the files of the mod `DynDOLOD DLL NG`).
+      Was: try DynDOLOD DLL NG Alpha-33 (Emma, 2026-10-10) (~0.4 GB and 12 threads per loading
+      screen, DynDOLOD DLL NG's threads; it ends in a freeze or a driver crash). Measure threads and memory over
+      loading screens in the rig against Alpha-32; both machines the same afterwards.
+- [x] **A message when the other player goes down ("X is down")**, message only, no revive (Emma, 2026-10-10).
+      Done: when a party member's reported health goes from above zero to zero, the HUD says "urSovngarde: <name> is
+      down" and the log "Party: <name> is down" (`OverlayService::OnNotifyPlayerHealthUpdate`; names kept from
+      "is online", forgotten on leave and disconnect). Tested in the rig with `live-down` and a new bot command,
+      `partyhealth`: one line per time down, 3 of 3. The other HUD lines that still said "Skyrim Together:"
+      (connected, connection failed, online, left, party) now say "urSovngarde:". Deployed
+      v1.9.0-4-gfa8d5355-dirty.76a82e0.
+- [x] **PLANCK 0.8.1 in the rig** (Emma, 2026-10-10: yes). Done 2026-10-10, v1.9.0-4-gfa8d5355-dirty.91ff85f: on her
+      PLANCK 0.6.6, `live-copies-left-3` no longer crashes (two fresh sessions, 5 of 5 each: alive after the trip away
+      and back, five "CopyGone"), so the test can no longer tell the versions apart; on 0.8.1 ("PLANCK v0.8.1.0",
+      "Got higgs interface!") it passes the same, 5 of 5. Modlist switched for that run only and restored byte for
+      byte (`modlist.txt.bak-20261010-planck081`); 0.8.1 kept outside MO2 as `E:\FUS\PLANCK 0.8.1 (tested
+      2026-10-10, ready to install)`. Updating is safe as far as the rig shows; whether to is her call (it changes how
+      grabbing and hits feel).
+- [x] **The server's defaults in a release** (Emma, 2026-10-10): PvP off, difficulty 2 (Adept), name "urSovngarde
+      Server"; the rest as the code's defaults (time scale 20, death system on, XP shared in the party, party made and
+      joined automatically, no gold lost on death, mod check off, 8 players). Done: `Tools/VR/STServer.default.ini`,
+      copied by `make-release.ps1` instead of the build folder's test file. Tested: a scratch server started with it
+      ("started on port 10578"), kept the values and added back a setting taken out of the file (the server rewrites
+      the file at start, comments included, so it has none); the stand-in release's server zip carries PvP false,
+      difficulty 2, the name, empty passwords.
 - [!] **Playback delay:** after your next session, the "InterpDiag players" lines say how much of the 225 ms delay
       the network really needs; it could then follow the connection (lower on a good link). Yes or no, once measured.
 
 ### Actions
 
-- [!] **Update DevBench** in MO2 (Nexus 181326): its newer releases drive the VR controllers by script, so the rig
+- [x] **Update DevBench** (2026-10-10): 1.27.0 from its author's GitHub release, in `E:\FUS\mods\DevBench` (meta.ini
+      1.27.0); 1.22.0 kept as `E:\FUS\DevBench 1.22.0 (set aside 2026-10-10)`. The rig game started, loaded and
+      connected with it; it now drives `vrTrackedSet` (headset and both controllers: poses and buttons). Was: its newer releases drive the VR controllers by script, so the rig
       can swing a sword and test PLANCK hits, the sword-hit fix, blocking and swing lag without you. Test tool only.
+- [!] **Try the release workflow once** (2026-10-10): after you commit and push, GitHub, Actions, "Create GitHub
+      Release", Run workflow, on main. It builds the three zips as an artifact and publishes nothing; if it goes
+      green, the next `vX.Y.Z` tag on main publishes a release by itself. If it goes red, I read its log.
+- [!] **Install DynDOLOD Alpha-43** on both PCs (tested 2026-10-10, ready as `E:\FUS\DynDOLOD DLL NG Alpha-43 (tested
+      2026-10-10, ready to install)`): replace the files of the mod `DynDOLOD DLL NG` with it, or install it as a mod
+      and untick Alpha-32. Seen downloads 'DynDOLOD DLL NG and Scripts 3.00 Alpha-43' from Nexus (97720).
 - [!] **Next session, one drag each way:** Seen drags a body your game owns for a few seconds, then you drag one of
       his. Both logs say whether it changed hands ("asking for it", "Transferred ownership ... for party leader
       claim") and whether its bones arrived ("posing body").
@@ -218,6 +310,10 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       seconds of getting up. Does it crash? With nobody in the headset it does every time (`skyrimvrtools.dll`).
 - [!] **Seen's mods match yours:** his newer VR Address Library crashed him on loading (Community Shaders patches the
       wrong spot); your combined `version-1-4-15-0.csv` fixes it (KNOWN_ISSUES section 1).
+- [x] **Seen's health bar in your fights** (8 and 9 Oct). Emma, 2026-10-09: "Health bar is fully fixed".
+- [!] **Next session, a few arrows:** draw a bow fully and shoot three or four arrows, at anything. Your log's
+      "VRArchery: local attack state" lines then say whether a VR draw moves the game's archery state (11 drawn,
+      12 releasing, 13 released), which decides how the arrow on the string is shown in the other game.
 
 ## Built, waiting for a real session
 
@@ -293,76 +389,209 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
 - [ ] Emma's freeze one frame after loading into the Ragged Flagon (2026-10-03 21:06:48), no report; the AI thread on
       an actor with no cell (19:52); Elbios on opening the wrist menu; Seen on the load after death. Debug plans in
       the history ["2. Crashes with no cause yet"].
-- [ ] Quit crash in Enchantment Art Extender (Seen, 2026-10-04 16:26:56).
-- [ ] Audit every overlay call made before the VR menu exists (a hard crash).
+- [-] Quit crash in Enchantment Art Extender (Seen, 2026-10-04 16:26:56). (2026-10-09) Not actionable: the
+      signature of the quit crash (`EnchantmentEffectExtender.dll` reading the `UI` singleton after it is gone,
+      VR_HISTORY "Crash when quitting"), 15 s after Emma's own crash ended that session; the quit guard
+      (`IsProcessExiting()`, 2026-09-19) is in. A crash while quitting loses nothing. Reopen if this signature shows up
+      while someone is still playing.
+- [x] Audit every overlay call made before the VR menu exists (a hard crash) (2026-10-09): done on 2026-10-07
+      (VR_HISTORY: every `OverlayService`, `PartyService`, `VRDashboard` and `OverlayClient` path checks first; the
+      `InputService` window hook fixed); re-checked: the only overlay line added since (`git diff f8f219aa HEAD`) is the
+      SteamVR tab's name in `VRDashboard`, an OpenVR call, not the menu's browser.
 
 ### Sync: NPCs, followers, the world
 
-- [ ] Followers and dragons in flight -- in the work queue.
+- [x] Followers and dragons in flight -- in the work queue: both done there (bot pairs `follower` 2026-10-07,
+      `dragonfly` 2026-10-09).
 - [ ] Maven fought by Seen was invisible for Emma; the blacksmith dead on Seen's side only; Brynjolf (essential)
       spinning on the floor for Seen after being "killed" (2026-10-04).
 - [ ] Lydia did not fight back while Emma was down; enemies ignored Seen while he was invisible to her (2026-10-03).
-- [ ] The `Unequip` loop: one actor sends the same unequip again and again (the Bandit Leader "ignoring us", 92 a
-      second); the queue is capped, the cause is not found.
-- [ ] A skill book Emma touched could not be read by Seen.
+- [x] The `Unequip` loop: one actor sends the same unequip again and again (the Bandit Leader "ignoring us", 92 a
+      second); the queue is capped, the cause is not found. 2026-10-09: no longer sent: Seen's logs of 10-08 and
+      10-09 hold about 700 `ActionFlood` lines for action `46BAF` (Unequip / WeapUnEquip, 30 to 36 a second, actors
+      such as 64814-64816, 529CD, D4FDA), every one "refused by the game here and not sent". Left: whether the AI's
+      retrying is ours. (2026-10-10, rig) Not ours: at the rig's spot actor 107CD0 retries action 132AF about 60 times
+      a second, all refused, 9 `ActionFlood` lines in 90 s with the mod loaded and not connected, and the same 9 in
+      90 s connected. The game's AI does it whatever the network does; nothing of it is sent.
+- [ ] A skill book Emma touched could not be read by Seen. (Emma, 2026-10-10: "once I had interacted with the item,
+      it was like it being in a corrupted state, he couldn't grab it, stash it or read it. I got same issue
+      reversed.") So: an item one player has touched becomes unusable for the other, both ways. Reproduce in the rig
+      with the bot taking and dropping a book (`live-world-object` does a plate), then find what state stays on it. Not reproduced: in the rig a plate held and let go of can
+      still be taken (`live-world-object`, VR_HISTORY); Seen's game had the book still on the table and held it while
+      she moved it, each hold released 2-3 s later. "Ask Seen about the skill book" under Actions.
 - [ ] Quest NPCs out of sync (Bastianus Axius); quest dialogue heard twice; message boxes shown to both players.
-- [ ] Weather and time on VR: only a party member gets the leader's weather.
-- [ ] Mounts: untested.
+- [ ] Weather and time on VR: only a party member gets the leader's weather. (2026-10-09) That is upstream's rule
+      (`WeatherService`, server and client); the open part is whether a VR member applies it. Addresses checked: the
+      Sky functions match CommonLibVR-NG (`ForceWeather` 25696, `ResetWeather` 25695, `SetWeather` 25694, `Get` 13789)
+      and the two ids given as AE are mapped by `VRAddressOverrides.h` (25684, 25697). A rig test needs the bot to
+      lead and the game to join after it (the game connects first in the live harness, so it always leads): not worth
+      it. Instead both logs now say it: "Weather: ours is now X, sent to the party as its leader" and "Weather: the
+      party leader's weather X applied, the sky now has Y" (`WeatherService.cpp`). Built and deployed
+      (v1.9.0-4-gfa8d5355-dirty.94246eb); read both logs after the next session with both players in a party.
+- [ ] Mounts: untested. (Emma, 2026-10-10: "Need all of them": fix it) (2026-10-10, rig, `live-mount` and a new bot command `mount`) **The other player does not see
+      a rider mount.** The chain runs: the rider's `MountRequest` passes the server ("Mount: rider 15 mounts 16; told the
+      players in range") and the game gives its copy of the rider the mount package, which the game accepts ("Mount:
+      copy ... told to ride copy ... of mount ...; the game accepted it"), but the copy never gets on: not after 12 s,
+      not after 32 s (screenshot: the horse standing over the copy). Second approach, the copy left unpinned from its
+      owner's position for 15 s so the package could walk it to the horse: still not on (reverted; it would leave a
+      copy frozen for 15 s at every mount). So the package does not run on a copy, most likely because copies do not
+      run their own AI packages. Kept: the "Mount:" log lines on both sides. Next, if wanted: put the copy on the
+      horse directly (the game's own mount state, without a package) and get it off when the owner's `bIsRiding`
+      (synced) goes false; "Mounts" under Needs Emma.
 - [ ] A downed follower lying sideways and running.
-- [ ] Sliding: creatures with no animation-variable descriptor slide whatever else is fixed; Dinya Balu sliding on
-      Emma's screen only. ["Sliding: the descriptor lookup"]
-- [ ] Different animals on each screen: the owner's base form travels now; not confirmed.
-- [ ] NPCs below the floor for one player: never measured where `ForcePosition` puts them. ["Goal 5"]
-- [ ] A distant dragon vanishing; the range check for a remote dragon with no copy here.
-- [ ] Vanishing at the Whiterun gate: logging in place, untested.
-- [ ] The paused player goes silent; grey distant hills (LOD).
-- [ ] Ownership: "actor for ownership transfer not found" warnings; a newer ownership number accepted by the six
-      receiving handlers instead of exact equality; removals for a viewer who walked away (the asymmetric range path).
-- [ ] An NPC's health after a revive is not re-sent; a respawn does not restore stored health (`OnRequestRespawn`);
-      `NotifyRespawn` is sent from inside the inventory lookup (`PlayerService`).
-- [ ] Connecting right after loading a save sometimes times out (the attempt, not a running connection); the spawn
+- [x] Sliding: creatures with no animation-variable descriptor slide whatever else is fixed; Dinya Balu sliding on
+      Emma's screen only. ["Sliding: the descriptor lookup"] (2026-10-10, from the logs) Gone as far as the logs see:
+      since 2026-10-07, in Emma's log and Seen's bundles, `SlideDiag` counts 54 of 34,216 remote moves with frozen
+      animation variables (0.2%; it was 100% on 2026-09-27); the reads still skipped (`AnimVarDiag`, 8,017 in 203
+      lines) are mostly references with no animation graph, 90 of them the local player's. Reopen on a sliding seen
+      in play, with the creature's name.
+- [x] Different animals on each screen: the owner's base form travels now; not confirmed. Confirmed in the rig since
+      (`live-levelled`, 2026-10-03: a goat claimed at a bear's spawn point is conformed to the owner's; VR_HISTORY), and
+      in the sessions since 2026-10-07 the owners' picks are sent ("Captured leveled NPC pick", 100+ lines) and no game
+      had to change an animal to match ("Applied leveled NPC pick": none). (2026-10-10)
+- [x] NPCs below the floor for one player: never measured where `ForcePosition` puts them. ["Goal 5"] Measured since
+      (VR_HISTORY, 2026-10-03): `SinkDiag` named 11 placements in all the logs, one actor each, never the same twice;
+      nothing sinks repeatedly. The one big drop belongs to "Copies spawned on the ground" (The other player's body).
+- [-] A distant dragon vanishing; the range check for a remote dragon with no copy here. (2026-10-10) The game's,
+      not the sync: read with positions (VR_HISTORY, "Distant dragon vanishes"), the dragon hovered at the edge of
+      the 5x5 loaded grid and both engines unloaded it there; no ownership rule can draw an actor the engine unloaded.
+      The churn around it (hand-offs of an unloaded dragon) is cosmetic in the logs. Reopen on a dragon vanishing
+      close by.
+- [x] Vanishing at the Whiterun gate: logging in place, untested. Tested since: `live-whiterun`, 2026-10-03, 8 of 8
+      (the copy goes when its player enters WhiterunWorld, another worldspace, and comes back when they leave;
+      VR_HISTORY).
+- [x] The paused player goes silent; grey distant hills (LOD). (2026-10-10, from the logs) A paused player keeps
+      sending: 162 probes taken with the pause counter above 0 since 2026-10-06 (Emma's log, Seen's bundles), the
+      longest "last move sent" 32 ms. Grey hills: the game's LOD streaming, not the sync (DynDOLOD's, see "Long
+      sessions grow" for Alpha-43).
+- [x] Ownership: "actor for ownership transfer not found" warnings; a newer ownership number accepted by the six
+      receiving handlers instead of exact equality. (2026-10-09) Settled by the logs: the warning's text is no longer
+      in the client, and none of the 11 log bundles in Downloads nor Emma's current log has it; `EpochMiss` (counting
+      every update dropped for a wrong ownership number, since 2026-09-26) appears in none of them either, so exact
+      equality has thrown nothing away and stays.
+- [x] Removals for a viewer who walked away (Emma, 2026-10-10: try it in the rig; keep only if nothing breaks). Done
+      and kept: the server now sends a removal for each character that was in range of where a player was and is not
+      of where it is (`PlayerService::RemoveWhatLeftRange`, from both the exterior entry and the grid shift: the entry
+      comes first and already moves the player, so a first try in the shift alone removed nothing). `rangeback`
+      now also requires the removal: 12 of 12; all 13 bot pairs green; in the rig `live-copies-left-3`,
+      `live-npc-away`, `live-whiterun` 5 of 5 each with removals arriving ("server removed player copy"), the game
+      alive. Deployed v1.9.0-4-gfa8d5355-dirty.f2b75bb, client and server. Was (the asymmetric range path): `OnShiftGridCellRequest` sends what came
+      into range and nothing for what left, so a viewer keeps copies of what it walked away from (`rangeback` pair,
+      2026-09-30). Left undone on purpose: removals are entity churn, where crashes have been. Look at it together
+      with the PLANCK crash on copies left behind (work queue).
+- [x] An NPC's health after a revive is not re-sent; a respawn does not restore stored health (`OnRequestRespawn`);
+      `NotifyRespawn` is sent from inside the inventory lookup (`PlayerService`). (2026-10-09) The revive: bot pair
+      `revive` green, 8 of 8 (the watcher sees the NPC die, then alive at 100, live and rebuilt from the server's
+      store). The player's respawn restores the stored health and the alive flag (`OnPlayerRespawnRequest`, since
+      2026-09-25); `OnRequestRespawn` is the beast-form rebuild, not a death. `NotifyRespawn` now goes out after the
+      inventory lookup, not inside it; relay pair green with its respawn round (6 of 6, "a respawned player must not
+      be rebuilt at the health they died on"); deployed v1.9.0-4-gfa8d5355-dirty.94246eb, client and server.
+- [x] (2026-10-10: not seen since: 62 connection attempts in Emma's log and Seen's bundles since 2026-10-07, none
+      "timed out" (`VRConnectService`); the spawn burst was timed and fixed on 2026-10-03, `live-spawn-burst`.)
+      Connecting right after loading a save sometimes times out (the attempt, not a running connection); the spawn
       burst on joining (30-40 actors in one millisecond) has never been timed.
-- [ ] Upstream's per-dungeon respawn positions (needs cell editor ids, which VR may not keep).
+- [ ] Upstream's per-dungeon respawn positions (needs cell editor ids, which VR may not keep). (2026-10-10) Already
+      in our code (`CellRespawnOverrides`, upstream #875, used by `PlayerCharacter::RespawnPlayer`); the open part
+      is only whether VR keeps the editor ids it looks cells up by. The respawn now logs "RespawnPlayer: in cell X
+      'name', at its override position | its COC marker": an empty name after the next death means the overrides
+      can never apply on VR. Built and deployed (v1.9.0-4-gfa8d5355-dirty.012d445).
 
 ### Dead bodies
 
-- [ ] Nothing we do moves a corpse's ragdoll, so bodies lie in different places on the two screens ("CorpseDiag");
-      `ForcePosition`, `MoveTo` and the console all move the reference, not the ragdoll. Next: what moves a ragdoll.
-- [ ] The bot sending a humanoid body's bones, to test the receiving side in the rig.
+- [x] Nothing we do moves a corpse's ragdoll, so bodies lie in different places on the two screens ("CorpseDiag");
+      `ForcePosition`, `MoveTo` and the console all move the reference, not the ragdoll. Done in the work queue,
+      "A corpse lies where its owner's lies" (`VRBodySync::PlaceCorpse`, `live-corpse-place` 5 of 5, 2026-10-07).
+- [!] The bot sending a humanoid body's bones, to test the receiving side in the rig. (2026-10-10) The bot can
+      already play a recorded stream, bones included, on a body it owns ("capture", then "replay npc", `Bot.cpp`), so
+      the bones need not be made up: record the game dragging a human corpse (`live-body-grab-human` sets that up),
+      then replay it on a second corpse of the bot's and check the game's "posing body". The drag needs a VR hand
+      moved by script: waits for "Update DevBench" (Actions).
 
 ### PvP and physics
 
 - [ ] Less delay for hands and weapons: from the next real session's "InterpDiag players".
-- [ ] The weapon's visible blade: `kWorldBoundOffset` is 0xB0 (`previousWorld`); the world bound is at 0xE4 on VR.
+- [x] The weapon's visible blade: `kWorldBoundOffset` is 0xB0 (`previousWorld`); the world bound is at 0xE4 on VR.
+      Done in the work queue (0xE4, 2026-10-07).
 - [ ] The other player's hands sit slightly off (palms together, a little low): structural, `VRPose`.
 - [ ] Your own sword hitting where the blade is not (2026-09-24 screenshots). ["4. Position accuracy"]
-- [ ] Nocked arrow on the other player's bow: cause known, not built. ["VRIK and HIGGS interactions"]
-- [ ] Objects already in the world moved by hand (a cup on a table) are not seen moving; dropped items are.
-- [ ] A floating item whose carrier disconnects mid-carry.
-- [ ] Item and body drift fixes from TiltedEvolutionVR (`aaf5d83`), if drift shows up.
+- [!] Nocked arrow on the other player's bow: waits for "Next session, a few arrows" (Actions); see the work queue.
+      ["VRIK and HIGGS interactions"]
+- [x] Objects already in the world moved by hand (a cup on a table) are not seen moving; dropped items are. Done
+      earlier (VR_HISTORY: movable objects within 400 units are watched and sent, 22ae2af; `live-world-object` green
+      twice, the game's plate within 20 units of where the bot sent it). Line closed 2026-10-10.
+- [x] A floating item whose carrier disconnects mid-carry. (2026-10-10, by the code; not seen live) Handled since the
+      drop-move work of 2026-09-30: an item held still on the other side's word goes back to physics after 2 s
+      without a word, whatever the reason (`DroppedItemService.cpp`, "stopped being moved over there without coming
+      to rest; released it here"; the same for world objects, "WorldObject: ... handed back to physics here"). The
+      line in a log is the proof when it happens; `live-dropmove` does not cover a carrier going silent.
+- [-] Item and body drift fixes from TiltedEvolutionVR (`aaf5d83`), if drift shows up. (2026-10-10) No drift reported
+      or logged since; corpses now lie where their owner's do (`PlaceCorpse`) and dropped items are moved for everyone.
+      Reopen with a drift seen in play.
 
 ### The other player's body
 
 - [ ] Legs when moving: a walk or run on the copy with smooth locomotion.
 - [ ] Face "looks off" (FaceGen on VR).
 - [ ] The invisible player (worse indoors): look at render state, not actor state. ["0a. The three open complaints"]
-- [ ] The friend's health bar: our message is right, the widget refuses it; the enemy health bar on the other player.
-- [ ] Copies spawned on the ground when the incoming height is bad; fade in instead of popping.
+- [x] The friend's health bar: our message is right, the widget refuses it; the enemy health bar on the other player.
+      (2026-10-09) Emma: "Health bar is fully fixed", seen in play; no change needed since the meter fixes of
+      September (`UI::SetEnemyMeterTarget`, the menu shown when it is missing).
+- [x] Copies spawned on the ground when the incoming height is bad; fade in instead of popping (Emma, 2026-10-10:
+      "Fade in"). Done as "not drawn until placed": a player's copy has its 3D hidden (NiAVObject flags, +0x10C on VR)
+      from the moment it arrives until the first movement update places it, 1.5 s at most (`Systems/SpawnReveal`).
+      Rig, `live-reveal` (new): "shown 10 ms / 27 ms after its 3D arrived (placed from a movement update)", the
+      screenshot shows the copy standing in place; `live-npc` 8 of 8. NPC copies are left out: standing still they
+      send no movement, and hidden they all appeared 1.5 s late. Not a gradual fade: papyrus `Actor.SetAlpha` could do
+      one, but a copy left at alpha 0 by a failed fade would be the invisible player again; the jump is gone, which
+      was the complaint. (Corrected 2026-10-10: an earlier note said the fade function was not mapped on VR.) Deployed v1.9.0-4-gfa8d5355-dirty.4af5155.
 
 ### Performance
 
-- [ ] Spawn bursts on cell change; `RunNakedNPCBugChecks` and the equipment snapshot once a second; linear searches
-      in hot paths. Measure first (a 60 s benchmark at one spot, four setups).
-- [ ] Both games slowed over a session (threads and memory) -- the DynDOLOD decision above.
+- [x] Spawn bursts on cell change; `RunNakedNPCBugChecks` and the equipment snapshot once a second; linear searches
+      in hot paths. Measure first (a 60 s benchmark at one spot, four setups). (2026-10-10) Measured from what every
+      log already writes ("Perf last 30 s", "Mod update took ..., slowest section"), Emma's log and Seen's bundles:
+      since 2026-10-07 the mod's own work averages 0.22 ms a frame (148 windows of 30 s; 11 with one update over
+      20 ms, 1 over 50 ms). The once-a-second checks never show as the slowest part. Spawn bursts were fixed on
+      2026-10-03 (`live-spawn-burst`). The large `RunLocalUpdates` spikes (to 251 ms) are all in Seen's logs of
+      10-06 and gone since 10-07. What is left is the next item.
+- [x] Hitches from the in-game menu's update: `OverlayService::OnUpdate` is the slowest part of 70 slow frames since
+      2026-10-07, 12 over 20 ms, up to 86 ms; then `CharacterService::RunRemoteUpdates` (6 over 20 ms, to 35 ms) and
+      `RunRemotePlayerDiag`, a diagnostic at about 9 ms each of 14 times. (2026-10-10, from the lines before each)
+      None of them is in play: the big overlay ones (63 to 158 ms) are once per game start, right after the loading
+      screen, when the SteamVR dashboard tab is created ("VRDashboard: ... overlay created"); the small ones (7 to
+      11 ms, once a second) only while that dashboard is open, the game paused behind it. The slow remote updates
+      are the moment the other player's copy gets its 3D ("Applied 3D for actor") or a corpse is put in place. The
+      diagnostic measures each copy once on first sight and then every 5 minutes, by design. If the start stutter
+      ever matters: create the dashboard tab during the loading screen instead.
+- [!] Both games slowed over a session (threads and memory) -- the DynDOLOD decision above. (2026-10-10) DynDOLOD DLL
+      NG Alpha-43 ends the thread leak and halves the memory growth in the rig (Decisions, "Long sessions grow"):
+      "Install DynDOLOD Alpha-43" under Actions.
 
 ### Shareable
 
 - [ ] An in-headset menu (the Skyrim Together UI as a SteamVR dashboard tab, large text, a small overlay for chat).
-- [ ] Start-up checks with plain messages in the headset: address library, fewer than 255 plugins, the plugin
-      header, and the address library disagreeing with our table.
-- [ ] Install script, a guide for other modlists, a licence check before sharing builds (GPL-3), VR server
-      defaults (difficulty, PvP, time scale), a test checklist per build.
-- [ ] **Antivirus false positives** (Nexus quarantined the first upload, 2026-10-09; VirusTotal: guessing engines
+- [-] Start-up checks with plain messages in the headset (Emma, 2026-10-10: the manual route stays as it is, no checks in the headset) (2026-10-09): the launcher already makes them before the
+      game starts, in plain words (`urSovngarde-launcher/rules/setup.json`: game version, address library and its
+      Community Shaders mismatch, SKSE, the Engine Fixes preloader, uGridsToLoad, the mod's plugin, its header
+      version, the plugin count). In the headset they would only serve installs without the launcher: "Does the
+      manual route stay?" under Needs Emma.
+- [x] A licence check before sharing builds (GPL-3) (2026-10-09). Every zip of `make-release.ps1` now carries
+      `LICENSE.txt` (the repo's notice), `GPL-3.0.txt` (the full text, from gnu.org, `Tools/VR/licences/`) and
+      `SOURCE.txt` (the repository at the exact commit, and where the build steps are); the full zip also
+      `THIRD-PARTY.txt` (CEF 141 with its BSD licence, the DirectX compilers, the Discord SDK). README.md's "Building"
+      now holds the real steps (those of `windows.yml`). Found on the way: the next zip would have shipped
+      `UI.before-logo` (a whole old menu), now skipped with every `.before-*`; `EarlyLoad.dll` came from Emma's folder
+      instead of the build, now from the build. Tested on a stand-in repo: 166, 11.7 and 3.1 MB zips, all three with
+      the licence files, no `before-` entry. Not settled here, upstream's choices kept as they are: the Discord SDK
+      is proprietary and OpenSSL 1.1.1 (linked) has a GPL-incompatible licence.
+- [x] Install script and a guide for other modlists (2026-10-09): the launcher installs; by hand,
+      `README-mod-manager.md` (any MO2 or Wabbajack list), `README-vortex.md`, `README-manual.md`.
+- [x] VR server defaults (difficulty, PvP, time scale): done 2026-10-10, "The server's defaults in a release" (Decisions).
+- [x] A test checklist per build (2026-10-09): `Tools/VR/TEST-CHECKLIST.md`, every build (the four built together,
+      the test for what changed, deploy, it starts), a release (clean tree, `make-release`, `scan-release`, the same
+      zips on GitHub and Nexus) and what to read after a session.
+- [!] **Antivirus false positives** (2026-10-10: (1) and (2) done, signing none for now; left: Emma's VirusTotal key)
+      (Nexus quarantined the first upload, 2026-10-09; VirusTotal: guessing engines
       such as Rising, Trapmine, MaxSecure). (1) The programs' identity: until now upstream's ("Together Team",
       "TogetherOnline", `launcher.exe`, 0.0.0.0), now urSovngarde's, with the version as four numbers from the root
       `xmake.lua` (v1.9.0-2 is 1.9.0.2) in the four `.rc` files. Built and deployed (v1.9.0-3-g22c24c5b): Explorer's
@@ -375,13 +604,83 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       flag. Tested against a stand-in VirusTotal (lookup, small and over-32 MB uploads, waiting, a flag, the report,
       the release layout); needs Emma's free key in `%USERPROFILE%\.str-vt-key` for real use. If a helper `.bat` is
       flagged (they start PowerShell with "-ExecutionPolicy Bypass"): move the helpers to a separate "manual tools"
-      zip, the launcher covering connect, host and update (Emma's call: is the manual route still needed?).
-      (3) Signing, Emma's decision: SignPath Foundation (free for open source; needs the release built by GitHub
-      Actions, see "How releases are made", and the launcher's repo public) or a paid certificate in her name.
+      zip, the launcher covering connect, host and update (Emma, 2026-10-10: the manual route stays as it is).
+      (3) Signing: none for now (Emma, 2026-10-10); VirusTotal scans and false-positive reports only. Her action:
+      the free VirusTotal key in `%USERPROFILE%\.str-vt-key`.
+- [~] **The website's public server page, live** (Emma, 2026-10-10: a push every 10 s while anyone is on, 60 s
+      when empty; place names from the client; a player who opts out is left out of the list but counted in
+      `player_count`). Asked by the website session (`urSovngarde-public-server-live.md`; its contract is
+      `docs/public-server-status.md` in `~/www/stvr`). The hub is ready (its `PUBLIC_SERVER.md`).
+      (1) Done 2026-10-10: the server pushes its status, `Code/server/Services/PublicStatusService.cpp`. Only with
+      `LiveServices:bPublicStatus=true` (off by default); the key from the `URSOVNGARDE_SERVER_KEY` environment
+      variable, never the ini; `sPublicAddress` is the address shown, `sPublicStatusUrl` the hub. It sends the name,
+      address, version, protocol, password flag, player limit, start time and `player_count`, and per player a
+      random token per connection, the character's name and, outdoors in Tamriel only, x, y and heading. Sent from
+      its own thread; joins and leaves pushed at once; "online": false on `/quit`. Closing the window or Ctrl+C
+      sends nothing (the runner's quit handler is disabled, `server_runner/main.cpp`): the hub and the page call it
+      offline after 180 s. Tested against the hub on `wrangler dev` with a bot (join, walk east: heading 90, leave,
+      clean stop), a wrong key, no hub, no key, and the real hub's certificate (401, as expected with no key there).
+      (2) Left, in one release since both change the protocol: the client sends its place name (the room's name
+      indoors, the location's outdoors, in the game's language) and the opt-out, which the launcher's checkbox
+      "Hide me from the public server page" sets. (3) Launcher: `ursovngarde://join?address=host:port`, asking
+      before it joins. (4) Emma: `SERVER_KEY` into Cloudflare and a hub deploy (the hub's TODO.md), the key in
+      `URSOVNGARDE_SERVER_KEY` on the public server's machine, `bPublicStatus=true` and `sPublicAddress` in its
+      STServer.ini. (5) The map's calibration (Whiterun's gate, Windhelm's bridge) from the rig with DevBench.
+      Not settled: parties on a public server. `IsPublicServer()` is `bAnnounceServer`, which also lists the server
+      on upstream's list (a 403 there stops our server), so with it off every stranger lands in one party (XP and
+      quest sync); `in_party_with` is left out until that is decided.
 
 ### Tooling
 
-- [ ] The bot registers only one of two NPCs asked for in the same instant (`live-copies-left-2`).
-- [ ] An equip of a weapon the copy already holds may leave its hand empty (`live-equip`); the creature-gait check
-      is noisy; the other order of "a creature this game made comes back".
-- [ ] TiltedEvolutionVR's two Havok crash guards (`29f99ed`) and ownership blacklists (`1660eb0`): read, not taken.
+- [x] The bot registers only one of two NPCs asked for in the same instant (`live-copies-left-2`) (2026-10-09):
+      the bot's, not the server's: one `m_npcCookie` for every "npc" request, so a second request overwrote it and the
+      first answer was dropped. Now one cookie per pending request (`m_npcCookies`, `Bot.cpp`); new script
+      `npc-twice.txt` green (two bears 10 ms apart, "NPC registered as actor 3" and "4", owned == 2, 4 of 4).
+      `run-bot-tests.ps1` now copies the tracked scripts into the build like `run-all-pairs.ps1` (a new script was
+      "missing" there). `live-copies-left-2` can now leave its two bears behind, for the PLANCK crash item.
+- [x] An equip of a weapon the copy already holds may leave its hand empty (`live-equip`). (2026-10-10) Proven and
+      fixed in the rig with a new script, `live-equip-twice` (the held sword equipped again, then twice at once):
+      without a fix the copy's right hand was empty after the second and third equips while the game said the sword
+      was equipped (2 of 8 failed); now an equip of a hand item the copy already holds in that hand is skipped
+      ("already holds X in the right hand; equip skipped", `InventoryService::OnNotifyEquipmentChanges`): 8 of 8.
+      (A first run blamed the double equip alone: its last check raced the script's unequip; a 3 s wait fixed the
+      script.) Deployed v1.9.0-4-gfa8d5355-dirty.91ff85f, same logic as the build that passed.
+- [ ] The creature-gait check is noisy; the other order of "a creature this game made comes back".
+- [-] TiltedEvolutionVR's two Havok crash guards (`29f99ed`) and ownership blacklists (`1660eb0`): read, not taken.
+      (2026-10-09, re-read from GitHub.) `29f99ed` guards two crashes, `+0AB1ABA` (ragdoll added with a bad
+      constraint) and `+03AD7B1` (island listener on a reference without 3D): none of the 115 Crash Logger logs in
+      `My Games\Skyrim VR\SKSE` nor the 4 in Downloads has either address; port them the day one does (they name the
+      reference). `1660eb0`: nothing left to take. Our server already drops actor-value, max-value and death updates
+      not from the current owner and epoch (`ActorValueService.cpp`, `ReportEpochDrop`), clients drop stale ones
+      (`ReportEpochMiss`), there is no owner blacklist to persist, and a refused move (not owned: `OwnerView`) logs
+      the id without touching the iterator.
+
+### Later
+
+- [ ] **A flat (non-VR) player with VR players** (asked on Reddit, 2026-10-09: "Is it possible for one person to be
+      non VR?"; Emma: add it, for later). Possible in principle: the repo still builds the flat client
+      (`SkyrimTogether.exe`, `build_client("SkyrimTogetherClient", false)`), `Code/encoding` has no VR-only message,
+      so both builds share the protocol and the server, and a flat player arrives in VR through animations like any
+      NPC. Missing: (1) the VR player on the flat screen: VR swings are not animations, and the hand, head and weapon
+      poses we send (`VRPose`) are applied only in VR builds (`VRBodySync`, about 130 `SKYRIMVR` switches in the
+      client); the flat side would pose the arms and the held weapon from them -- the bulk of the work. (2) The mod
+      check (`GameServer.cpp`, `kModsMismatch`; `bEnableModCheck`, off by default) refuses differing plugins when on,
+      and form ids must still mean the same thing on both sides: `SkyrimVR.esm` on one side, the Creation
+      Club files on the other, VR-only plugins in a VR modlist; a rule for the expected differences and a light
+      shared modlist. (3) Fights across the two: a flat block has to count in the defender's rule, which knows only
+      VR blade contact. (4) The flat build untested since the fork, against the current Skyrim SE; testing needs an
+      SE copy. Only once VR to VR is solid.
+- [ ] **Party members on the map and compass** (Emma, 2026-10-10: "Start now"; she and Seen try invite, accept and teleport in the next session) (Emma, 2026-10-09, for a public server: "how hard would it be marked on
+      the map? Some that look good without breaking immersion"). Upstream has no player markers: only the player
+      list, parties with "teleport to" and the member's place in the party menu, and shared custom waypoints
+      (`MapService`). Plan: Skyrim's own quest markers, so the VR map and compass need nothing: a "Fellow
+      travellers" misc quest in `SkyrimTogether.esp` (name kept, saves fine) with up to 7 objectives, each aimed at
+      an invisible persistent marker that the client moves to that member. A far player has no actor in our game (the
+      server spawns characters only in range, `CharacterService.cpp` `IsInRange`), but every client already gets each
+      player's world and cell (`NotifyPlayerCellChanged`): cell precision (about 58 m outdoors) needs no protocol
+      change; in an interior the game itself points to the door. Immersion: party members only; tracking the quest in
+      the journal shows or hides them; the objective hidden while their real body is in our area; text in the game's
+      voice ("Seen travels near Whiterun"). Work: the records (Creation Kit or xEdit), the client code moving markers
+      and showing objectives, VR addresses for the quest functions (the likely surprise), one VR session. Exact
+      positions later would need a new message (everyone updates). Before it: try invite, accept and "teleport to" in
+      VR once; never tried, our sessions were two players who knew where the other was.

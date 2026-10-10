@@ -395,7 +395,7 @@ void OverlayService::OnUpdate(const UpdateEvent&) noexcept
 void OverlayService::OnConnectedEvent(const ConnectedEvent& acEvent) noexcept
 {
 #ifdef SKYRIMVR
-    Utils::ShowHudMessage("Skyrim Together: connected (build " BUILD_COMMIT ")");
+    Utils::ShowHudMessage("urSovngarde: connected (build " BUILD_COMMIT ")");
 #endif
     if (!m_pOverlay)
         return;
@@ -409,6 +409,9 @@ void OverlayService::OnConnectedEvent(const ConnectedEvent& acEvent) noexcept
 
 void OverlayService::OnDisconnectedEvent(const DisconnectedEvent&) noexcept
 {
+    m_playerNames.clear();
+    m_playerHealth.clear();
+
     // On VR the disconnection message comes from VRConnectService, which knows whether it will reconnect.
     if (!m_pOverlay)
         return;
@@ -515,7 +518,7 @@ TiltedPhoques::String DescribeConnectionError(const TiltedPhoques::String& acDet
     else
         text = "refused by the server";
 
-    return TiltedPhoques::String("Skyrim Together: connection failed, ") + text.c_str();
+    return TiltedPhoques::String("urSovngarde: connection failed, ") + text.c_str();
 }
 } // namespace
 #endif
@@ -536,9 +539,10 @@ void OverlayService::OnConnectionError(const ConnectionErrorEvent& acConnectedEv
 void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcept
 {
     String cellName = GetCellName(acMessage.WorldSpaceId, acMessage.CellId);
+    m_playerNames[acMessage.PlayerId] = acMessage.Username;
 #ifdef SKYRIMVR
     // Sent both when someone joins and, on connecting, for everyone already there.
-    Utils::ShowHudMessage(String("Skyrim Together: ") + acMessage.Username + " is online" + (cellName.empty() ? "" : String(" (") + cellName + ")"));
+    Utils::ShowHudMessage(String("urSovngarde: ") + acMessage.Username + " is online" + (cellName.empty() ? "" : String(" (") + cellName + ")"));
 #endif
     if (!m_pOverlay)
         return;
@@ -555,8 +559,10 @@ void OverlayService::OnPlayerJoined(const NotifyPlayerJoined& acMessage) noexcep
 
 void OverlayService::OnPlayerLeft(const NotifyPlayerLeft& acMessage) noexcept
 {
+    m_playerNames.erase(acMessage.PlayerId);
+    m_playerHealth.erase(acMessage.PlayerId);
 #ifdef SKYRIMVR
-    Utils::ShowHudMessage(String("Skyrim Together: ") + acMessage.Username + " left");
+    Utils::ShowHudMessage(String("urSovngarde: ") + acMessage.Username + " left");
 #endif
     if (!m_pOverlay)
         return;
@@ -619,6 +625,20 @@ void OverlayService::OnNotifyTeleport(const NotifyTeleport& acMessage) noexcept
 
 void OverlayService::OnNotifyPlayerHealthUpdate(const NotifyPlayerHealthUpdate& acMessage) noexcept
 {
+    // "X is down", once, when a party member's health reaches zero (Emma, 2026-10-10: a message, no revive). A first
+    // report of someone already down says nothing: there is no "before" to compare with.
+    const auto previous = m_playerHealth.find(acMessage.PlayerId);
+    if (previous != m_playerHealth.end() && previous->second > 0.f && acMessage.Percentage <= 0.f)
+    {
+        const auto name = m_playerNames.find(acMessage.PlayerId);
+        const String who = name != m_playerNames.end() ? name->second : String("A party member");
+        spdlog::info("Party: {} is down", who.c_str());
+#ifdef SKYRIMVR
+        Utils::ShowHudMessage(String("urSovngarde: ") + who + " is down");
+#endif
+    }
+    m_playerHealth[acMessage.PlayerId] = acMessage.Percentage;
+
     if (!m_pOverlay)
         return;
 
@@ -633,7 +653,7 @@ void OverlayService::OnNotifyPlayerHealthUpdate(const NotifyPlayerHealthUpdate& 
 void OverlayService::OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcept
 {
 #ifdef SKYRIMVR
-    Utils::ShowHudMessage(acEvent.IsLeader ? "Skyrim Together: party created" : "Skyrim Together: joined party");
+    Utils::ShowHudMessage(acEvent.IsLeader ? "urSovngarde: party created" : "urSovngarde: joined party");
 #endif
     if (!m_pOverlay)
         return;
@@ -645,7 +665,7 @@ void OverlayService::OnPartyJoinedEvent(const PartyJoinedEvent& acEvent) noexcep
 void OverlayService::OnPartyLeftEvent(const PartyLeftEvent& acEvent) noexcept
 {
 #ifdef SKYRIMVR
-    Utils::ShowHudMessage("Skyrim Together: left party");
+    Utils::ShowHudMessage("urSovngarde: left party");
 #endif
     if (!m_pOverlay)
         return;
