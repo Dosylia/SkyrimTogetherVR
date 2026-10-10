@@ -1,11 +1,14 @@
 #pragma once
 
+#include <Events/PacketEvent.h>
+
 #include <condition_variable>
 #include <random>
 #include <thread>
 
 struct World;
 struct UpdateEvent;
+struct PlayerPlaceRequest;
 
 /**
  * @brief Pushes this server's status (name, player count, character names and where they are) to the urSovngarde hub,
@@ -24,6 +27,7 @@ struct PublicStatusService
 
 protected:
     void OnUpdate(const UpdateEvent& acEvent) noexcept;
+    void OnPlayerPlace(const PacketEvent<PlayerPlaceRequest>& acMessage) const noexcept;
 
 private:
     [[nodiscard]] std::string BuildStatus() noexcept;
@@ -35,6 +39,7 @@ private:
 
     World& m_world;
     entt::scoped_connection m_updateConnection;
+    entt::scoped_connection m_playerPlaceConnection;
 
     bool m_enabled{false};
     std::string m_key;

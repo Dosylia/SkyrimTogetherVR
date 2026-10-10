@@ -73,6 +73,141 @@ static bool IsExecutableAddress(void* apAddress)
     return (prot & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
 }
 
+// The game image, mapped by our own loader at its preferred base (immersive_launcher), is no module to Windows; the
+// same range as UI.cpp's DescribeCaller.
+constexpr uintptr_t kGameImageBase = 0x140000000ull;
+constexpr uintptr_t kGameImageSpan = 0x8000000ull;
+#ifdef SKYRIMVR
+constexpr char kGameImageName[] = "SkyrimVR.exe";
+#else
+constexpr char kGameImageName[] = "SkyrimSE.exe";
+#endif
+
+// "<module>+0x<offset>", the form Crash Logger uses, for the lines the launcher reads into a report (urSovngarde-hub,
+// worker/LAUNCHER.md 8a). The file name only, never the path: a path carries the Windows user name. False outside
+// every module; apModule is left null for the game image, which has no version resource of its own to read.
+static bool NameModuleOffset(uintptr_t aAddress, char* apOut, size_t aOutSize, HMODULE* apModule) noexcept
+{
+    if (aAddress >= kGameImageBase && aAddress < kGameImageBase + kGameImageSpan)
+    {
+        _snprintf_s(apOut, aOutSize, _TRUNCATE, "%s+0x%llx", kGameImageName, static_cast<unsigned long long>(aAddress - kGameImageBase));
+        return true;
+    }
+
+    HMODULE hModule = nullptr;
+    wchar_t path[MAX_PATH];
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(aAddress), &hModule) || !hModule)
+        return false;
+    const DWORD length = GetModuleFileNameW(hModule, path, MAX_PATH);
+    if (!length || length >= MAX_PATH)
+        return false;
+    const wchar_t* pFile = wcsrchr(path, L'\\');
+    char file[MAX_PATH * 3];
+    if (!WideCharToMultiByte(CP_UTF8, 0, pFile ? pFile + 1 : path, -1, file, sizeof(file), nullptr, nullptr))
+        return false;
+
+    _snprintf_s(apOut, aOutSize, _TRUNCATE, "%s+0x%llx", file, static_cast<unsigned long long>(aAddress - reinterpret_cast<uintptr_t>(hModule)));
+    if (apModule)
+        *apModule = hModule;
+    return true;
+}
+
+// A loaded module's file version, read from its version resource where it already sits in memory: no file opened,
+// nothing allocated, which is what a crash handler can afford. False when it has none.
+static bool ModuleFileVersion(HMODULE aModule, char* apOut, size_t aOutSize) noexcept
+{
+    const HRSRC hResource = FindResourceW(aModule, MAKEINTRESOURCEW(1) /* VS_VERSION_INFO */, MAKEINTRESOURCEW(16) /* RT_VERSION */);
+    if (!hResource)
+        return false;
+    const DWORD size = SizeofResource(aModule, hResource);
+    const HGLOBAL hData = LoadResource(aModule, hResource);
+    const auto* pData = hData ? static_cast<const uint8_t*>(LockResource(hData)) : nullptr;
+    if (!pData)
+        return false;
+
+    // VS_FIXEDFILEINFO follows the "VS_VERSION_INFO" key on a 4-byte boundary, and starts with this signature.
+    struct FixedFileInfo
+    {
+        DWORD Signature, StructVersion, FileVersionMS, FileVersionLS;
+    };
+    constexpr DWORD cSignature = 0xFEEF04BD;
+    for (DWORD offset = 0; offset + sizeof(FixedFileInfo) <= size; offset += 4)
+    {
+        FixedFileInfo info;
+        std::memcpy(&info, pData + offset, sizeof(info));
+        if (info.Signature != cSignature)
+            continue;
+        _snprintf_s(apOut, aOutSize, _TRUNCATE, "%u.%u.%u.%u", HIWORD(info.FileVersionMS), LOWORD(info.FileVersionMS), HIWORD(info.FileVersionLS), LOWORD(info.FileVersionLS));
+        return true;
+    }
+    return false;
+}
+
+// The frames above us, guarded: a broken stack makes the walk fault, and an access violation inside CrashGuard is left
+// to this __except (VectoredExceptionHandler lets it through) instead of re-entering the crash report. Alone in its own
+// function, since MSVC allows no __try where C++ objects need unwinding.
+static USHORT CaptureFramesGuarded(void** apFrames, ULONG aCount) noexcept
+{
+    CrashGuard::Enter();
+    USHORT captured = 0;
+    __try
+    {
+        captured = RtlCaptureStackBackTrace(0, aCount, apFrames, nullptr);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        captured = 0;
+    }
+    CrashGuard::Leave();
+    return captured;
+}
+
+// Which module crashed and the frames that led there, for the launcher's report (urSovngarde-hub, worker/LAUNCHER.md
+// 8a): it names the crash "<module>+<offset>", as Crash Logger does, so a report without Crash Logger's log still says
+// what crashed. Logged right after the exception code and the faulting access, which launchers parse as they are, and
+// flushed at once: a report of 2026-10-10 (20261010-064510-d37b8fe6) held those lines and nothing after them.
+static void LogCrashModule(PEXCEPTION_POINTERS apInfo) noexcept
+{
+    void* const pFault = apInfo->ExceptionRecord->ExceptionAddress;
+    char where[MAX_PATH * 3 + 32];
+    char version[64];
+    HMODULE hModule = nullptr;
+
+    if (!NameModuleOffset(reinterpret_cast<uintptr_t>(pFault), where, sizeof(where), &hModule))
+        spdlog::error("VectoredExceptionHandler: in no module");
+    else if (hModule && ModuleFileVersion(hModule, version, sizeof(version)))
+        spdlog::error("VectoredExceptionHandler: in {}, version {}", where, version);
+    else
+        spdlog::error("VectoredExceptionHandler: in {}", where);
+
+    // The walk starts here, in the handler, and passes through the exception dispatcher into the faulting frame: the
+    // frames from the faulting address outwards are the ones that matter. No line when it never gets there.
+    void* frames[62];
+    const USHORT captured = CaptureFramesGuarded(frames, static_cast<ULONG>(std::size(frames)));
+    USHORT first = 0;
+    while (first < captured && frames[first] != pFault)
+        ++first;
+    if (first < captured)
+    {
+        char stack[1024];
+        size_t used = 0;
+        stack[0] = '\0';
+        for (USHORT i = first; i < captured && i < first + 8; ++i)
+        {
+            char frame[MAX_PATH * 3 + 32];
+            if (!NameModuleOffset(reinterpret_cast<uintptr_t>(frames[i]), frame, sizeof(frame), nullptr))
+                _snprintf_s(frame, sizeof(frame), _TRUNCATE, "?");
+            const int written = _snprintf_s(stack + used, sizeof(stack) - used, _TRUNCATE, "%s%s", i == first ? "" : " < ", frame);
+            if (written < 0)
+                break;
+            used += static_cast<size_t>(written);
+        }
+        spdlog::error("VectoredExceptionHandler: stack {}", stack);
+    }
+
+    spdlog::default_logger()->flush();
+}
+
 // Logs registers and a raw stack scan, because minidumps of this process are mostly unusable.
 // A real stack walk needs unwind info, which the custom-loaded game image doesn't have. Scanning
 // the stack for pointers into executable memory recovers the return-address chain instead
@@ -90,6 +225,8 @@ static void LogCrashContext(PEXCEPTION_POINTERS pExceptionInfo)
                       kind == 0 ? "read from" : (kind == 1 ? "write to" : "execute at"),
                       static_cast<uint64_t>(pRecord->ExceptionInformation[1]));
     }
+
+    LogCrashModule(pExceptionInfo);
 
     DescribeCodeAddress(pRecord->ExceptionAddress, desc, sizeof(desc));
     spdlog::error("  rip 0x{:x}  ({})", static_cast<uint64_t>(pContext->Rip), desc);

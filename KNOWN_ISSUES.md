@@ -280,7 +280,7 @@ entries below are under `#ifdef SKYRIMVR` with `static_assert`s.
   - Also frozen, the same way as far as could be seen: loading Emma's Autosave2 of 2026-10-03 09:32:50 in a fresh
     game, with this build and the one before. Not looked into further.
   The rig restarts the game every six scripts since (`run-live.ps1 -Batch`). In play, a long session with many
-  loading screens is where this would show; the modlist is Emma's (see VR_TODO.md, "Needs Emma").
+  loading screens is where this would show; the modlist is Emma's (see VR_TODO.md, "Waiting on a test or action").
   To name a frame of our own exe in a debugger, use the linker map (`build/.../SkyrimTogetherVR.map`): the exe has
   no debug directory, so cdb finds no pdb. Game frames show as `game_seg+X`, which is `SkyrimVR.exe+(X+0x101000)`.
 

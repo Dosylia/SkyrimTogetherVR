@@ -4,7 +4,7 @@ What is current, and nothing else. The full story -- session reports, investigat
 Physics and PvP queues as they were worked -- is in `VR_HISTORY.md` (everything this file held up to 2026-10-07, word
 for word); `KNOWN_ISSUES.md` says what is known to be broken and why. Section names in brackets point into the history.
 
-`[ ]` open, `[!]` waiting on Emma, `[x]` built and tested in the rig but not yet seen in a real session. An item the
+`[ ]` open, `[!]` waiting on a test or action, `[x]` built and tested in the rig but not yet seen in a real session. An item the
 players confirm is deleted, not ticked; git keeps it.
 
 **Aims, in order** (2026-09-25): no crashes; the game in sync for both players; VRIK and HIGGS interactions seen by
@@ -61,7 +61,7 @@ its `TODO.md`. What stays here is the mod's own part:
       server setup", 1 day; (5) a session with Seen, each on his own connection. About 1.5 to 2 weeks in all.
       The P2P route this item first described (GameNetworkingSockets' ICE, present in the built library, with the hub
       as go-between) stays possible later to save the relay's hop for pairs whose routers allow it; it changes the
-      mod's network code on both sides. Questions under "Needs Emma".
+      mod's network code on both sides. Questions under "Waiting on a test or action".
       Progress (2026-10-07, the plumbing, steps 2 and 3 in part): the relay is a std-only Rust program in the
       launcher's repo, `relay/` (not the hub's: the launcher shares its wire format, `relay/src/proto.rs`), 9 tests
       (routing between a host and its players only, refusals, lost answers, a host's changed address, leaving,
@@ -100,7 +100,7 @@ its `TODO.md`. What stays here is the mod's own part:
       client folder's selection on any tree (29 entries from her tools folder, none of those). Open: `release.yml`
       publishes a GitHub release on any `vX.Y.Z` tag push, built by `windows-playable-build.yml` in upstream's SE
       layout (a `SkyrimTogetherReborn` folder): a tag pushed today would publish a zip the launcher cannot install,
-      and its update notice would announce it. Question under "Needs Emma". Was: release packaging for VR (the
+      and its update notice would announce it. Question under "Waiting on a test or action". Was: release packaging for VR (the
       workflows still name upstream's SE files).
 
 ## Now (Emma, 2026-10-10 morning): the blade and body upgrade, all of it
@@ -115,11 +115,21 @@ controllers: `input vrTrackedSet`, one frame = HMD and both controllers, a 3x4 `
 5. Mounts: the rider's copy put on the horse directly (Sync).
 6. The skill book that cannot be taken after the other player touched it (Sync).
 
+- [ ] **The next build, after Emma's session of 2026-10-10** (handed over by the public-page session, which builds
+      nothing itself). On disk, unbuilt: `AuthenticationRequest.HideFromPublicPage` and the new `PlayerPlaceRequest`
+      (protocol change), the client's place updates (PlayerService, TransportService) and the server's
+      `PublicStatusService` (off by default), and two new crash lines in `Code/client/CrashHandler.cpp` for the
+      launcher's reports ("VectoredExceptionHandler: in <module>+0x<offset>, version x" and "... stack ...", from the
+      new helpers above `LogCrashContext`; crash path only). Build all five together (client, launcher, server, runner, bot); a
+      compile error in those files goes to that session (tiltedevolution-09). Deploy, then tell Emma: her friends need
+      the new client from the tools folder before joining a server from this build. The blade stop is in the same tree,
+      unproven: prove it in the rig first, or keep it from turning anything, before this build reaches the tools folder.
+
 ## Work queue (2026-10-07)
 
 Emma's answers of 2026-10-07: a player's follower always belongs to that player's game; a dragon flying in the other
 game is never taken over; keep at the crash on travelling away with PLANCK (option 3). Worked top to bottom by the loop:
-`[x]` with its evidence in one line, `[!]` with the question or action under "Needs Emma", `[-]` with why. Details of
+`[x]` with its evidence in one line, `[!]` with the question or action under "Waiting on a test or action", `[-]` with why. Details of
 each item's past are in `VR_HISTORY.md` under the section named in brackets.
 
 - [x] **A corpse lies where its owner's lies** (2026-10-07, `live-corpse-place` 06:35 and 06:38, 5 of 5 each): the
@@ -158,7 +168,7 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       left-behind copies go), "add lock around active actors set", "Remove actors from the world if their AI is not
       active", "Refactor ragdoll add/remove", "fix crash", "Make things safer". 0.8.1 needs HIGGS 1.6 or newer; she
       has 1.10. The test is ready: `live-copies-left-3` crashes on 0.6.6 in a fresh session. "PLANCK 0.8.1 in the
-      rig" under Needs Emma.
+      rig" under "Waiting on a test or action".
 - [x] **The weapon's visible blade** (2026-10-07, built with the corpse fix): `kWorldBoundOffset` is 0xE4; nothing
       reads it on a live path any more (`ReadWorldBound` has no caller), only the shape report's line. Was: `kWorldBoundOffset` 0xB0 is `previousWorld`; the world bound is at 0xE4 on VR
       (measured 2026-10-06). Batch into another item's build.
@@ -170,7 +180,7 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       the state if it moves; attach the arrow by hand on the receiving side if it never leaves 0 (bigger). ["Nocked
       arrow not shown on the other player's bow"]
 
-## Needs Emma
+## Waiting on a test or action
 
 ### Decisions
 
@@ -219,6 +229,21 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       Emma, 2026-10-08, after a fight with Seen: "if I meet my enemy sword I shouldn't be able to still go past it, or
       it defeats the purpose" -- that is (1). To confirm before it starts (the most work), and after the damage path
       below is right: a stop that lets blades through still has to drop the hit.
+      Progress, 2026-10-10 morning:
+      - [x] Harness: `live-blade` swings the player's EQUIPPED sword by script (`DO swing right through copy <ms>
+            [past <m>] [hold <ms>]`, DevBench vrTrackedSet, aimed at the copy's blade centre) and the bot's new
+            `infront <units>` puts the copy at the player's height (it stood 156 units inside a hillside before). The
+            swing reaches his blade: "Clash: our right hand ... met the right weapon of FF001245" (08:16, 08:37).
+      - [ ] The stop, written (not proven): `VRBodySync` "BladeStop" at the frame end. Blades are segments (the
+            weapon node's +Y, as far as its bound reaches; measured 53.8 for his iron sword, 58-69 for ours). A
+            crossing is the sign change of ours against the plane through our grip and his blade. While crossed,
+            the drawn weapon is turned about the grip to rest on his, and let go when the hand comes back, slides off
+            either end, reaches his blade or would turn more than 60 degrees. The stopped grip is sent
+            (`DrawnGripRotation`), and a hit along that blade is dropped (`IsBladeStoppedAt`, Actor.cpp). Rig 08:37:
+            the bodies touched (Clash) but no "BladeStop: ... met" line, so the crossing test never fired. Next: a
+            temporary geometry line (both segments, side, t and v) during the swing, then fix and photograph
+            `live-blade-held`. That build (069af59) is set aside in the tools folder as
+            `urSovngarde.*.bladestop-20261010-0832`. Emma plays on the tested 05:33 build (da73f2f).
 - [x] **7.9 GB copied at every start** (Emma's OK, 2026-10-08). MO2's `overwrite\Root` held 77 crash dumps (7.5 GB,
       18 Sep to 6 Oct, written by the game into its folder and captured by RootBuilder), a 388 MB unchanged copy of
       the v1.9.0 `Skyrim Together VR` folder and `urSovngarde Server` (both from the launcher's no-MO2 test install
@@ -437,7 +462,7 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       copy frozen for 15 s at every mount). So the package does not run on a copy, most likely because copies do not
       run their own AI packages. Kept: the "Mount:" log lines on both sides. Next, if wanted: put the copy on the
       horse directly (the game's own mount state, without a package) and get it off when the owner's `bIsRiding`
-      (synced) goes false; "Mounts" under Needs Emma.
+      (synced) goes false; "Mounts" under "Waiting on a test or action".
 - [ ] A downed follower lying sideways and running.
 - [x] Sliding: creatures with no animation-variable descriptor slide whatever else is fixed; Dinya Balu sliding on
       Emma's screen only. ["Sliding: the descriptor lookup"] (2026-10-10, from the logs) Gone as far as the logs see:
@@ -574,7 +599,7 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       game starts, in plain words (`urSovngarde-launcher/rules/setup.json`: game version, address library and its
       Community Shaders mismatch, SKSE, the Engine Fixes preloader, uGridsToLoad, the mod's plugin, its header
       version, the plugin count). In the headset they would only serve installs without the launcher: "Does the
-      manual route stay?" under Needs Emma.
+      manual route stay?" under "Waiting on a test or action".
 - [x] A licence check before sharing builds (GPL-3) (2026-10-09). Every zip of `make-release.ps1` now carries
       `LICENSE.txt` (the repo's notice), `GPL-3.0.txt` (the full text, from gnu.org, `Tools/VR/licences/`) and
       `SOURCE.txt` (the repository at the exact commit, and where the build steps are); the full zip also
@@ -620,10 +645,18 @@ each item's past are in `VR_HISTORY.md` under the section named in brackets.
       sends nothing (the runner's quit handler is disabled, `server_runner/main.cpp`): the hub and the page call it
       offline after 180 s. Tested against the hub on `wrangler dev` with a bot (join, walk east: heading 90, leave,
       clean stop), a wrong key, no hub, no key, and the real hub's certificate (401, as expected with no key there).
-      (2) Left, in one release since both change the protocol: the client sends its place name (the room's name
-      indoors, the location's outdoors, in the game's language) and the opt-out, which the launcher's checkbox
-      "Hide me from the public server page" sets. (3) Launcher: `ursovngarde://join?address=host:port`, asking
-      before it joins. (4) Emma: `SERVER_KEY` into Cloudflare and a hub deploy (the hub's TODO.md), the key in
+      (2) Written 2026-10-10, not built yet (Emma was about to play; the next five-target build carries it), one
+      protocol change: `PlayerPlaceRequest` (client `PlayerService::RunPlaceUpdates`, once a second: the room's name
+      indoors, the location's outdoors, the worldspace's otherwise, in the game's language; the server converts to
+      UTF-8) and `AuthenticationRequest.HideFromPublicPage`, read from
+      `HKCU\Software\TiltedPhoques\TiltedEvolution\Skyrim VR\HideFromPublicPage` (DWORD), which the launcher's
+      checkbox "Hide me from the public server page" writes (asked of the launcher session). A hidden player is
+      counted in `player_count` and never named. To check after the build: a place name from the real VR client.
+      (3) Launcher, done 2026-10-10, uncommitted and not released: the checkbox (Friends panel, Join, under "or an
+      address"; fr "Me cacher de la page du serveur public", es "Ocultarme de la página del servidor público", de "Mich
+      auf der Seite des öffentlichen Servers verbergen") and `ursovngarde://join?address=<host>:<port>` (IPv4 or a
+      dotted name and a port; anything else refused; always asks "Join this server?"). It ships with or after the mod
+      build that reads the setting. Older launchers have no handler for the link. (4) Emma: `SERVER_KEY` into Cloudflare and a hub deploy (the hub's TODO.md), the key in
       `URSOVNGARDE_SERVER_KEY` on the public server's machine, `bPublicStatus=true` and `sPublicAddress` in its
       STServer.ini. (5) The map's calibration (Whiterun's gate, Windhelm's bridge) from the rig with DevBench.
       Not settled: parties on a public server. `IsPublicServer()` is `bAnnounceServer`, which also lists the server

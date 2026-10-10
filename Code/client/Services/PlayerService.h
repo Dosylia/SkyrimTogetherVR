@@ -51,6 +51,7 @@ private:
     void RunDifficultyUpdates() const noexcept;
     void RunLevelUpdates() const noexcept;
     void RunBeastFormDetection() const noexcept;
+    void RunPlaceUpdates() noexcept;
 
     void ToggleDeathSystem(bool aSet) noexcept;
 
@@ -73,6 +74,10 @@ private:
     uint32_t m_cachedMainSpellId = 0;
     uint32_t m_cachedSecondarySpellId = 0;
     uint32_t m_cachedPowerId = 0;
+
+    // The last place sent for the public server page (PlayerPlaceRequest), and when to look again.
+    String m_lastPlace;
+    std::chrono::steady_clock::time_point m_nextPlaceCheck{};
 
     entt::scoped_connection m_updateConnection;
     entt::scoped_connection m_connectedConnection;

@@ -24,6 +24,22 @@
 #include <Packet.hpp>
 
 #include <ScriptExtender.h>
+
+#pragma comment(lib, "advapi32.lib")
+
+// The launcher's "Hide me from the public server page", kept beside the game path it writes for the mod's own launcher
+// (immersive_launcher/oobe/PathSelection.cpp). Read at every connection, so a change applies at the next one.
+static bool IsHiddenFromPublicPage() noexcept
+{
+#ifdef SKYRIMVR
+    constexpr wchar_t kKey[] = LR"(Software\TiltedPhoques\TiltedEvolution\Skyrim VR)";
+#else
+    constexpr wchar_t kKey[] = LR"(Software\TiltedPhoques\TiltedEvolution\Skyrim Special Edition)";
+#endif
+    DWORD value = 0;
+    DWORD size = sizeof(value);
+    return RegGetValueW(HKEY_CURRENT_USER, kKey, L"HideFromPublicPage", RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS && value != 0;
+}
 #include <Services/DiscordService.h>
 
 // #include <imgui_internal.h>
@@ -156,6 +172,10 @@ void TransportService::OnConnected()
     modSystem.GetServerModId(pPlayer->parentCell->formID, request.CellId);
 
     request.Level = pPlayer->GetLevel();
+
+    request.HideFromPublicPage = IsHiddenFromPublicPage();
+    if (request.HideFromPublicPage)
+        spdlog::info("Hidden from the public server page (launcher setting)");
 
     auto* pGameTime = TimeData::Get();
     request.PlayerTime.TimeScale = pGameTime->TimeScale->f;

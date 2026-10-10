@@ -9,10 +9,10 @@ sections below are not maintained any more. Newest first, as it was.
 Emma, after the first fight between two headsets: "Loop for these fixes", then "not just dragging bodies working, but
 actually interacting with an npc or maybe even the other player body could be seen". Worked top to bottom by the loop
 like the Physics queue below: `[x]` with its evidence in one line, `[!]` with the question or action copied under
-"Needs Emma (PvP)", `[-]` with why. A design choice is never the loop's to make. What the fight showed is under "First
+"Waiting on a test or action (PvP)", `[-]` with why. A design choice is never the loop's to make. What the fight showed is under "First
 fight between two headsets" in P4 below; Seen's log clock runs about 2.5 s ahead of Emma's.
 
-**Needs Emma (PvP)**
+**Waiting on a test or action (PvP)**
 
 - **Handling a living NPC the other player's game runs: what should happen?** Today your grab or shove on it is
   undone at once on your screen and he sees nothing; only your hits' damage reaches it. Options: (1) while your hand
@@ -67,7 +67,7 @@ fight between two headsets" in P4 below; Seen's log clock runs about 2.5 s ahead
       second at 60 fps) while the owner's side looks every 100 ms (40 units a second); a hand drag is slower than the
       first. Now both every 100 ms -- on code evidence and his log's silence, not a failing run. Also fixed on the way:
       temporary bodies could never change hands (item above). Bodies did finish dying on his side within a minute
-      (1018F9 "dying or downed" then posed). **Owed: a real drag** -- see "Needs Emma (PvP)". Was: try what the rig has not --
+      (1018F9 "dying or downed" then posed). **Owed: a real drag** -- see "Waiting on a test or action (PvP)". Was: try what the rig has not --
       a humanoid corpse (a bandit, not the bear), a body still in its death animation, a body the other side killed
       with a hit rather than `npclife dead` -- and see which one `ObserveRemoteBodyMotion` misses.
 - [!] Tighter ragdoll (2026-10-06, rig 22:25 and 22:30): ours installed around PLANCK's hook instead of inside it made
@@ -75,7 +75,7 @@ fight between two headsets" in P4 below; Seen's log clock runs about 2.5 s ahead
       before the drive copies the game's animation pose over the track, after ours. The same as the first try that
       morning; reverted. What is left is how softly PLANCK's active ragdoll follows any pose (its gains, Emma's
       activeragdoll.ini at the defaults): a setting of her install that changes every NPC's body, so a question under
-      "Needs Emma (PvP)". Was: the drawn pose written before PLANCK's own work, installed once the game
+      "Waiting on a test or action (PvP)". Was: the drawn pose written before PLANCK's own work, installed once the game
       runs (session scratchpad `p43_p44_patch.py`, its P4.4 half). Measured on the `VRRagdoll` hands lines against
       today's 8-14 units; reverted if worse.
 - [x] The other player's delay alone (2026-10-06, both runs): "InterpDiag players: 601 updates, newest point ahead of
@@ -90,14 +90,14 @@ fight between two headsets" in P4 below; Seen's log clock runs about 2.5 s ahead
       rig cannot pull one. What the code does today: a living NPC the other game owns is put where its owner has it at
       every update here (InterpolationSystem, ForcePosition), so a pull or a shove here is undone at once and its owner
       sees nothing; only a hit's damage is sent (and the owner's NPC fights back). Only dead bodies are watched for a
-      hand moving them (`ObserveRemoteBodyMotion`). Design question under "Needs Emma (PvP)". Was: what the NPC's owner gets today when this player grabs it (HIGGS), pushes
+      hand moving them (`ObserveRemoteBodyMotion`). Design question under "Waiting on a test or action (PvP)". Was: what the NPC's owner gets today when this player grabs it (HIGGS), pushes
       it or knocks it over (PLANCK), measured in the rig with a bot-owned NPC -- what is sent, what the owner would
       apply. Then what would make it seen: the non-owner taking the NPC while handling it (as for bodies), or sending
-      the hand's pull. Which of those is a design choice: under "Needs Emma (PvP)" with the measured facts.
+      the hand's pull. Which of those is a design choice: under "Waiting on a test or action (PvP)" with the measured facts.
 - [!] The other player's body handled by this player (2026-10-06, from the code): his copy is posed from his own VR
       pose every frame and its ragdoll is driven to that pose (P2), so a hand here can bend it a little (PLANCK's soft
       following, 8-14 units) and nothing is sent to him. His real hands cannot be moved by the game. Design question
-      under "Needs Emma (PvP)". Was: grabbing his copy's hand or arm, pushing his copy. What happens
+      under "Waiting on a test or action (PvP)". Was: grabbing his copy's hand or arm, pushing his copy. What happens
       on his side today (nothing is sent, presumably: measure), and what could be: a buzz on the hand that was
       grabbed, his body pushed. Design choice to Emma with the facts.
 
@@ -108,7 +108,7 @@ objects in your game where you see them, so a blade is really stopped by his; yo
 delay stays, so **the defender's screen decides whether a hit was blocked** (agreed 2026-10-06).
 
 Worked top to bottom by the loop; each item ends `[x]` with its evidence in one line, `[!]` with the question or action
-for Emma copied under "Needs Emma (physics)", or `[-]` with why. A design choice is never the loop's to make.
+for Emma copied under "Waiting on a test or action (physics)", or `[-]` with why. A design choice is never the loop's to make.
 
 Known going in (see "Swords between players" below): PLANCK 0.6.6 is installed (0.8.1 exists); its code for making
 characters' equipped weapons physical is commented out in every version; it drives each ragdoll toward the behaviour
@@ -118,7 +118,7 @@ into the pose track when foot IK is on); our VR pose is only drawn, at the rende
 the world (PLANCK 0.7.0 notes). Sources: github.com/adamhynek/activeragdoll (PLANCK, VR offsets in
 `src/RE/offsets.cpp`), github.com/adamhynek/higgs (HIGGS), github.com/ijwzac/WeaponCollisionVR (the parry mod).
 
-**Needs Emma (physics)**
+**Waiting on a test or action (physics)**
 
 - **DevBench update?** To swing a sword in the test rig (no headset) the rig needs controller poses, which newer
   DevBench releases have (`input vrTrackedSet`); the installed 1.22.0 has the keyboard only. Would you update DevBench
@@ -256,8 +256,8 @@ the world (PLANCK 0.7.0 notes). Sources: github.com/adamhynek/activeragdoll (PLA
       into him as a hit, need a moving hand: [!] below.
 - [!] A swinging hand in the rig: DevBench 1.22.0 drives the keyboard only; its newer releases add `input vrTrackedSet`
       (HMD and both controllers' poses and buttons, frame by frame -- github.com/alandtse/devbench). With that, the rig
-      can swing a held sword into his and measure the lag and PLANCK's hits. Question under "Needs Emma (physics)".
-- [!] How an equipped sword should meet his: design choice, question under "Needs Emma (physics)".
+      can swing a held sword into his and measure the lag and PLANCK's hits. Question under "Waiting on a test or action (physics)".
+- [!] How an equipped sword should meet his: design choice, question under "Waiting on a test or action (physics)".
 
 ### P4. Two screens, one fight
 
@@ -283,7 +283,7 @@ the world (PLANCK 0.7.0 notes). Sources: github.com/adamhynek/activeragdoll (PLA
       "... lands"). Red (18:43, before the rule): a hit stamped at the clash took 30. Green (18:58): "blocked: our
       weapon met theirs 0 ms before it was seen here", health 335 -> 335; the control hit "lands, 340 ms after it
       happened", 335 -> 305; 15 of 15. The 18:54 run never started (the test save timed out loading). **One more
-      green run owed.** The 300/100 ms windows are first values: see "Needs Emma (physics)".
+      green run owed.** The 300/100 ms windows are first values: see "Waiting on a test or action (physics)".
 - [ ] **First fight between two headsets (2026-10-06, 19:47-20:11), and what it changed.** Emma: the buzz matched
       where the sword was, a hand on his sword felt it too; no blocking, no block reaction or sparks; hitting his sword
       hurt him. Measured from both logs (Seen's clock runs 2.5 s ahead of Emma's):
@@ -433,12 +433,12 @@ player (`Tools/VR/live-check.py`, `Tools/VR/run-all-pairs.ps1`), and reading cod
 item at a time. Each item ends as one of:
 
 - `[x]` done -- with the evidence in one line (red before, green after, or the log line that settles it);
-- `[!]` needs Emma -- with the exact question or the one action only she can take, copied to "Needs Emma" below;
+- `[!]` waiting on a test or action -- with the exact question or the one action only she can take, copied to "Waiting on a test or action" below;
 - `[-]` not worth doing -- with why.
 
 A longer write-up goes in the section the item belongs to further down; this list stays one line per item.
 
-**Needs Emma** (questions and actions collected from the queue; newest last)
+**Waiting on a test or action** (questions and actions collected from the queue; newest last)
 
 - Whether to show "X is down" when the other player dies (asked 2026-10-01, not answered).
 - **Commit and push, and send Seen the new exe (2026-10-02).** The login message changed (it carries the protocol id
@@ -511,7 +511,7 @@ A longer write-up goes in the section the item belongs to further down; this lis
 ### Crashes and stability
 
 - [x] Death while connected: `live-death`, killed twice by console, back in the world after 5 s both times, alive at 335, still connected, never at the main menu (7 of 7 checks).
-- [!] Loading a save after dying: crashes in the no-headset rig when the load falls inside our death sequence (3 of 3), not 40 s later (2 of 2) and never without our respawn (4 of 4). Needs Emma's headset test, above. Since then a load with no death at all crashed the same way (2026-10-03 01:41:59, `skyrimvrtools.dll+0x71B5`, the first load of `live-load`, 25 minutes into a session; the same script passed early in other sessions), so in the rig the trigger may be the fake controllers' state rather than our death sequence. The headset test is still the only way to know. One more of the family on 2026-10-03 07:47: a trip by cell (`cow`, a loading screen) half a minute after the mod had brought the player back from death crashed at `SkyrimVR.exe+0x6C689A` (`PlayerCharacter::UpdateAnimation`, a null pointer), one run of `live-sender` in two; the other run made the same trip cleanly.
+- [!] Loading a save after dying: crashes in the no-headset rig when the load falls inside our death sequence (3 of 3), not 40 s later (2 of 2) and never without our respawn (4 of 4). Waiting on a test or action's headset test, above. Since then a load with no death at all crashed the same way (2026-10-03 01:41:59, `skyrimvrtools.dll+0x71B5`, the first load of `live-load`, 25 minutes into a session; the same script passed early in other sessions), so in the rig the trigger may be the fake controllers' state rather than our death sequence. The headset test is still the only way to know. One more of the family on 2026-10-03 07:47: a trip by cell (`cow`, a loading screen) half a minute after the mod had brought the player back from death crashed at `SkyrimVR.exe+0x6C689A` (`PlayerCharacter::UpdateAnimation`, a null pointer), one run of `live-sender` in two; the other run made the same trip cleanly.
 - [-] Wrist menu crash: not reproducible here. Tween then inventory opened 20 times through DevBench, 170 ms and 20 ms apart, while connected: no crash, nothing left open. The crash had controller input reaching a menu mid-start and no frame of ours; DevBench opens menus without a controller.
 - [-] Seen's stuck journal: not reproducible here. Journal opened and closed 25 times while connected (10 with a second open, 15 closed 50 ms after opening), game window unfocused throughout: it closed every time. If it happens to Seen again, his log's `Menu queued` and `Probe` lines around it are what to send.
 - [x] Quit crash: twenty quits by `qqq` since 2026-10-01 18:00 (the last on 2026-10-03 01:08), no crash report and no dump from any of them. Every crash report in that time is a mid-session crash with its own entry.

@@ -21,11 +21,13 @@
 #include <Messages/EnterInteriorCellRequest.h>
 #include <Messages/PlayerDialogueRequest.h>
 #include <Messages/PlayerLevelRequest.h>
+#include <Messages/PlayerPlaceRequest.h>
 
 #include <Structs/ServerSettings.h>
 
 #include <PlayerCharacter.h>
 #include <Forms/TESObjectCELL.h>
+#include <Forms/TESWorldSpace.h>
 #include <Forms/TESGlobal.h>
 #include <Games/Overrides.h>
 #include <Games/References.h>
@@ -60,10 +62,15 @@ void PlayerService::OnUpdate(const UpdateEvent&) noexcept
     RunDifficultyUpdates();
     RunLevelUpdates();
     RunBeastFormDetection();
+    RunPlaceUpdates();
 }
 
 void PlayerService::OnConnected(const ConnectedEvent& acEvent) noexcept
 {
+    // Every connection starts with the place unknown to the server: send it at the next check.
+    m_lastPlace.clear();
+    m_nextPlaceCheck = {};
+
     // TODO: SkyrimTogether.esm
     TESGlobal* pKillMove = Cast<TESGlobal>(TESForm::GetById(0x100F19));
     pKillMove->f = 0.f;
@@ -330,6 +337,41 @@ void PlayerService::RunLevelUpdates() const noexcept
 
         oldLevel = newLevel;
     }
+}
+
+// The public server page's "where": the room's name indoors, the location's outdoors (a town, a dungeon, the hold in
+// the wilds), the worldspace's when there is neither. Checked once a second and sent when it changes.
+void PlayerService::RunPlaceUpdates() noexcept
+{
+    const auto now = std::chrono::steady_clock::now();
+    if (now < m_nextPlaceCheck || !m_transport.IsConnected())
+        return;
+    m_nextPlaceCheck = now + std::chrono::seconds(1);
+
+    const PlayerCharacter* pPlayer = PlayerCharacter::Get();
+    if (!pPlayer)
+        return;
+
+    const auto nameOf = [](const TESForm* apForm) -> const char* {
+        const char* pName = apForm ? apForm->GetName() : nullptr;
+        return pName && *pName ? pName : nullptr;
+    };
+
+    TESWorldSpace* pWorldSpace = pPlayer->GetWorldSpace();
+    const char* pPlace = pWorldSpace ? nullptr : nameOf(pPlayer->GetParentCellEx());
+    if (!pPlace)
+        pPlace = nameOf(pPlayer->locationForm);
+    if (!pPlace)
+        pPlace = nameOf(pWorldSpace);
+
+    const String place = pPlace ? pPlace : "";
+    if (place == m_lastPlace)
+        return;
+    m_lastPlace = place;
+
+    PlayerPlaceRequest request{};
+    request.Place = place;
+    m_transport.Send(request);
 }
 
 void PlayerService::RunBeastFormDetection() const noexcept

@@ -4486,9 +4486,28 @@ void StopLocalBlades(const std::chrono::steady_clock::time_point aNow) noexcept
                 if (stop.Key || sign == 0.f || before == stop.LastSide.end() || before->second == 0.f || before->second == sign)
                     continue;
                 float t = 0.f, v = 0.f;
-                if (!LineParameters(ours.Grip, glm::normalize(ours.Axis - sideNow * normal), his.Segment.Grip, his.Segment.Axis, t, v) || t < kBladeGuard ||
-                    t > ours.Length + kBladeSlack || v < -kBladeSlack || v > his.Segment.Length + kBladeSlack)
+                const bool cLines = LineParameters(ours.Grip, glm::normalize(ours.Axis - sideNow * normal), his.Segment.Grip, his.Segment.Axis, t, v);
+                const char* pNotHeld = !cLines                                                   ? "the blades lie along each other"
+                                       : t < kBladeGuard                                         ? "his blade passed at the hand"
+                                       : t > ours.Length + kBladeSlack                           ? "his blade passed beyond our tip"
+                                       : v < -kBladeSlack || v > his.Segment.Length + kBladeSlack ? "ours passed beyond his blade's ends"
+                                                                                                 : nullptr;
+                if (pNotHeld)
+                {
+                    // Crossings that are not held, said at most four times a second: what a test or a fight shows of the
+                    // geometry (grips, axes, where along each blade).
+                    static std::chrono::steady_clock::time_point s_nextNotHeld{};
+                    if (aNow >= s_nextNotHeld)
+                    {
+                        s_nextNotHeld = aNow + std::chrono::milliseconds(250);
+                        spdlog::info("BladeStop: our {} blade crossed the line of {:X}'s {} blade, not held: {} ({:.0f} along ours of {:.0f}, {:.0f} along his of {:.0f}; ours "
+                                     "from ({:.0f}, {:.0f}, {:.0f}) along ({:.2f}, {:.2f}, {:.2f}), his from ({:.0f}, {:.0f}, {:.0f}) along ({:.2f}, {:.2f}, {:.2f}))",
+                                     side ? "right" : "left", static_cast<uint32_t>(his.Key >> 1), his.Key & 1 ? "right" : "left", pNotHeld, t, ours.Length, v,
+                                     his.Segment.Length, ours.Grip.x, ours.Grip.y, ours.Grip.z, ours.Axis.x, ours.Axis.y, ours.Axis.z, his.Segment.Grip.x,
+                                     his.Segment.Grip.y, his.Segment.Grip.z, his.Segment.Axis.x, his.Segment.Axis.y, his.Segment.Axis.z);
+                    }
                     continue;
+                }
                 stop.Key = his.Key;
                 stop.HeldSide = before->second;
                 stop.Since = aNow;

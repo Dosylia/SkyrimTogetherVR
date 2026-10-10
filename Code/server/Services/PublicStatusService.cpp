@@ -2,6 +2,7 @@
 
 #include <Events/UpdateEvent.h>
 #include <Game/Player.h>
+#include <Messages/PlayerPlaceRequest.h>
 #include <GameServer.h>
 #include <World.h>
 
@@ -39,10 +40,67 @@ constexpr auto kFailureLogInterval = std::chrono::minutes(5);
 // The website shows at most 64 players and the hub takes at most 16 KB; player_count still counts everyone.
 constexpr size_t kMaxListedPlayers = 64;
 constexpr size_t kMaxNameLength = 40;
+constexpr size_t kMaxPlaceLength = 60;
+// What the server keeps of a place a client sends, before it is cut to kMaxPlaceLength characters.
+constexpr size_t kMaxPlaceBytes = 240;
 
 // Tamriel, the only worldspace the page's map draws: Skyrim.esm's 0x3C.
 constexpr uint32_t kTamrielBaseId = 0x3C;
 
+// Windows-1252's 0x80 to 0x9F; 0 where it has no character.
+constexpr char16_t kWindows1252[32] = {0x20AC, 0, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0, 0x017D, 0,
+                                       0, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0, 0x017E, 0x0178};
+
+// Text from a game is not always UTF-8 (string files and typed names can be Windows-1252), and the hub wants JSON,
+// which is. A valid UTF-8 sequence passes as it is; any other byte is read as Windows-1252. Cut to aMaxCharacters.
+std::string ToUtf8(std::string_view aText, size_t aMaxCharacters)
+{
+    std::string out;
+    size_t characters = 0;
+    for (size_t i = 0; i < aText.size() && characters < aMaxCharacters; ++characters)
+    {
+        const auto byte = [&](size_t aAt) { return aAt < aText.size() ? static_cast<unsigned char>(aText[aAt]) : 0u; };
+        const auto continuation = [&](size_t aAt) { return (byte(aAt) & 0xC0) == 0x80; };
+        const auto c = static_cast<unsigned char>(byte(i));
+
+        size_t length = 0;
+        if (c < 0x80)
+            length = 1;
+        else if (c >= 0xC2 && c <= 0xDF && continuation(i + 1))
+            length = 2;
+        else if (c >= 0xE0 && c <= 0xEF && continuation(i + 1) && continuation(i + 2) && !(c == 0xE0 && byte(i + 1) < 0xA0) && !(c == 0xED && byte(i + 1) > 0x9F))
+            length = 3;
+        else if (c >= 0xF0 && c <= 0xF4 && continuation(i + 1) && continuation(i + 2) && continuation(i + 3) && !(c == 0xF0 && byte(i + 1) < 0x90) &&
+                 !(c == 0xF4 && byte(i + 1) > 0x8F))
+            length = 4;
+
+        if (length)
+        {
+            out.append(aText.substr(i, length));
+            i += length;
+            continue;
+        }
+
+        const char16_t code = c >= 0xA0 ? c : kWindows1252[c - 0x80];
+        if (code == 0)
+            out += '?';
+        else if (code < 0x800)
+        {
+            out += static_cast<char>(0xC0 | (code >> 6));
+            out += static_cast<char>(0x80 | (code & 0x3F));
+        }
+        else
+        {
+            out += static_cast<char>(0xE0 | (code >> 12));
+            out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (code & 0x3F));
+        }
+        ++i;
+    }
+    return out;
+}
+
+// aText is UTF-8 (ToUtf8): only quotes, backslashes and control characters need escaping.
 void AppendJsonString(std::string& aOut, std::string_view aText)
 {
     aOut += '"';
@@ -130,6 +188,7 @@ bool SplitUrl(std::string_view aUrl, std::string& aOrigin, std::string& aPath)
 PublicStatusService::PublicStatusService(World& aWorld, entt::dispatcher& aDispatcher) noexcept
     : m_world(aWorld)
     , m_updateConnection(aDispatcher.sink<UpdateEvent>().connect<&PublicStatusService::OnUpdate>(this))
+    , m_playerPlaceConnection(aDispatcher.sink<PacketEvent<PlayerPlaceRequest>>().connect<&PublicStatusService::OnPlayerPlace>(this))
     , m_random(std::random_device{}())
 {
     if (!bPublicStatus)
@@ -199,14 +258,23 @@ void PublicStatusService::OnUpdate(const UpdateEvent& acEvent) noexcept
     Queue(BuildStatus());
 }
 
+void PublicStatusService::OnPlayerPlace(const PacketEvent<PlayerPlaceRequest>& acMessage) const noexcept
+{
+    // Kept even while nothing is published: it costs a short string per player.
+    const auto& place = acMessage.Packet.Place;
+    acMessage.pPlayer->SetPlace(String(place.c_str(), std::min(place.size(), kMaxPlaceBytes)));
+    // The client sends only when it changes, so one line per move between places.
+    spdlog::info("Player {} is now in '{}'", acMessage.pPlayer->GetId(), ToUtf8({place.c_str(), std::min(place.size(), kMaxPlaceBytes)}, 120));
+}
+
 std::string PublicStatusService::BuildStatus() noexcept
 {
     const auto* pServer = GameServer::Get();
 
     std::string header = "\"name\":";
-    AppendJsonString(header, {pServer->GetInfo().name.c_str(), pServer->GetInfo().name.size()});
+    AppendJsonString(header, ToUtf8({pServer->GetInfo().name.c_str(), pServer->GetInfo().name.size()}, 80));
     header += ",\"address\":";
-    AppendJsonString(header, sPublicAddress.value());
+    AppendJsonString(header, ToUtf8(sPublicAddress.value(), 100));
     header += fmt::format(",\"version\":\"{}.{}.{}\",\"protocol\":", BUILD_MAJOR, BUILD_MINOR, BUILD_PATCH);
     AppendJsonString(header, BUILD_PROTOCOL);
     header += fmt::format(",\"password\":{},\"max_players\":{},\"started_at\":\"{}\"", pServer->IsPasswordProtected() ? "true" : "false",
@@ -220,7 +288,8 @@ std::string PublicStatusService::BuildStatus() noexcept
     m_world.GetPlayerManager().ForEach([&](Player* pPlayer) {
         ++playerCount;
         present.insert(pPlayer->GetId());
-        if (listed >= kMaxListedPlayers)
+        // Counted, never named or placed.
+        if (pPlayer->IsHiddenFromPublicPage() || listed >= kMaxListedPlayers)
             return;
         ++listed;
 
@@ -231,7 +300,13 @@ std::string PublicStatusService::BuildStatus() noexcept
         // the Discord id or anything else that tells who the person is.
         const auto& username = pPlayer->GetUsername();
         players += "{\"id\":\"" + TokenOf(pPlayer->GetId()) + "\",\"name\":";
-        AppendJsonString(players, std::string_view(username.c_str(), username.size()).substr(0, kMaxNameLength));
+        AppendJsonString(players, ToUtf8({username.c_str(), username.size()}, kMaxNameLength));
+
+        if (const auto& place = pPlayer->GetPlace(); !place.empty())
+        {
+            players += ",\"location\":";
+            AppendJsonString(players, ToUtf8({place.c_str(), place.size()}, kMaxPlaceLength));
+        }
 
         // A position only outdoors in Tamriel: anywhere else the page lists the player without a dot on its map.
         const auto& cell = pPlayer->GetCellComponent();
